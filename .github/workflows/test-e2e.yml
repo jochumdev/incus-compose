@@ -140,6 +140,10 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Incus version
+        run: |
+          incus version
+
       - name: Cleanup
         run: |
           just purge-projects || true
@@ -152,6 +156,12 @@ jobs:
           short="${sha:0:7}"
           echo "VERSION=${short}" >> "$GITHUB_ENV"
           echo "INCUS_COMPOSE_HEALTHD_IMAGE=ghcr.io/lxc/incus-compose/ic-healthd:${short}" >> "$GITHUB_ENV"
+
+      - name: Build healthd
+        run: |
+          echo "Using healthd image: ${INCUS_COMPOSE_HEALTHD_IMAGE}"
+          just run -P cmd/ic-healthd build --os-env
+          just run healthd down --force || true
 
       - name: Test
         run: |
