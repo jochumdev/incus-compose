@@ -34,7 +34,7 @@
   {
     "kind": "instance",
     "name": "",
-    "description": "incus-compose: default:ic-healthd",
+    "description": "incus-compose: incus-compose:ic-healthd",
     "incus_name": "ic-healthd",
     "image": "ghcr.io/lxc/incus-compose/ic-healthd:-stripped-",
     "status": "Running",
