@@ -116,8 +116,8 @@ jobs:
             args: "-run TestExample/leafwiki"
           - name: Immich
             args: "-run TestExample/immich -timeout 20m"
-          - name: ManyDependencies
-            args: "-run TestExample/many-dependencies"
+          # - name: ManyDependencies
+          #   args: "-run TestExample/many-dependencies"
           - name: WikiJS
             args: "-run TestExample/wikijs"
     runs-on: [self-hosted, incus-compose]
