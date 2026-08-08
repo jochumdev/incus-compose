@@ -9,7 +9,7 @@ Version numbering moved from `0.0.1` to `1.0.0` at beta11 (1.0.0 is the intended
 final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced form.
 
-## [Unreleased]
+## [v1.2.0-rc.3] - 2026-08-07
 
 ### Changed
 
