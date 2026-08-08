@@ -298,6 +298,29 @@ func TestInstanceConfigResourceLimits(t *testing.T) {
 	}
 }
 
+func TestInstanceConfigSysctls(t *testing.T) {
+	t.Parallel()
+
+	gc, err := client.NewTestClient(t.Context())
+	require.NoError(t, err)
+	c, err := gc.EnsureProject("default")
+	require.NoError(t, err)
+
+	service := types.ServiceConfig{
+		Name: "web",
+		Sysctls: types.Mapping{
+			"net.ipv4.conf.all.src_valid_mark": "1",
+			"net.ipv6.conf.all.disable_ipv6":   "0",
+		},
+	}
+
+	config, err := instanceConfig(c, service, "test", nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "1", config["linux.sysctl.net.ipv4.conf.all.src_valid_mark"])
+	assert.Equal(t, "0", config["linux.sysctl.net.ipv6.conf.all.disable_ipv6"])
+}
+
 func TestInstanceConfigMinimal(t *testing.T) {
 	t.Parallel()
 	skipLocal(t)

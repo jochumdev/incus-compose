@@ -186,6 +186,13 @@ func instanceConfig(c *client.Client, service types.ServiceConfig, projectName s
 		config["security.privileged"] = "true"
 	}
 
+	// Sysctls -- verified live against a real cluster: linux.sysctl.<key>
+	// applies immediately and persists across restart, on both privileged
+	// and unprivileged OCI application containers.
+	for key, val := range service.Sysctls {
+		config["linux.sysctl."+key] = val
+	}
+
 	// Restart policy
 	applyRestartPolicy(config, service.Restart)
 	if service.Restart != "" {
