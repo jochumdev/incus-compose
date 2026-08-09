@@ -13,6 +13,7 @@ import (
 
 	"github.com/avast/retry-go/v5"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/lxc/incus-compose/iclient"
@@ -212,7 +213,7 @@ func getInstance(ctx context.Context, conn *iclient.Connection, name string) (*i
 }
 
 func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
-	if inst.Config[shared.HealthIgnoreKey] == "true" {
+	if util.IsTrue(inst.Config[shared.HealthIgnoreKey]) {
 		return nil, ErrInstanceIgnored
 	}
 
@@ -221,7 +222,7 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 
 	// Watching is opt-in. One that looks like it wants checking but never
 	// opted in is reported rather than assumed.
-	if inst.Config[shared.HealthEnabledKey] != "true" {
+	if !util.IsTrue(inst.Config[shared.HealthEnabledKey]) {
 		if wantsChecking {
 			return nil, ErrInstanceNotEnabled
 		}
@@ -410,7 +411,7 @@ func instanceRestartAction(ctx context.Context, conn *iclient.Connection, name s
 	case err != nil:
 		res.err = err
 		return res
-	case inst.Config[shared.HealthStoppedKey] == "true":
+	case util.IsTrue(inst.Config[shared.HealthStoppedKey]):
 		res.err = ErrIntentionallyStopped
 		return res
 	default:

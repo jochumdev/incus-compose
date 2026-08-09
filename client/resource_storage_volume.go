@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 )
 
 // StorageVolumeConfig configures storage volume creation.
@@ -88,7 +89,7 @@ func newStorageVolume(c *Client, name string, configGetter Config) (*StorageVolu
 	}
 
 	shifted, ok := config.Extensions["security.shifted"]
-	if ok && shifted != "true" {
+	if ok && !util.IsTrue(shifted) {
 		config.Shifted = false
 	}
 
@@ -215,7 +216,7 @@ func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
 
 	// Check shifted is enabled
 	volume := r.State().IncusVolume
-	if volume.Config["security.shifted"] != "true" {
+	if !util.IsTrue(volume.Config["security.shifted"]) {
 		errs = errors.Join(errors.New("expected security.shifted=true"))
 	}
 

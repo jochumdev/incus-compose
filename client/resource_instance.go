@@ -20,6 +20,7 @@ import (
 	"github.com/avast/retry-go/v5"
 	"github.com/kballard/go-shellquote"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 	"github.com/pkg/sftp"
 
 	"github.com/lxc/incus-compose/iclient"
@@ -737,8 +738,7 @@ func (r *Instance) Start(ctx context.Context, opts ...Option) error {
 	state := r.State()
 	_, hasTest := state.IncusInstance.Config[HealthKeyPrefix+"test"]
 	restart := slices.Contains(shared.RestartPolicies, state.IncusInstance.Config[HealthKeyPrefix+"restart"])
-	v, ok := state.IncusInstance.Config[HealthKeyPrefix+"daemon"]
-	isHealthd := ok && v == "true"
+	isHealthd := util.IsTrue(state.IncusInstance.Config[HealthKeyPrefix+"daemon"])
 
 	if !isHealthd && (hasTest || restart) && options.Healthd && !options.ExternalHealthd {
 		// Wait for healthd to be available for 3 seconds; fixed, the default delay doubles.

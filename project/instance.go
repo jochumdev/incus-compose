@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/types"
+	"github.com/lxc/incus/v7/shared/util"
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/shared"
@@ -622,7 +623,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 
 		shifted := true
 		es, ok := extensions["security.shifted"]
-		if ok && es != "true" {
+		if ok && !util.IsTrue(es) {
 			shifted = false
 		}
 

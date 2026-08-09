@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 
 	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
@@ -416,7 +417,7 @@ func (c *Client) FindHealthd() (string, error) {
 	}
 
 	for _, inst := range instances {
-		if inst.Config[HealthKeyPrefix+"daemon"] == "true" {
+		if util.IsTrue(inst.Config[HealthKeyPrefix+"daemon"]) {
 			c.healthdMu.Lock()
 			c.healthd = inst.Name
 			c.healthdMu.Unlock()
@@ -475,7 +476,7 @@ func (c *Client) healthdTarget() (*iclient.Connection, string, error) {
 	}
 
 	for _, inst := range instances {
-		if inst.Config[HealthKeyPrefix+"daemon"] != "true" {
+		if !util.IsTrue(inst.Config[HealthKeyPrefix+"daemon"]) {
 			continue
 		}
 

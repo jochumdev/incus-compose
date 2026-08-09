@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/lxc/incus/v7/shared/util"
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
@@ -172,7 +173,7 @@ func newPsCommand() *cli.Command {
 						continue
 					}
 
-					if full.Config[client.HealthKeyPrefix+"daemon"] == "true" {
+					if util.IsTrue(full.Config[client.HealthKeyPrefix+"daemon"]) {
 						continue
 					}
 
@@ -219,7 +220,7 @@ func newPsCommand() *cli.Command {
 					name := inst.Name
 					status := "Unknown"
 
-					if inst.Config[client.HealthKeyPrefix+"daemon"] == "true" {
+					if util.IsTrue(inst.Config[client.HealthKeyPrefix+"daemon"]) {
 						continue
 					}
 
