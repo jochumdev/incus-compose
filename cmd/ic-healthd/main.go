@@ -380,10 +380,9 @@ func projectScheduler(ctx context.Context, conn *iclient.Connection, pool *pools
 	logger := logger(ctx).With("project", project)
 	ctx = withLogger(ctx, logger)
 
-	// A copy of its own, so this project's event listeners end with it rather
-	// than outliving the scheduler that opened them.
+	// Scoped once here rather than per call, so every read this scheduler makes
+	// is in its own project.
 	conn = conn.WithProject(project)
-	defer func() { _ = conn.Disconnect(ctx) }()
 
 	instances := map[string]*instance{}
 	results := make(chan instanceResult, resultBuffer)
@@ -827,10 +826,7 @@ func mainAction(ctx context.Context, cfg config) error {
 		conn = c
 	}
 
-	defer func() { _ = conn.Disconnect(ctx) }()
-
 	ownConn := conn.WithProject(cfg.OwnProject)
-	defer func() { _ = ownConn.Disconnect(ctx) }()
 
 	logger.Info("Health daemon connected")
 

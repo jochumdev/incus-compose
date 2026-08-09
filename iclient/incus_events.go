@@ -27,29 +27,24 @@ const incusEventBuffer = 64
 // nothing above learns the stream stopped.
 const incusEventSilence = 30 * time.Second
 
-// incusEvents is one connection's listeners, keyed by the channel each was handed.
+// incusEvents is one connection's listeners, keyed by the channel each was
+// handed. Each ends with the context it was opened on; this is the register that
+// says which are still running.
 type incusEvents struct {
 	mu      sync.Mutex
 	cancels map[chan api.Event]context.CancelFunc
-	closed  bool
 }
 
-// add registers a listener's cancel, or refuses once Disconnect has run.
-func (e *incusEvents) add(events chan api.Event, cancel context.CancelFunc) bool {
+// add registers a listener's cancel.
+func (e *incusEvents) add(events chan api.Event, cancel context.CancelFunc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	if e.closed {
-		return false
-	}
 
 	if e.cancels == nil {
 		e.cancels = map[chan api.Event]context.CancelFunc{}
 	}
 
 	e.cancels[events] = cancel
-
-	return true
 }
 
 // remove forgets a listener that has already ended.
@@ -68,21 +63,8 @@ func (e *incusEvents) len() int {
 	return len(e.cancels)
 }
 
-// stop cancels every listener. Each one closes its own channel on the way out.
-func (e *incusEvents) stop() {
-	e.mu.Lock()
-	cancels := e.cancels
-	e.cancels = nil
-	e.closed = true
-	e.mu.Unlock()
-
-	for _, cancel := range cancels {
-		cancel()
-	}
-}
-
 // ListenEvents opens an event socket of this connection's own and returns the
-// events it carries. Closing ctx, or Disconnect, closes the channel.
+// events it carries. Closing ctx closes the channel.
 //
 // With allProjects the connection's project is not sent at all, and the server
 // answers with every project the certificate is allowed to see.
@@ -141,17 +123,13 @@ func (c *Connection) ListenEvents(ctx context.Context, types []string, allProjec
 		return pong(data)
 	})
 
-	// Its own context, so Disconnect can end this listener without touching the caller's.
+	// Its own context, so the read loop can end itself on a dead socket without
+	// touching the caller's.
 	listenCtx, cancel := context.WithCancel(ctx)
 
 	events := make(chan api.Event, incusEventBuffer)
 
-	if !c.events.add(events, cancel) {
-		cancel()
-		_ = socket.Close()
-
-		return nil, fmt.Errorf("listening for events: %w", ErrConnectionDisconnected)
-	}
+	c.events.add(events, cancel)
 
 	// ReadMessage only unblocks on a closed socket, so the context has to close it.
 	go func() {

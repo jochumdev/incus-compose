@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -39,8 +38,6 @@ func TestDialTrustsAnUnknownServerCert(t *testing.T) {
 
 	conn, err := dial(config{IncusURL: server.URL}, certPEM, keyPEM)
 	require.NoError(t, err)
-
-	t.Cleanup(func() { _ = conn.Disconnect(context.Background()) })
 
 	got, _, err := conn.GetServer(t.Context())
 	require.NoError(t, err)

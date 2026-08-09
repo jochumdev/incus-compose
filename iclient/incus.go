@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
@@ -45,9 +44,6 @@ type Connection struct {
 	socketPath string
 	serverCert string
 
-	// refs counts the Connections sharing this http client; the last one out closes the pool.
-	refs *atomic.Int64
-
 	// events is this Connection's own listeners, never shared with a copy.
 	events *incusEvents
 
@@ -66,12 +62,9 @@ func NewConnection(info *ConfigRemoteInfo) (*Connection, error) {
 		project:      info.Project,
 		userAgent:    info.UserAgent,
 		serverCert:   info.ServerCert,
-		refs:         &atomic.Int64{},
 		events:       &incusEvents{},
 		eventSilence: incusEventSilence,
 	}
-
-	c.refs.Store(1)
 
 	// Only the first address is tried, where upstream probes the whole rolling list.
 	addr := info.Addrs[0]
@@ -136,6 +129,11 @@ func incusTransport() *http.Transport {
 
 // WithProject returns a copy scoped to another project, sharing the transport
 // and therefore its connection pool and TLS session cache.
+//
+// Nothing has to be handed back. A Connection is not a resource with a lifetime
+// of its own: what it holds is a transport, and an abandoned one closes its idle
+// sockets after incusIdleConnTimeout and is then collected. Callers drop
+// connections; they do not close them.
 func (c *Connection) WithProject(project string) *Connection {
 	clone := *c
 	clone.project = project
@@ -143,26 +141,7 @@ func (c *Connection) WithProject(project string) *Connection {
 	// Listeners are never inherited: a copy that listens gets a socket of its own.
 	clone.events = &incusEvents{}
 
-	c.refs.Add(1)
-
 	return &clone
-}
-
-// Disconnect drops this Connection: its listeners end, and the pool is closed
-// once the last Connection sharing it has gone.
-func (c *Connection) Disconnect(_ context.Context) error {
-	c.events.stop()
-
-	if c.refs.Add(-1) > 0 {
-		return nil
-	}
-
-	transport, ok := c.http.Transport.(*http.Transport)
-	if ok {
-		transport.CloseIdleConnections()
-	}
-
-	return nil
 }
 
 // WithMaxIdleConns returns a copy that keeps at most conns idle connections,
@@ -174,14 +153,9 @@ func (c *Connection) WithMaxIdleConns(conns int, perHost int) *Connection {
 
 	transport, ok := c.http.Transport.(*http.Transport)
 	if !ok {
-		c.refs.Add(1)
-
+		// Nothing to retune, so the copy shares c's pool as a WithProject copy does.
 		return &clone
 	}
-
-	// A pool of its own means a refcount of its own.
-	clone.refs = &atomic.Int64{}
-	clone.refs.Store(1)
 
 	// Clone carries the dialer, the TLS config and the rest of the tuning over.
 	tuned := transport.Clone()

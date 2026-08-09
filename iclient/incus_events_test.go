@@ -315,7 +315,10 @@ func TestIncusListenEventsCancelWhileDelivering(t *testing.T) {
 	}
 }
 
-func TestIncusDisconnectClosesListeners(t *testing.T) {
+// TestIncusListenEventsScopedEndsOnItsOwnContext: a project-scoped copy is a
+// view on the parent's transport, but its listeners are its own and end with the
+// context they were opened on, not with the parent's.
+func TestIncusListenEventsScopedEndsOnItsOwnContext(t *testing.T) {
 	t.Parallel()
 
 	send := make(chan api.Event)
@@ -323,58 +326,27 @@ func TestIncusDisconnectClosesListeners(t *testing.T) {
 
 	conn, _ := eventServer(t, send)
 
-	events, err := conn.ListenEvents(t.Context(), nil, false)
-	require.NoError(t, err)
+	scoped := conn.WithProject("second")
 
-	require.NoError(t, conn.Disconnect(t.Context()))
+	ctx, cancel := context.WithCancel(t.Context())
+
+	events, err := scoped.ListenEvents(ctx, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, scoped.events.len())
+	require.Equal(t, 0, conn.events.len(), "a copy's listener is not the parent's")
+
+	cancel()
 
 	select {
 	case _, open := <-events:
-		require.False(t, open, "Disconnect must close the listener")
+		require.False(t, open, "the channel must close, not deliver")
 	case <-time.After(5 * time.Second):
-		t.Fatal("Disconnect left the listener open")
+		t.Fatal("the copy's listener outlived its context")
 	}
 
-	// A listener started afterwards is refused rather than silently dead.
-	_, err = conn.ListenEvents(t.Context(), nil, false)
-	require.ErrorIs(t, err, ErrConnectionDisconnected)
-}
-
-// TestIncusDisconnectRefcount covers the sharing rule: the pool survives until
-// the last Connection using it disconnects.
-func TestIncusDisconnectRefcount(t *testing.T) {
-	t.Parallel()
-
-	conn, err := NewConnection(&ConfigRemoteInfo{Name: "t", Addrs: []string{"https://127.0.0.1:8443"}})
-	require.NoError(t, err)
-
-	incus := conn
-
-	other := conn.WithProject("second")
-	require.EqualValues(t, 2, incus.refs.Load())
-
-	require.NoError(t, other.Disconnect(t.Context()))
-	require.EqualValues(t, 1, incus.refs.Load(), "the pool is still in use")
-
-	require.NoError(t, conn.Disconnect(t.Context()))
-	require.EqualValues(t, 0, incus.refs.Load())
-}
-
-// TestIncusDisconnectRetunedIsIndependent: WithMaxIdleConns builds its own
-// pool, so it must not share the refcount either.
-func TestIncusDisconnectRetunedIsIndependent(t *testing.T) {
-	t.Parallel()
-
-	conn, err := NewConnection(&ConfigRemoteInfo{Name: "t", Addrs: []string{"https://127.0.0.1:8443"}})
-	require.NoError(t, err)
-
-	incus := conn
-
-	tuned := conn.WithMaxIdleConns(4, 2)
-
-	require.NotSame(t, incus.refs, tuned.refs, "a pool of its own needs a refcount of its own")
-	require.EqualValues(t, 1, incus.refs.Load())
-	require.EqualValues(t, 1, tuned.refs.Load())
+	require.Eventually(t, func() bool {
+		return scoped.events.len() == 0
+	}, 5*time.Second, 10*time.Millisecond, "the ended listener is still registered")
 }
 
 func TestIncusListenEventsAgainstRealIncus(t *testing.T) {

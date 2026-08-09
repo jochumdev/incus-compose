@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -114,9 +113,6 @@ func dialTestRemote(t *testing.T) *iclient.Connection {
 
 	conn, err := iclient.NewConnection(info)
 	require.NoError(t, err)
-
-	// t.Context() is canceled before cleanup runs, so this takes its own.
-	t.Cleanup(func() { _ = conn.Disconnect(context.Background()) })
 
 	return conn
 }

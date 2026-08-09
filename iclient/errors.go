@@ -15,10 +15,6 @@ var (
 	// ErrConnectionNoAddress is returned for a remote with nothing to dial.
 	ErrConnectionNoAddress = errors.New("remote has no address")
 
-	// ErrConnectionDisconnected is returned by a Connection used after
-	// Disconnect.
-	ErrConnectionDisconnected = errors.New("connection is disconnected")
-
 	// ErrConnectionUnsupported is returned by a Connection asked for an
 	// operation its remote cannot serve, e.g. an instance call on a
 	// simplestreams remote.
