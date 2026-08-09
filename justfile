@@ -202,19 +202,18 @@ build: lint update-healthd
     go build -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${version#v}" -o bin/incus-compose ./cmd/incus-compose
 
 # Build ic-healthd container image
-release-healthd-image tag="ghcr.io/lxc/incus-compose/ic-healthd:latest": build-healthd-image
-    echo "${GITHUB_TOKEN}" | podman login --username "${GITHUB_USERNAME}" --password-stdin ghcr.io
-    podman push {{ tag }}
+release-healthd-image tag="ghcr.io/lxc/incus-compose/ic-healthd:latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Release incus-compose
-release tag="0.0.1-dev0" healthd_image="ghcr.io/lxc/incus-compose/ic-healthd": build-healthd-image
-    git tag v{{ tag }}
+    VERSION="`git describe --tags --always --long --dirty="-dirty"`-`openssl rand -hex 4`"
+
+    # New image
+    podman build --tag "{{ tag }}" --build-arg VERSION="${VERSION}" -f ./cmd/ic-healthd/Dockerfile .
+    echo "Image ${INCUS_COMPOSE_HEALTHD_IMAGE}"
+
     echo "${GITHUB_TOKEN}" | podman login --username "${GITHUB_USERNAME}" --password-stdin ghcr.io
-    podman push {{ healthd_image }}:latest
-    podman tag {{ healthd_image }}:latest {{ healthd_image }}:{{ tag }}
-    podman push {{ healthd_image }}:{{ tag }}
-    goreleaser release --clean
-    git push --tags
+    podman push "{{ tag }}"
 
 # Run with local healthd binary (for testing without an explicit OCI image) (ex. just run-healthd -f test/healthd/debug/compose.yaml up )
 run-healthd compose="examples/immich/compose.yaml" name="immich": build-healthd
