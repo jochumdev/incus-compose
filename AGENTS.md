@@ -102,7 +102,7 @@ import path by hand and do not reach for `goimports`.
 ## Changing ic-healthd
 
 The sidecar runs a container image, so a change under `cmd/ic-healthd/**` - or
-in what it compiles in, `shared/` and the dependencies - reaches it only after
+in what it compiles in, `shared/`, `iclient/` and the dependencies - reaches it only after
 `just update-healthd`, which also points `INCUS_COMPOSE_HEALTHD_IMAGE` in
 `.env` at the new tag. Change none of those and there is nothing to rebuild.
 

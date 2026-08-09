@@ -47,6 +47,8 @@ incus-compose/
 ├── cmd/incus-compose/    # CLI entry point
 |-- cmd/ic-healthd/       # Sidecar
 ├── client/               # High-level Incus client wrapper
+├── iclient/              # Incus API client, a fork of the upstream one
+├── shared/               # Code both binaries use
 |-- examples/             # Example projects
 ├── project/              # Compose project loading and service translation
 ├── docs/                 # User-facing documentation
@@ -58,6 +60,11 @@ incus-compose/
 - `cmd/incus-compose/` - CLI flag parsing, command handlers, wiring only
 - `cmd/ic-healthd/` - Sidecar for health checking and instance restarts
 - `client/` - High-level Incus wrapper, resource management, transactions
+- `iclient/` - The Incus REST API, forked from `lxc/incus/client` because that
+  one cannot be used from several goroutines. Everything reaches Incus through
+  it; nothing else may import the upstream client
+- `shared/` - Code both binaries use; changing it or `iclient/` means the
+  sidecar image needs rebuilding (see [AGENTS.md](AGENTS.md))
 - `examples/` - Example projects ready to use with incus-compose
 - `project/` - Compose-spec loading via compose-go, service-to-instance translation
 - Root package - No code at root level (all in packages)
@@ -95,7 +102,7 @@ Prefer Go-style concise names over Java-style verbose names:
 
 Go code reads better when names are short and context provides meaning.
 
-Name a type for what it *is*, not for the role it plays: `Backuper`, not
+Name a type for what it _is_, not for the role it plays: `Backuper`, not
 `BackupManager`. `-Manager`, `-Handler`, `-Service` and `-Helper` suffixes carry
 no information.
 
@@ -106,7 +113,7 @@ says it - a mutex in a struct with one lock is `mu`.
 
 Avoid single-purpose helpers. A function with one caller is usually better
 inlined: the indirection costs the reader a jump and hides the flow. The
-exception is when extracting it makes the caller *much* easier to read - a
+exception is when extracting it makes the caller _much_ easier to read - a
 noisy block reduced to one named line.
 
 ### Comments
