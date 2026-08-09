@@ -368,3 +368,72 @@ func TestIncusListenEventsAgainstRealIncus(t *testing.T) {
 		t.Fatal("the event socket did not close")
 	}
 }
+
+// TestLifecycleEvent: incusd fills Name and Project on instance events alone,
+// so every other kind has to be taken out of Source.
+func TestLifecycleEvent(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		lc    api.EventLifecycle
+		wantN string
+		wantP string
+	}{
+		{
+			name:  "an instance carries both already",
+			lc:    api.EventLifecycle{Action: "instance-started", Source: "/1.0/instances/web1?project=alpha", Name: "web1", Project: "alpha"},
+			wantN: "web1",
+			wantP: "alpha",
+		},
+		{
+			name:  "a network in the default project",
+			lc:    api.EventLifecycle{Action: "network-created", Source: "/1.0/networks/ic-q2mjfn37xz"},
+			wantN: "ic-q2mjfn37xz",
+			// api.URL.Project omits the query for the default project, and so does
+			// a resource that is not project-scoped, so this is not guessed at.
+			wantP: "",
+		},
+		{
+			name:  "a network in a project owning its own",
+			lc:    api.EventLifecycle{Action: "network-updated", Source: "/1.0/networks/br0?project=alpha"},
+			wantN: "br0",
+			wantP: "alpha",
+		},
+		{
+			name:  "a profile",
+			lc:    api.EventLifecycle{Action: "profile-updated", Source: "/1.0/profiles/default?project=alpha"},
+			wantN: "default",
+			wantP: "alpha",
+		},
+		{
+			name:  "a project is not project-scoped",
+			lc:    api.EventLifecycle{Action: "project-updated", Source: "/1.0/projects/alpha"},
+			wantN: "alpha",
+			wantP: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			metadata, err := json.Marshal(tc.lc)
+			require.NoError(t, err)
+
+			got, err := LifecycleEvent(api.Event{Type: "lifecycle", Metadata: metadata})
+			require.NoError(t, err)
+
+			require.Equal(t, tc.wantN, got.Name)
+			require.Equal(t, tc.wantP, got.Project)
+			require.Equal(t, tc.lc.Action, got.Action)
+		})
+	}
+}
+
+// TestLifecycleEventRejectsBadMetadata: metadata that will not parse is the one
+// failure this reports.
+func TestLifecycleEventRejectsBadMetadata(t *testing.T) {
+	t.Parallel()
+
+	_, err := LifecycleEvent(api.Event{Type: "lifecycle", Metadata: []byte("not json")})
+	require.Error(t, err)
+}

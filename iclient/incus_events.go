@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +167,37 @@ func (c *Connection) ListenEvents(ctx context.Context, types []string, allProjec
 	}()
 
 	return events, nil
+}
+
+// LifecycleEvent decodes lifecycle metadata, backfilling Name and Project from
+// Source: only instance events carry them as fields.
+func LifecycleEvent(raw api.Event) (api.EventLifecycle, error) {
+	var lc api.EventLifecycle
+
+	err := json.Unmarshal(raw.Metadata, &lc)
+	if err != nil {
+		return api.EventLifecycle{}, fmt.Errorf("decoding lifecycle metadata: %w", err)
+	}
+
+	if lc.Name != "" && lc.Project != "" {
+		return lc, nil
+	}
+
+	source, err := url.Parse(lc.Source)
+	if err != nil {
+		// Nothing to take them from, so what was decoded stands.
+		source = &url.URL{}
+	}
+
+	if lc.Name == "" && source.Path != "" {
+		lc.Name = path.Base(source.Path)
+	}
+
+	if lc.Project == "" {
+		lc.Project = source.Query().Get("project")
+	}
+
+	return lc, nil
 }
 
 // eventsURL is the websocket address of the event endpoint.
