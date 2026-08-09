@@ -349,8 +349,8 @@ func TestNetworkEnsure(t *testing.T) {
 				t.Helper()
 				network, ok := r.(*Network)
 				require.True(t, ok)
-				require.NotNil(t, network.IncusNetwork)
-				require.Equal(t, "bridge", network.IncusNetwork.Type)
+				require.NotNil(t, network.State().IncusNetwork)
+				require.Equal(t, "bridge", network.State().IncusNetwork.Type)
 			},
 		},
 		{
@@ -362,7 +362,7 @@ func TestNetworkEnsure(t *testing.T) {
 				t.Helper()
 				network, ok := r.(*Network)
 				require.True(t, ok)
-				require.Equal(t, "bridge", network.IncusNetwork.Type)
+				require.Equal(t, "bridge", network.State().IncusNetwork.Type)
 			},
 		},
 	}

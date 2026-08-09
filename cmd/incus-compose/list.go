@@ -293,7 +293,7 @@ func newListCommand() *cli.Command {
 						continue
 					}
 
-					instFull := instance.IncusInstanceFull
+					instFull := instance.State().IncusInstanceFull
 
 					status.Name = instance.ServiceName()
 					status.Status = instFull.State.Status

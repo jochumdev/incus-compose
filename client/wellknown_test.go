@@ -3,69 +3,56 @@ package client
 import (
 	"testing"
 
-	"github.com/lxc/incus/v7/shared/cliconfig"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
-func TestAddWellKnownRegistriesHook(t *testing.T) {
-	gc := New(t.Context())
+// wellKnownImage builds an Image directly, bypassing the resource store.
+func wellKnownImage(t *testing.T, remote, image string) *Image {
+	t.Helper()
 
-	delete(gc.CliConfig().Remotes, "ghcr.io")
-
-	img := &Image{
-		BaseResource: NewBaseResource(KindImage, "ghcr.io/lxc/incus-compose/ic-healthd:latest", PriorityImage),
-		incusName:    "ghcr.io/lxc/incus-compose/ic-healthd:latest",
-		remote:       "ghcr.io",
-		image:        "lxc/incus-compose/ic-healthd:latest",
+	return &Image{
+		BaseResource: NewBaseResource(KindImage, remote+"/"+image, PriorityImage),
+		client:       NewOfflineClient(t.Context(), "wellknown"),
+		incusName:    remote + "/" + image,
+		remote:       remote,
+		image:        image,
 	}
-
-	err := gc.hookBefore(t.Context(), ActionEnsure, img, Options{}, nil)
-	require.NoError(t, err)
-
-	remote, ok := gc.CliConfig().Remotes["ghcr.io"]
-	require.True(t, ok, "ghcr.io should be added by hook")
-
-	require.Equal(t, "oci", remote.Protocol)
-	require.True(t, remote.Public)
-	require.Equal(t, []string{"https://ghcr.io"}, remote.Addrs)
 }
 
-func TestWellKnownHookSkipsUnknownRegistries(t *testing.T) {
-	gc := New(t.Context())
+func TestWellKnownRegistryResolves(t *testing.T) {
+	img := wellKnownImage(t, "ghcr.io", "lxc/incus-compose/ic-healthd:latest")
 
-	img := &Image{
-		BaseResource: NewBaseResource(KindImage, "unknown.registry.example.com/image:tag", PriorityImage),
-		incusName:    "unknown.registry.example.com/image:tag",
-		remote:       "unknown.registry.example.com",
-		image:        "image:tag",
-	}
+	delete(img.client.Global().CliConfig().Remotes, "ghcr.io")
 
-	err := gc.hookBefore(t.Context(), ActionEnsure, img, Options{}, nil)
+	source, err := img.resolveSource()
 	require.NoError(t, err)
 
-	_, ok := gc.CliConfig().Remotes["unknown.registry.example.com"]
-	require.False(t, ok, "unknown registry should not be added")
+	require.Equal(t, "https://ghcr.io", source.server)
+	require.Equal(t, "oci", source.protocol)
+	require.Nil(t, source.conn, "a registry is pointed at, never dialed")
 }
 
-func TestWellKnownHookSkipsExistingRemotes(t *testing.T) {
-	gc := New(t.Context())
+func TestWellKnownRegistrySkipsUnknown(t *testing.T) {
+	img := wellKnownImage(t, "unknown.registry.example.com", "image:tag")
 
-	gc.CliConfig().Remotes["ghcr.io"] = cliconfig.Remote{
+	_, err := img.resolveSource()
+	require.ErrorIs(t, err, ErrImageSource)
+}
+
+func TestWellKnownRegistryConfiguredWins(t *testing.T) {
+	img := wellKnownImage(t, "ghcr.io", "something:latest")
+
+	img.client.Global().CliConfig().Remotes["ghcr.io"] = iclient.ConfigRemote{
 		Addrs:    []string{"https://custom.example.com"},
 		Protocol: "oci",
 		Public:   true,
 	}
 
-	img := &Image{
-		BaseResource: NewBaseResource(KindImage, "ghcr.io/something:latest", PriorityImage),
-		incusName:    "ghcr.io/something:latest",
-		remote:       "ghcr.io",
-		image:        "something:latest",
-	}
-
-	err := gc.hookBefore(t.Context(), ActionEnsure, img, Options{}, nil)
+	source, err := img.resolveSource()
 	require.NoError(t, err)
 
-	require.Equal(t, "https://custom.example.com", gc.CliConfig().Remotes["ghcr.io"].Addrs[0],
-		"existing remote should not be overwritten")
+	require.Equal(t, "https://custom.example.com", source.server)
+	require.Equal(t, "oci", source.protocol)
 }

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	incus "github.com/lxc/incus/v7/client"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -25,7 +25,7 @@ const absenceGrace = 500 * time.Millisecond
 // scheduler is one project's loop state, without the loop.
 type scheduler struct {
 	ctx       context.Context
-	conn      incus.InstanceServer
+	conn      *iclient.Connection
 	pool      *pools
 	instances map[string]*instance
 	results   chan instanceResult

@@ -14,12 +14,17 @@ import (
 )
 
 // SFTP returns a new SFTP connection to the volume. The caller closes it.
-func (r *StorageVolume) SFTP() (*sftp.Client, error) {
+func (r *StorageVolume) SFTP(ctx context.Context) (*sftp.Client, error) {
 	if !r.IsEnsured() {
 		return nil, ErrNotEnsured.WithResource(r)
 	}
 
-	return r.conn.GetStoragePoolVolumeFileSFTP(r.Config.Pool, "custom", r.incusName)
+	conn, err := r.client.Connection()
+	if err != nil {
+		return nil, err
+	}
+
+	return conn.GetStoragePoolVolumeFileSFTP(ctx, r.Config.Pool, "custom", r.incusName)
 }
 
 // VolumeLock is an advisory lock on a file inside a StorageVolume; release it with Unlock.

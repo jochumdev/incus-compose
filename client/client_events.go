@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -13,57 +14,59 @@ func addEventHook(c *Client) {
 			return err
 		}
 
-		listener, err := c.incus.GetEventsByType([]string{incusApi.EventTypeLifecycle})
+		// Its own context, so Done ends the listener without touching the client's.
+		listenCtx, stop := context.WithCancel(c.ctx)
+
+		events, err := c.incus.ListenEvents(listenCtx, []string{incusApi.EventTypeLifecycle}, false)
 		if err != nil {
+			stop()
 			return fmt.Errorf("opening an event listener: %w", err)
 		}
 
-		_, err = listener.AddHandler([]string{incusApi.EventTypeLifecycle}, func(event incusApi.Event) {
-			var lc incusApi.EventLifecycle
+		go func() {
+			for event := range events {
+				var lc incusApi.EventLifecycle
 
-			err := json.Unmarshal(event.Metadata, &lc)
-			if err != nil {
-				c.LogDebug("Decoding lifecycle event", "error", err)
-				return
-			}
-
-			// Ignore all lifecycle events except started, stopped and updated.
-			switch lc.Action {
-			case incusApi.EventLifecycleInstanceStarted:
-			case incusApi.EventLifecycleInstanceStopped:
-			case incusApi.EventLifecycleInstanceUpdated:
-			default:
-				return
-			}
-
-			if lc.Name == "" {
-				return
-			}
-
-			c.rangeResources(func(r Resource) {
-				if r.Kind() != KindInstance || r.IncusName() != lc.Name {
-					return
+				err := json.Unmarshal(event.Metadata, &lc)
+				if err != nil {
+					c.LogDebug("Decoding lifecycle event", "error", err)
+					continue
 				}
 
-				inst, ok := r.(*Instance)
-				if !ok {
-					return
+				// Ignore all lifecycle events except started, stopped and updated.
+				switch lc.Action {
+				case incusApi.EventLifecycleInstanceStarted:
+				case incusApi.EventLifecycleInstanceStopped:
+				case incusApi.EventLifecycleInstanceUpdated:
+				default:
+					continue
 				}
 
-				// We ignore errors here as on stop/delete this would log an error.
-				err = inst.fetch()
-				if err == nil {
-					c.LogDebug("New lifecycle event", "resource", inst, "action", lc.Action, "health_status", inst.IncusInstance.Config[HealthStatusKey])
+				if lc.Name == "" {
+					continue
 				}
-			})
-		})
-		if err != nil {
-			listener.Disconnect()
-			return fmt.Errorf("registering an event handler: %w", err)
-		}
+
+				c.rangeResources(func(r Resource) {
+					if r.Kind() != KindInstance || r.IncusName() != lc.Name {
+						return
+					}
+
+					inst, ok := r.(*Instance)
+					if !ok {
+						return
+					}
+
+					// We ignore errors here as on stop/delete this would log an error.
+					err = inst.fetch(listenCtx)
+					if err == nil {
+						c.LogDebug("New lifecycle event", "resource", inst, "action", lc.Action, "health_status", inst.State().IncusInstance.Config[HealthStatusKey])
+					}
+				})
+			}
+		}()
 
 		c.AddHookDone(func(err error) error {
-			listener.Disconnect()
+			stop()
 			return err
 		})
 

@@ -159,7 +159,7 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
 
-	gInfo, err := gc.incus.GetConnectionInfo()
+	gInfo, err := gc.incus.GetConnectionInfo(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "default", gInfo.Project)
 
@@ -173,7 +173,7 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	gConn, err := project.GlobalConnection()
 	require.NoError(t, err)
 
-	gInfo, err = gConn.GetConnectionInfo()
+	gInfo, err = gConn.GetConnectionInfo(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "default", gInfo.Project)
 }
@@ -189,7 +189,7 @@ func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 		t.Skipf("Skipping INCUS_COMPOSE_IMAGE_CACHE is empty")
 	}
 
-	gInfo, err := gc.imageCache.incus.GetConnectionInfo()
+	gInfo, err := gc.imageCache.incus.GetConnectionInfo(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "incus-compose-tests-cache", gInfo.Project)
 }

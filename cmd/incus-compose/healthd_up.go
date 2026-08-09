@@ -265,7 +265,7 @@ func healthdEnsure(ctx context.Context, hc *client.Client, stack *client.Stack, 
 		return errLogged.Wrap(err)
 	}
 
-	current, _, err := conn.GetInstance(hInst.IncusName())
+	current, _, err := conn.GetInstance(ctx, hInst.IncusName(), nil)
 	fetchImage := err != nil ||
 		params.pull == "always" ||
 		healthdNeedsUpgrade(current.Config["user.image_alias"], wantAlias)
@@ -287,8 +287,8 @@ func healthdEnsure(ctx context.Context, hc *client.Client, stack *client.Stack, 
 	}
 
 	// A newer image means the sidecar is replaced by one built from it.
-	if hInst.IsEnsured() && healthdNeedsUpgrade(hInst.IncusInstance.Config["user.image_alias"], wantAlias) {
-		maps.Copy(params.carry, healthdCarriedConfig(hInst.IncusInstance.Config))
+	if info := hInst.State().IncusInstance; info != nil && healthdNeedsUpgrade(info.Config["user.image_alias"], wantAlias) {
+		maps.Copy(params.carry, healthdCarriedConfig(info.Config))
 
 		downStack := client.NewStack(hc, client.StackSortDescending(), client.StackWorkers(params.stackWorkers))
 

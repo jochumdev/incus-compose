@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // ----------------------------------------------------------------------------
@@ -219,10 +221,22 @@ func TestImageEnsure(t *testing.T) {
 			r, err := c.Resource(KindImage, tt.image, &ImageConfig{})
 			require.NoError(t, err)
 
-			err = RunAction(ctx, r, ActionEnsure, tt.opts...)
+			actionCtx := ctx
+
+			// Bounded, so a regression fails here instead of sitting in copyToCache's retry.
+			if tt.wantErr {
+				var cancel context.CancelFunc
+
+				actionCtx, cancel = context.WithTimeout(ctx, 2*time.Minute)
+				defer cancel()
+			}
+
+			err = RunAction(actionCtx, r, ActionEnsure, tt.opts...)
 			if tt.wantErr {
 				require.Error(t, err)
 				require.ErrorIs(t, err, ErrNotFound)
+				require.NotErrorIs(t, err, context.DeadlineExceeded,
+					"a missing image must fail fast, not sit in the retry")
 				require.False(t, r.IsEnsured())
 			} else {
 				require.NoError(t, err)
@@ -230,7 +244,7 @@ func TestImageEnsure(t *testing.T) {
 
 				image, ok := r.(*Image)
 				require.True(t, ok)
-				require.NotNil(t, image.IncusAlias)
+				require.NotNil(t, image.State().IncusAlias)
 			}
 		})
 	}
@@ -350,7 +364,7 @@ func TestImageDelete(t *testing.T) {
 			require.NoError(t, RunAction(ctx, r, ActionDelete, OptionForce()))
 
 			if tt.ensure {
-				alias, _, _ := c.incus.GetImageAlias(r.(*Image).IncusName())
+				alias, _, _ := c.incus.GetImageAlias(ctx, r.(*Image).IncusName(), nil)
 				require.Nil(t, alias, "image should be gone after Delete")
 			}
 		})
@@ -387,9 +401,9 @@ func TestImageProperties(t *testing.T) {
 	image, ok := r.(*Image)
 	require.True(t, ok)
 	assert.Equal(t, "ghcr.io/lxc/incus-compose/ic-healthd:latest", image.Name())
-	assert.Equal(t, "/", image.Cwd)
-	assert.Equal(t, 65534, int(image.UID))
-	assert.Equal(t, 65534, int(image.GID))
+	assert.Equal(t, "/", image.State().Cwd)
+	assert.Equal(t, 65534, int(image.State().UID))
+	assert.Equal(t, 65534, int(image.State().GID))
 }
 
 func TestImageFromCache(t *testing.T) {
@@ -408,7 +422,7 @@ func TestImageFromCache(t *testing.T) {
 	require.True(t, ok)
 
 	// Get should fail after delete.
-	require.Error(t, img.get())
+	require.Error(t, img.get(ctx))
 
 	// Create should work without a source (no panic) as we have the image in cache.
 	img.source = nil
@@ -429,7 +443,7 @@ func TestImagePullNever_StoreHit(t *testing.T) {
 
 	img, ok := r.(*Image)
 	require.True(t, ok)
-	require.Error(t, img.get())
+	require.Error(t, img.get(ctx))
 
 	// Served from the cache without ever consulting the source.
 	img.source = nil
@@ -586,7 +600,7 @@ func TestImageEnsure_ConcurrentSameImage(t *testing.T) {
 	for i, err := range errs {
 		require.NoError(t, err, i)
 		require.True(t, images[i].IsEnsured(), i)
-		require.Equal(t, images[0].IncusAlias.Target, images[i].IncusAlias.Target, i)
+		require.Equal(t, images[0].State().IncusAlias.Target, images[i].State().IncusAlias.Target, i)
 	}
 }
 
@@ -628,7 +642,7 @@ func TestImageEnsure_ConcurrentDifferentImages(t *testing.T) {
 		require.NoError(t, err, names[i])
 		require.True(t, images[i].IsEnsured(), names[i])
 
-		target := images[i].IncusAlias.Target
+		target := images[i].State().IncusAlias.Target
 		require.False(t, seen[target], "distinct images share a fingerprint")
 		seen[target] = true
 	}
@@ -648,14 +662,16 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	require.NotNil(t, img.cache)
 
 	// Another project prunes the cache entry out from under us.
-	cacheAlias, _, err := img.cache.incus.GetImageAlias(img.incusName)
+	cacheAlias, _, err := img.cache.incus.GetImageAlias(ctx, img.incusName, nil)
 	require.NoError(t, err)
 
-	op, err := img.cache.incus.DeleteImage(cacheAlias.Target)
+	op, err := img.cache.incus.DeleteImage(ctx, cacheAlias.Target)
 	require.NoError(t, err)
-	require.NoError(t, op.Wait())
 
-	_, _, err = img.cache.incus.GetImageAlias(img.incusName)
+	_, err = iclient.WaitOperation(ctx, op)
+	require.NoError(t, err)
+
+	_, _, err = img.cache.incus.GetImageAlias(ctx, img.incusName, nil)
 	require.Error(t, err)
 
 	// The project still holds it, so Ensure must answer from there.
@@ -663,7 +679,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	require.True(t, r.IsEnsured())
 
 	// A refill would mean it went looking past its own project.
-	_, _, err = img.cache.incus.GetImageAlias(img.incusName)
+	_, _, err = img.cache.incus.GetImageAlias(ctx, img.incusName, nil)
 	require.Error(t, err, "ensure repopulated the cache instead of using the project copy")
 }
 

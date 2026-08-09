@@ -182,13 +182,13 @@ func newExecCommand() *cli.Command {
 			if cmd.String("user") != "" {
 				iArgs = append(iArgs, "--user", cmd.String("user"))
 			} else {
-				iArgs = append(iArgs, "--user", strconv.FormatUint(inst.UID, 10))
+				iArgs = append(iArgs, "--user", strconv.FormatUint(inst.State().UID, 10))
 			}
 
 			if cmd.String("group") != "" {
 				iArgs = append(iArgs, "--group", cmd.String("group"))
 			} else {
-				iArgs = append(iArgs, "--group", strconv.FormatUint(inst.GID, 10))
+				iArgs = append(iArgs, "--group", strconv.FormatUint(inst.State().GID, 10))
 			}
 
 			iArgs = append(iArgs, instances[cmd.Int("index")].IncusName())

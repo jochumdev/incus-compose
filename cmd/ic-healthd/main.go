@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v5"
-	incus "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/cmd/ic-healthd/version"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -196,8 +196,24 @@ func newVersionCommand() *cli.Command {
 	}
 }
 
+// dial opens a connection to the Incus API with the daemon's client cert.
+//
+// The server certificate cannot be pinned: the daemon is handed a URL and a
+// token and has never seen the server before.
+func dial(cfg config, certPEM, keyPEM []byte) (*iclient.Connection, error) {
+	return iclient.NewConnection(&iclient.ConfigRemoteInfo{
+		Name:               "incus",
+		Addrs:              []string{cfg.IncusURL},
+		Protocol:           "incus",
+		ClientCert:         string(certPEM),
+		ClientKey:          string(keyPEM),
+		InsecureSkipVerify: true,
+		UserAgent:          "ic-healthd/" + version.Current(),
+	})
+}
+
 // register has Incus trust a self-signed cert via the one-time token, then persists it.
-func register(ctx context.Context, cfg config) (incus.InstanceServer, error) {
+func register(ctx context.Context, cfg config) (*iclient.Connection, error) {
 	logger := logger(ctx)
 
 	certPEM, keyPEM, err := generateClientCert()
@@ -205,38 +221,29 @@ func register(ctx context.Context, cfg config) (incus.InstanceServer, error) {
 		return nil, fmt.Errorf("generating cert: %w", err)
 	}
 
-	conn, err := incus.ConnectIncus(
-		cfg.IncusURL,
-		connectionArgs(
-			string(certPEM),
-			string(keyPEM),
-			apiTimeout,
-		),
-	)
+	conn, err := dial(cfg, certPEM, keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to register cert: %w", err)
 	}
 
+	post := incusApi.CertificatesPost{
+		CertificatePut: incusApi.CertificatePut{Name: "ic-healthd-" + cfg.ID()},
+		TrustToken:     cfg.Token,
+	}
+
+	// A restricted certificate needs a fixed project list, which a daemon that
+	// watches by marker does not have.
 	if len(cfg.Projects) > 0 {
-		if err := conn.CreateCertificate(
-			incusApi.CertificatesPost{
-				CertificatePut: incusApi.CertificatePut{
-					Name:       "ic-healthd-" + cfg.ID(),
-					Restricted: true,
-					Projects:   cfg.Projects,
-				}, TrustToken: cfg.Token,
-			}); err != nil {
-			return nil, fmt.Errorf("registering cert with token: %w", err)
-		}
-	} else {
-		if err := conn.CreateCertificate(
-			incusApi.CertificatesPost{
-				CertificatePut: incusApi.CertificatePut{
-					Name: "ic-healthd-" + cfg.ID(),
-				}, TrustToken: cfg.Token,
-			}); err != nil {
-			return nil, fmt.Errorf("registering cert with token: %w", err)
-		}
+		post.Restricted = true
+		post.Projects = cfg.Projects
+	}
+
+	registerCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+
+	err = conn.CreateCertificate(registerCtx, post)
+	if err != nil {
+		return nil, fmt.Errorf("registering cert with token: %w", err)
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
@@ -255,20 +262,13 @@ func register(ctx context.Context, cfg config) (incus.InstanceServer, error) {
 
 	logger.Debug("certificate registered and persisted")
 
-	// conn above was dialed before the certificate was trusted, and the client
-	// caches the API metadata it read then.
-	return incus.ConnectIncus(
-		cfg.IncusURL,
-		connectionArgs(
-			string(certPEM),
-			string(keyPEM),
-			apiTimeout,
-		),
-	)
+	// Reading /1.0 is lazy, so this connection knows nothing it learned while
+	// untrusted and needs no redial.
+	return conn, nil
 }
 
 // connect returns an authenticated Incus client, registering a cert on first run.
-func connect(ctx context.Context, cfg config) (incus.InstanceServer, error) {
+func connect(ctx context.Context, cfg config) (*iclient.Connection, error) {
 	logger := logger(ctx)
 
 	tokenPath := filepath.Join(cfg.SecretsDir, tokenFile)
@@ -314,19 +314,12 @@ func connect(ctx context.Context, cfg config) (incus.InstanceServer, error) {
 		return nil, fmt.Errorf("reading key: %w", err)
 	}
 
-	return incus.ConnectIncus(
-		cfg.IncusURL,
-		connectionArgs(
-			string(certPEM),
-			string(keyPEM),
-			apiTimeout,
-		),
-	)
+	return dial(cfg, certPEM, keyPEM)
 }
 
 // discoverProject re-reads the whole project on its own goroutine and closes
 // with a roster, so the loop can drop the instances that are gone.
-func discoverProject(ctx context.Context, conn incus.InstanceServer, results chan<- instanceResult) {
+func discoverProject(ctx context.Context, conn *iclient.Connection, results chan<- instanceResult) {
 	go func() {
 		send := func(res instanceResult) bool {
 			select {
@@ -337,7 +330,7 @@ func discoverProject(ctx context.Context, conn incus.InstanceServer, results cha
 			}
 		}
 
-		var instances []incusApi.Instance
+		var instances []incusApi.InstanceFull
 
 		// A project that is briefly unreachable is the common case, so retry
 		// before reporting a failure the loop can only log.
@@ -347,12 +340,13 @@ func discoverProject(ctx context.Context, conn incus.InstanceServer, results cha
 			retry.Delay(time.Second),
 			retry.LastErrorOnly(true),
 		).Do(func() error {
-			got, _, err := withContext(ctx, func() ([]incusApi.Instance, string, error) {
-				i, err := conn.GetInstances(incusApi.InstanceTypeAny)
-				return i, "", err
-			})
+			callCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+			defer cancel()
+
+			got, err := conn.GetInstances(callCtx, nil)
 
 			instances = got
+
 			return err
 		})
 		if err != nil {
@@ -364,7 +358,7 @@ func discoverProject(ctx context.Context, conn incus.InstanceServer, results cha
 		for _, inst := range instances {
 			names = append(names, inst.Name)
 
-			cfg, err := parseInstanceConfig(&inst)
+			cfg, err := parseInstanceConfig(&inst.Instance)
 			if !send(instanceResult{
 				kind:   instanceResultDiscovered,
 				name:   inst.Name,
@@ -382,11 +376,14 @@ func discoverProject(ctx context.Context, conn incus.InstanceServer, results cha
 }
 
 // projectScheduler runs one project's health loop until ctx is done.
-func projectScheduler(ctx context.Context, conn incus.InstanceServer, pool *pools, project string, events <-chan instanceEvent) {
+func projectScheduler(ctx context.Context, conn *iclient.Connection, pool *pools, project string, events <-chan instanceEvent) {
 	logger := logger(ctx).With("project", project)
 	ctx = withLogger(ctx, logger)
 
-	conn = conn.UseProject(project)
+	// A copy of its own, so this project's event listeners end with it rather
+	// than outliving the scheduler that opened them.
+	conn = conn.WithProject(project)
+	defer func() { _ = conn.Disconnect(ctx) }()
 
 	instances := map[string]*instance{}
 	results := make(chan instanceResult, resultBuffer)
@@ -425,6 +422,68 @@ func projectScheduler(ctx context.Context, conn incus.InstanceServer, pool *pool
 	}
 }
 
+// decodeLifecycle turns one raw event into a routable one, reporting false for
+// everything the daemon does not act on.
+func decodeLifecycle(ctx context.Context, raw incusApi.Event) (lifecycleEvent, bool) {
+	log := logger(ctx)
+
+	var lc incusApi.EventLifecycle
+
+	err := json.Unmarshal(raw.Metadata, &lc)
+	if err != nil {
+		log.Warn("Decoding lifecycle event", "error", err)
+
+		return lifecycleEvent{}, false
+	}
+
+	ev := lifecycleEvent{Project: raw.Project}
+
+	switch lc.Action {
+	case incusApi.EventLifecycleProjectCreated:
+		ev.ProjectAction = projectCreated
+	case incusApi.EventLifecycleProjectUpdated:
+		ev.ProjectAction = projectUpdated
+	case incusApi.EventLifecycleProjectDeleted:
+		ev.ProjectAction = projectDeleted
+	case incusApi.EventLifecycleProjectRenamed:
+		ev.ProjectAction = projectRenamed
+
+		// A project event names nothing: Project and Name are both empty on
+		// it, so the old name is only ever in the context.
+		old, ok := lc.Context["old_name"].(string)
+		if !ok || old == "" {
+			log.Warn("Project renamed without an old name", "project", raw.Project)
+
+			return lifecycleEvent{}, false
+		}
+
+		ev.OldName = old
+	default:
+		if lc.Name == "" {
+			return lifecycleEvent{}, false
+		}
+
+		switch lc.Action {
+		case incusApi.EventLifecycleInstanceStarted, incusApi.EventLifecycleInstanceRestarted:
+			ev.Instance.Action = instanceRestarted
+		case incusApi.EventLifecycleInstanceUpdated:
+			ev.Instance.Action = instanceUpdated
+		case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceShutdown:
+			ev.Instance.Action = instanceStopped
+		case incusApi.EventLifecycleInstanceDeleted:
+			ev.Instance.Action = instanceDeleted
+		default:
+			return lifecycleEvent{}, false
+		}
+
+		ev.Instance.Instance = lc.Name
+	}
+
+	log.Log(ctx, levelTrace, "New lifecycle event", "project", raw.Project, "instance", lc.Name, "action", lc.Action)
+
+	return ev, true
+}
+
 // projectData is one watched project's handle on the router side.
 type projectData struct {
 	cancel context.CancelFunc
@@ -437,7 +496,7 @@ type projectData struct {
 
 // runProjects owns the listener, the watched projects and their events. One
 // generation is one listener; schedulers hang off ctx and outlive a reconnect.
-func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, reload <-chan struct{}) {
+func runProjects(ctx context.Context, conn *iclient.Connection, cfg config, reload <-chan struct{}) {
 	log := logger(ctx)
 
 	pool, err := newPools(cfg.Workers, cfg.RestartWorkers)
@@ -499,9 +558,11 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 			return slices.Contains(cfg.Projects, name)
 		}
 
-		project, _, err := withContext(ctx, func() (*incusApi.Project, string, error) {
-			return conn.GetProject(name)
-		})
+		// Bounded because this runs on the router goroutine.
+		callCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+		defer cancel()
+
+		project, _, err := conn.GetProject(callCtx, name)
 		if err != nil {
 			log.Warn("Reading a project failed, not watching it", "project", name, "error", err)
 			return false
@@ -531,13 +592,11 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 	}
 
 	for {
-		intake := make(chan lifecycleEvent, intakeBuffer)
-
-		// evCtx unblocks the handler's sends when this generation ends; the
-		// schedulers hang off ctx and are untouched by it.
+		// evCtx is one listener generation: closing it closes the event socket.
+		// The schedulers hang off ctx and are untouched by it.
 		evCtx, evCancel := context.WithCancel(ctx)
 
-		listener, err := conn.GetEventsAllProjectsByType([]string{incusApi.EventTypeLifecycle})
+		events, err := conn.ListenEvents(evCtx, []string{incusApi.EventTypeLifecycle}, true)
 		if err != nil {
 			log.Error("Opening the event listener", "error", err)
 			evCancel()
@@ -550,97 +609,15 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 			}
 		}
 
-		_, err = listener.AddHandler([]string{incusApi.EventTypeLifecycle}, func(raw incusApi.Event) {
-			var lc incusApi.EventLifecycle
-
-			err := json.Unmarshal(raw.Metadata, &lc)
-			if err != nil {
-				log.Warn("Decoding lifecycle event", "error", err)
-				return
-			}
-
-			ev := lifecycleEvent{Project: raw.Project}
-
-			switch lc.Action {
-			case incusApi.EventLifecycleProjectCreated:
-				ev.ProjectAction = projectCreated
-			case incusApi.EventLifecycleProjectUpdated:
-				ev.ProjectAction = projectUpdated
-			case incusApi.EventLifecycleProjectDeleted:
-				ev.ProjectAction = projectDeleted
-			case incusApi.EventLifecycleProjectRenamed:
-				ev.ProjectAction = projectRenamed
-
-				// A project event names nothing: Project and Name are both
-				// empty on it, so the old name is only ever in the context.
-				old, ok := lc.Context["old_name"].(string)
-				if !ok || old == "" {
-					log.Warn("Project renamed without an old name", "project", raw.Project)
-					return
-				}
-
-				ev.OldName = old
-			default:
-				if lc.Name == "" {
-					return
-				}
-
-				switch lc.Action {
-				case incusApi.EventLifecycleInstanceStarted, incusApi.EventLifecycleInstanceRestarted:
-					ev.Instance.Action = instanceRestarted
-				case incusApi.EventLifecycleInstanceUpdated:
-					ev.Instance.Action = instanceUpdated
-				case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceShutdown:
-					ev.Instance.Action = instanceStopped
-				case incusApi.EventLifecycleInstanceDeleted:
-					ev.Instance.Action = instanceDeleted
-				default:
-					return
-				}
-
-				ev.Instance.Instance = lc.Name
-			}
-
-			log.Log(evCtx, levelTrace, "New lifecycle event", "project", raw.Project, "instance", lc.Name, "action", lc.Action)
-
-			select {
-			case intake <- ev:
-			case <-evCtx.Done():
-			}
-		})
-		if err != nil {
-			listener.Disconnect()
-			evCancel()
-			log.Error("Registering the event handler", "error", err)
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-				continue
-			}
-		}
-
-		disconnected := make(chan struct{})
-		go func() {
-			err := listener.Wait()
-			if err != nil {
-				log.Error("While waiting for events", "error", err)
-			}
-
-			close(disconnected)
-		}()
-
 		// Reconcile against the listener, not before it, so a project created
 		// in the gap arrives as an event rather than being missed by both.
 		scope := cfg.Projects
 		if len(scope) == 0 {
-			all, _, err := withContext(evCtx, func() ([]incusApi.Project, string, error) {
-				p, err := conn.GetProjects()
-				return p, "", err
-			})
+			scopeCtx, scopeCancel := context.WithTimeout(evCtx, apiTimeout)
+			all, err := conn.GetProjects(scopeCtx)
+			scopeCancel()
+
 			if err != nil {
-				listener.Disconnect()
 				evCancel()
 				log.Error("Listing projects", "error", err)
 
@@ -683,7 +660,6 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 			case p.events <- instanceEvent{Action: instanceResync}:
 			case <-p.done:
 			case <-ctx.Done():
-				listener.Disconnect()
 				evCancel()
 
 				return
@@ -701,14 +677,9 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 
 			select {
 			case <-ctx.Done():
-				listener.Disconnect()
 				evCancel()
 
 				return
-			case <-disconnected:
-				log.Warn("Event listener disconnected, reconnecting")
-				evCancel()
-				generation = false
 
 			case <-recheckTimer.C:
 				for name, tries := range recheck {
@@ -735,11 +706,25 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 
 			case <-reload:
 				log.Info("Manual resync requested")
-				listener.Disconnect()
 				evCancel()
 				generation = false
 
-			case ev := <-intake:
+			case raw, open := <-events:
+				// The channel closes with the socket, which is the only way a
+				// generation ends other than a reload.
+				if !open {
+					log.Warn("Event listener disconnected, reconnecting")
+					evCancel()
+					generation = false
+
+					continue
+				}
+
+				ev, ok := decodeLifecycle(evCtx, raw)
+				if !ok {
+					continue
+				}
+
 				if ev.ProjectAction != "" {
 					switch ev.ProjectAction {
 					case projectCreated, projectUpdated:
@@ -780,7 +765,6 @@ func runProjects(ctx context.Context, conn incus.InstanceServer, cfg config, rel
 				case p.events <- ev.Instance:
 				case <-p.done:
 				case <-ctx.Done():
-					listener.Disconnect()
 					evCancel()
 
 					return
@@ -824,7 +808,7 @@ func mainAction(ctx context.Context, cfg config) error {
 		}
 	}()
 
-	var conn incus.InstanceServer
+	var conn *iclient.Connection
 
 	for conn == nil {
 		c, err := connect(ctx, cfg)
@@ -843,7 +827,10 @@ func mainAction(ctx context.Context, cfg config) error {
 		conn = c
 	}
 
-	ownConn := conn.UseProject(cfg.OwnProject)
+	defer func() { _ = conn.Disconnect(ctx) }()
+
+	ownConn := conn.WithProject(cfg.OwnProject)
+	defer func() { _ = ownConn.Disconnect(ctx) }()
 
 	logger.Info("Health daemon connected")
 

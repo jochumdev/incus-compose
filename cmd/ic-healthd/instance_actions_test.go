@@ -155,7 +155,7 @@ func TestInstanceRestartActionRestarts(t *testing.T) {
 	name := testContainer(t, c, "web", nil, true)
 	conn := testConn(t, c)
 
-	before, _, err := conn.GetInstanceState(name)
+	before, _, err := conn.GetInstanceState(t.Context(), name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Running, before.StatusCode)
 
@@ -163,7 +163,7 @@ func TestInstanceRestartActionRestarts(t *testing.T) {
 	require.Equal(t, instanceResultRestarted, res.kind)
 	require.NoError(t, res.err)
 
-	after, _, err := conn.GetInstanceState(name)
+	after, _, err := conn.GetInstanceState(t.Context(), name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Running, after.StatusCode)
 	require.NotEqual(t, before.StartedAt, after.StartedAt, "the instance must actually have been replaced")
@@ -182,7 +182,7 @@ func TestInstanceRestartActionStartsAStoppedInstance(t *testing.T) {
 	res := instanceRestartAction(t.Context(), conn, name)
 	require.NoError(t, res.err)
 
-	state, _, err := conn.GetInstanceState(name)
+	state, _, err := conn.GetInstanceState(t.Context(), name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Running, state.StatusCode)
 }
@@ -201,7 +201,7 @@ func TestInstanceRestartActionRefusesAnIntentionalStop(t *testing.T) {
 
 	require.ErrorIs(t, res.err, ErrIntentionallyStopped)
 
-	state, _, err := conn.GetInstanceState(name)
+	state, _, err := conn.GetInstanceState(t.Context(), name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Stopped, state.StatusCode,
 		"a deliberately stopped instance must stay stopped")
@@ -222,7 +222,7 @@ func TestPatchInstanceConfigWritesOnlyItsKeys(t *testing.T) {
 
 	require.NoError(t, writeInstanceStatus(t.Context(), conn, name, shared.HealthStatusUnhealthy))
 
-	inst, _, err := conn.GetInstance(name)
+	inst, _, err := conn.GetInstance(t.Context(), name, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, shared.HealthStatusUnhealthy, inst.Config[shared.HealthStatusKey])

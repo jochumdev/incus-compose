@@ -328,7 +328,7 @@ func instanceImage(c *client.Client, service types.ServiceConfig) (client.Resour
 	if !ok {
 		return nil, errors.Join(errs, errors.New("not an image"))
 	}
-	img.Config.Services = append(img.Config.Services, service.Name)
+	img.AddService(service.Name)
 
 	return image, errs
 }

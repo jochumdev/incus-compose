@@ -2,22 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/avast/retry-go/v5"
-	incus "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -37,7 +35,11 @@ func newToken(t *testing.T, c *client.Client, projects ...string) string {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	op, err := conn.CreateCertificateToken(incusApi.CertificatesPost{
+	// A token operation never finishes, only its first update carries the token.
+	tokenCtx, release := context.WithCancel(t.Context())
+	defer release()
+
+	updates, err := conn.CreateCertificateToken(tokenCtx, incusApi.CertificatesPost{
 		CertificatePut: incusApi.CertificatePut{
 			Name:       "ic-healthd-" + c.IncusProject(),
 			Type:       "client",
@@ -48,7 +50,8 @@ func newToken(t *testing.T, c *client.Client, projects ...string) string {
 	})
 	require.NoError(t, err)
 
-	opAPI := op.Get()
+	opAPI, ok := <-updates
+	require.True(t, ok, "the certificate token operation reported nothing")
 
 	addToken, err := opAPI.ToCertificateAddToken()
 	require.NoError(t, err)
@@ -64,7 +67,7 @@ func markProject(t *testing.T, c *client.Client, key, value string) {
 	gConn, err := c.GlobalConnection()
 	require.NoError(t, err)
 
-	project, etag, err := gConn.GetProject(c.IncusProject())
+	project, etag, err := gConn.GetProject(t.Context(), c.IncusProject())
 	require.NoError(t, err)
 
 	writable := project.Writable()
@@ -74,7 +77,7 @@ func markProject(t *testing.T, c *client.Client, key, value string) {
 
 	writable.Config[key] = value
 
-	require.NoError(t, gConn.UpdateProject(c.IncusProject(), writable, etag))
+	require.NoError(t, gConn.UpdateProject(t.Context(), c.IncusProject(), writable, etag))
 }
 
 // revokeCert removes what registration left in the trust store.
@@ -86,7 +89,10 @@ func revokeCert(t *testing.T, c *client.Client) {
 		return
 	}
 
-	certs, err := gConn.GetCertificates()
+	// t.Context is already canceled by the time cleanup runs.
+	ctx := context.Background()
+
+	certs, err := gConn.GetCertificates(ctx)
 	if err != nil {
 		return
 	}
@@ -94,7 +100,7 @@ func revokeCert(t *testing.T, c *client.Client) {
 	want := "ic-healthd-" + c.IncusProject()
 	for _, cert := range certs {
 		if cert.Name == want {
-			_ = gConn.DeleteCertificate(cert.Fingerprint)
+			_ = gConn.DeleteCertificate(ctx, cert.Fingerprint)
 		}
 	}
 }
@@ -177,13 +183,13 @@ func runScheduler(t *testing.T, c *client.Client) {
 
 // requireStatus waits for the daemon's verdict to land on the instance, and
 // reports what it last saw.
-func requireStatus(t *testing.T, conn incus.InstanceServer, name, want string, within time.Duration) {
+func requireStatus(t *testing.T, conn *iclient.Connection, name, want string, within time.Duration) {
 	t.Helper()
 
 	var status, state string
 
 	ok := assert.Eventually(t, func() bool {
-		inst, _, err := conn.GetInstance(name)
+		inst, _, err := conn.GetInstance(t.Context(), name, nil)
 		if err != nil {
 			state = err.Error()
 			return false
@@ -199,46 +205,10 @@ func requireStatus(t *testing.T, conn incus.InstanceServer, name, want string, w
 		name, want, status, state)
 }
 
-// waitBusy blocks until no queryable operation holds the instance's operation
-// lock. It is client.Instance.waitBusyOperation, which raw API calls miss.
-func waitBusy(t *testing.T, conn incus.InstanceServer, name string) {
-	t.Helper()
-
-	instanceURL := incusApi.NewURL().Path("1.0", "instances", name).String()
-
-	for {
-		ops, err := conn.GetOperations()
-		require.NoError(t, err)
-
-		busyOp := ""
-		for _, op := range ops {
-			if op.Class != incusApi.OperationClassTask || op.StatusCode.IsFinal() {
-				continue
-			}
-
-			if slices.Contains(op.Resources["instances"], instanceURL) {
-				busyOp = op.ID
-				break
-			}
-		}
-
-		if busyOp == "" {
-			return
-		}
-
-		// A NotFound just means it completed and was pruned between the
-		// listing and here.
-		_, _, err = conn.GetOperationWait(busyOp, 30)
-		if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
-			require.NoError(t, err)
-		}
-	}
-}
-
 // setState drives an instance from the test side and waits for the change.
 // Every raw write here races the daemon's status writes for the instance's
-// operation lock, so it waits the lock out and retries, as client.Instance does.
-func setState(t *testing.T, conn incus.InstanceServer, name string, req incusApi.InstanceStatePut) {
+// operation lock, so it waits the lock out and retries.
+func setState(t *testing.T, conn *iclient.Connection, name string, req incusApi.InstanceStatePut) {
 	t.Helper()
 
 	err := retry.New(
@@ -246,17 +216,22 @@ func setState(t *testing.T, conn incus.InstanceServer, name string, req incusApi
 		retry.Delay(250*time.Millisecond),
 		retry.LastErrorOnly(true),
 		retry.RetryIf(func(err error) bool {
-			return strings.Contains(err.Error(), "Instance is busy")
+			return errors.Is(err, iclient.ErrInstanceBusy)
 		}),
 	).Do(func() error {
-		waitBusy(t, conn, name)
-
-		op, err := conn.UpdateInstanceState(name, req, "")
+		err := conn.WaitInstanceBusy(t.Context(), name)
 		if err != nil {
 			return err
 		}
 
-		return op.Wait()
+		op, err := conn.UpdateInstanceState(t.Context(), name, req, "")
+		if err != nil {
+			return err
+		}
+
+		_, err = iclient.WaitOperation(t.Context(), op)
+
+		return err
 	})
 	require.NoError(t, err)
 }
@@ -276,7 +251,7 @@ func TestE2EConnectRegistersThenReuses(t *testing.T) {
 	conn, err := connect(t.Context(), cfg)
 	require.NoError(t, err)
 
-	_, err = conn.UseProject(c.IncusProject()).GetInstanceNames(incusApi.InstanceTypeAny)
+	_, err = conn.WithProject(c.IncusProject()).GetInstanceNames(t.Context(), nil)
 	require.NoError(t, err, "the registered certificate must be usable against its project")
 
 	require.FileExists(t, filepath.Join(cfg.DataDir, certFile))
@@ -289,7 +264,7 @@ func TestE2EConnectRegistersThenReuses(t *testing.T) {
 	conn, err = connect(t.Context(), reuse)
 	require.NoError(t, err, "a restarted daemon must reuse its persisted certificate")
 
-	_, err = conn.UseProject(c.IncusProject()).GetInstanceNames(incusApi.InstanceTypeAny)
+	_, err = conn.WithProject(c.IncusProject()).GetInstanceNames(t.Context(), nil)
 	require.NoError(t, err)
 }
 
@@ -313,7 +288,7 @@ func TestE2EConnectRegistersFromATokenFile(t *testing.T) {
 	conn, err := connect(t.Context(), cfg)
 	require.NoError(t, err)
 
-	_, err = conn.UseProject(c.IncusProject()).GetInstanceNames(incusApi.InstanceTypeAny)
+	_, err = conn.WithProject(c.IncusProject()).GetInstanceNames(t.Context(), nil)
 	require.NoError(t, err, "a certificate registered from a token file must be usable")
 }
 
@@ -398,7 +373,7 @@ func TestE2ESchedulerRestartsACrashedInstance(t *testing.T) {
 	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
 	require.Eventually(t, func() bool {
-		state, _, err := conn.GetInstanceState(name)
+		state, _, err := conn.GetInstanceState(t.Context(), name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 90*time.Second, time.Second, "a crashed instance should be restarted")
 }
@@ -456,7 +431,7 @@ func TestE2EReloadKeepsWatching(t *testing.T) {
 	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
 	require.Eventually(t, func() bool {
-		state, _, err := conn.GetInstanceState(name)
+		state, _, err := conn.GetInstanceState(t.Context(), name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 90*time.Second, time.Second,
 		"a crash after a reload must still be repaired: the scheduler outlives the listener")
@@ -501,7 +476,7 @@ func TestE2EDynamicScope(t *testing.T) {
 	// which is the whole point of the marker.
 	conn := testConn(t, plain)
 	require.Never(t, func() bool {
-		inst, _, err := conn.GetInstance(ignored)
+		inst, _, err := conn.GetInstance(t.Context(), ignored, nil)
 		return err == nil && inst.Config[shared.HealthStatusKey] == shared.HealthStatusHealthy
 	}, 20*time.Second, time.Second, "a project without the marker must not be watched")
 }
@@ -535,17 +510,19 @@ func TestE2EProjectRenamed(t *testing.T) {
 	// Let the first generation settle so the rename lands as an event rather
 	// than as part of the startup sweep.
 	require.Eventually(t, func() bool {
-		_, _, err := gConn.GetProject(c.IncusProject())
+		_, _, err := gConn.GetProject(t.Context(), c.IncusProject())
 		return err == nil
 	}, 30*time.Second, time.Second)
 
 	renamed := c.IncusProject() + "-renamed"
 
-	op, err := gConn.RenameProject(c.IncusProject(), incusApi.ProjectPost{Name: renamed})
+	op, err := gConn.RenameProject(t.Context(), c.IncusProject(), incusApi.ProjectPost{Name: renamed})
 	require.NoError(t, err, "only empty projects can be renamed; this one must still be empty")
-	require.NoError(t, op.Wait())
 
-	t.Cleanup(func() { _ = gConn.DeleteProject(renamed) })
+	_, err = iclient.WaitOperation(t.Context(), op)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = gConn.DeleteProject(context.Background(), renamed, nil) })
 
 	// The daemon must be watching the new name: an instance created there gets
 	// a verdict, which only a scheduler for that project can produce.
@@ -583,7 +560,7 @@ func TestE2EStatusIsRepairedAfterAnotherWriter(t *testing.T) {
 
 	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
 
-	waitBusy(t, conn, name)
+	require.NoError(t, conn.WaitInstanceBusy(t.Context(), name))
 
 	// Exactly what client.Instance.SetHealthCheckingStopped writes on a start.
 	require.NoError(t, patchInstanceConfig(t.Context(), conn, name,
@@ -617,7 +594,7 @@ func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 	setState(t, conn, name, incusApi.InstanceStatePut{Action: "start", Timeout: -1})
 
-	state, _, err := conn.GetInstanceState(name)
+	state, _, err := conn.GetInstanceState(t.Context(), name)
 	require.NoError(t, err)
 	require.NotZero(t, state.Pid, "a running container has an init pid, which is what a bounce would change")
 
@@ -625,7 +602,7 @@ func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 
 	// Well past the 5s backoff floor this instance's interval and retries give.
 	require.Never(t, func() bool {
-		state, _, err := conn.GetInstanceState(name)
+		state, _, err := conn.GetInstanceState(t.Context(), name)
 		return err != nil || state.StatusCode != incusApi.Running || state.Pid != pid
 	}, 45*time.Second, time.Second, "an instance that came back on its own must not be restarted again")
 }
@@ -651,7 +628,7 @@ func TestE2ESchedulerHonoursAnIntentionalStop(t *testing.T) {
 
 	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
 
-	waitBusy(t, conn, name)
+	require.NoError(t, conn.WaitInstanceBusy(t.Context(), name))
 
 	require.NoError(t, patchInstanceConfig(t.Context(), conn, name,
 		map[string]string{shared.HealthStoppedKey: "true"}))
@@ -660,7 +637,7 @@ func TestE2ESchedulerHonoursAnIntentionalStop(t *testing.T) {
 
 	// Outlast the 5s backoff floor several times over.
 	require.Never(t, func() bool {
-		state, _, err := conn.GetInstanceState(name)
+		state, _, err := conn.GetInstanceState(t.Context(), name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 45*time.Second, time.Second, "a deliberately stopped instance must stay stopped")
 }

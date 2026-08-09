@@ -13,6 +13,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
 )
 
@@ -166,7 +167,7 @@ func newPsCommand() *cli.Command {
 
 				// If resource is an Instance resource and has full details, use them.
 				if inst.IsEnsured() && inst.HasFull() {
-					full := inst.IncusInstanceFull
+					full := inst.State().IncusInstanceFull
 					if full == nil || full.State == nil {
 						continue
 					}
@@ -195,14 +196,13 @@ func newPsCommand() *cli.Command {
 			}
 
 			// Include orphaned instances (instances present in the Incus project but not defined in compose).
-			// Use GetInstancesFull to obtain complete instance information and avoid reflection workarounds.
 			func() {
 				incus, err := c.Connection()
 				if err != nil {
 					return
 				}
 
-				instances, err := incus.GetInstancesFull("")
+				instances, err := incus.GetInstances(ctx, &iclient.GetInstancesArgs{Full: true})
 				if err != nil {
 					// Non-fatal: if we cannot list instances, skip orphan inclusion.
 					c.LogDebug("Listing instances for orphans failed", "error", err)

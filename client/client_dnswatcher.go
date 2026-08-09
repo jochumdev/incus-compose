@@ -203,11 +203,11 @@ func (c *Client) RegisterDNSWatcher() error {
 					}
 				}
 
-				err = network.updateDNSAliases(owned, servicesIPs)
+				err = network.updateDNSAliases(ctx, owned, servicesIPs)
 				if err != nil && strings.Contains(err.Error(), "ETag doesn't match") {
 					// Try a second time.
 					time.Sleep(100 * time.Millisecond)
-					err = network.updateDNSAliases(owned, servicesIPs)
+					err = network.updateDNSAliases(ctx, owned, servicesIPs)
 				}
 
 				errs = errors.Join(errs, err)

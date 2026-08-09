@@ -100,8 +100,8 @@ func TestProfileEnsure(t *testing.T) {
 				t.Helper()
 				profile, ok := r.(*Profile)
 				require.True(t, ok)
-				require.NotNil(t, profile.IncusProfile)
-				require.NotEmpty(t, profile.IncusProfile.Devices)
+				require.NotNil(t, profile.State().IncusProfile)
+				require.NotEmpty(t, profile.State().IncusProfile.Devices)
 			},
 		},
 	}

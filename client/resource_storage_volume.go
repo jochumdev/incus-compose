@@ -8,8 +8,9 @@ import (
 	"maps"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 
-	incusClient "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
 )
 
@@ -52,12 +53,17 @@ type StorageVolume struct {
 	created   bool
 	Config    StorageVolumeConfig
 
-	// conn is this resource's own event-isolated Incus connection, set in
-	// Ensure() (which always runs before any other action) so concurrent
-	// workers never share a *ProtocolIncus. See Client.Connection.
-	conn *incusClient.ProtocolIncus
+	// mu serializes the actions; every image in a batch shares the lock volume.
+	// Nothing the actions call may take it again - it is not reentrant.
+	mu sync.Mutex
 
-	// State - nil means not ensured.
+	// state is swapped whole, so a reader never sees a half-updated volume.
+	state atomic.Pointer[StorageVolumeState]
+}
+
+// StorageVolumeState is what the last fetch read back from Incus.
+type StorageVolumeState struct {
+	// IncusVolume is nil until the volume is ensured.
 	IncusVolume *incusApi.StorageVolume
 	ETag        string
 }
@@ -93,6 +99,10 @@ func newStorageVolume(c *Client, name string, configGetter Config) (*StorageVolu
 	}
 
 	vol.incusName = "vol-" + SanitizeIncusName(name, MaxIncusNameLen-4)
+
+	// Every accessor dereferences this, so it must never be nil.
+	vol.state.Store(&StorageVolumeState{})
+
 	return vol, nil
 }
 
@@ -108,7 +118,18 @@ func (r *StorageVolume) IncusName() string {
 
 // IsEnsured returns true if the volume has been fetched/created.
 func (r *StorageVolume) IsEnsured() bool {
-	return r.IncusVolume != nil
+	return r.State().IncusVolume != nil
+}
+
+// State returns the volume state as of the last fetch. It is replaced whole,
+// never written into, so the result stays consistent for as long as it is held.
+func (r *StorageVolume) State() *StorageVolumeState {
+	return r.state.Load()
+}
+
+// clearState forgets the fetched volume.
+func (r *StorageVolume) clearState() {
+	r.state.Store(&StorageVolumeState{})
 }
 
 // Created returns true if the volume was created during the last Ensure call.
@@ -118,27 +139,29 @@ func (r *StorageVolume) Created() bool {
 
 // Ensure retrieves an existing storage volume or creates a new one if Create option is set.
 func (r *StorageVolume) Ensure(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionEnsure, r, options, nil); err != nil {
 		return err
 	}
 
-	conn, err := r.client.Connection()
+	_, err := r.client.Connection()
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 	}
-	r.conn = conn
 
-	err = r.get()
+	err = r.get(ctx)
 	if err != nil {
 		if options.Create && errors.Is(err, ErrNotFound) {
-			err = r.create()
+			err = r.create(ctx)
 
 			// Incus reports a lost create race either as "already exists" or as a
 			// raw unique-constraint failure, so adopt whatever is there instead of
 			// matching messages.
-			if err != nil && r.get() == nil {
+			if err != nil && r.get(ctx) == nil {
 				err = nil
 			}
 		}
@@ -149,24 +172,31 @@ func (r *StorageVolume) Ensure(ctx context.Context, opts ...Option) error {
 	return err
 }
 
-func (r *StorageVolume) get() error {
+func (r *StorageVolume) get(ctx context.Context) error {
 	// r.client.LogDebug("getting volume", "pool", r.Config.Pool, "volume", r.incusName)
 
-	// Try to get existing volume
-	volume, eTag, err := r.conn.GetStoragePoolVolume(r.Config.Pool, "custom", r.incusName)
+	conn, err := r.client.Connection()
 	if err != nil {
-		r.IncusVolume = nil
-		r.ETag = ""
+		return err
+	}
+
+	// Try to get existing volume
+	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName, nil)
+	if err != nil {
+		r.clearState()
 		return ErrNotFound.Wrap(err)
 	}
 
-	r.IncusVolume = volume
-	r.ETag = eTag
+	r.state.Store(&StorageVolumeState{IncusVolume: &volume.StorageVolume, ETag: eTag})
+
 	return nil
 }
 
 // Start validates the storage volume.
 func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if !r.IsEnsured() || !r.Config.Shifted {
 		return nil
 	}
@@ -184,7 +214,8 @@ func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
 	var errs error
 
 	// Check shifted is enabled
-	if r.IncusVolume.Config["security.shifted"] != "true" {
+	volume := r.State().IncusVolume
+	if volume.Config["security.shifted"] != "true" {
 		errs = errors.Join(errors.New("expected security.shifted=true"))
 	}
 
@@ -203,16 +234,17 @@ func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
 		}
 
 		// Check UID/GID match
-		expectedUID = strconv.FormatUint(img.UID, 10)
-		expectedGID = strconv.FormatUint(img.GID, 10)
+		imageState := img.State()
+		expectedUID = strconv.FormatUint(imageState.UID, 10)
+		expectedGID = strconv.FormatUint(imageState.GID, 10)
 	}
 
-	if r.IncusVolume.Config["initial.uid"] != expectedUID {
-		errs = errors.Join(errs, fmt.Errorf("UID mismatch, expected %s got %s", expectedUID, r.IncusVolume.Config["initial.uid"]))
+	if volume.Config["initial.uid"] != expectedUID {
+		errs = errors.Join(errs, fmt.Errorf("UID mismatch, expected %s got %s", expectedUID, volume.Config["initial.uid"]))
 	}
 
-	if r.IncusVolume.Config["initial.gid"] != expectedGID {
-		errs = errors.Join(errs, fmt.Errorf("GID mismatch, expected %s got %s", expectedGID, r.IncusVolume.Config["initial.gid"]))
+	if volume.Config["initial.gid"] != expectedGID {
+		errs = errors.Join(errs, fmt.Errorf("GID mismatch, expected %s got %s", expectedGID, volume.Config["initial.gid"]))
 	}
 
 	if errs != nil {
@@ -222,7 +254,7 @@ func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
 	return nil
 }
 
-func (r *StorageVolume) create() error {
+func (r *StorageVolume) create(ctx context.Context) error {
 	config := map[string]string{}
 
 	if r.Config.Shifted {
@@ -232,8 +264,9 @@ func (r *StorageVolume) create() error {
 				return ErrUnknownResource.WithResource(r.Config.ImageResource)
 			}
 
-			r.Config.UID = img.UID
-			r.Config.GID = img.GID
+			imageState := img.State()
+			r.Config.UID = imageState.UID
+			r.Config.GID = imageState.GID
 		}
 
 		config["security.shifted"] = "true"
@@ -258,21 +291,25 @@ func (r *StorageVolume) create() error {
 
 	// r.client.LogDebug("creating volume", "pool", r.Config.Pool, "volume", r.incusName)
 
-	if err := r.conn.CreateStoragePoolVolume(r.Config.Pool, volReq); err != nil {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	if err := conn.CreateStoragePoolVolume(ctx, r.Config.Pool, volReq); err != nil {
 		return ErrCreate.Wrap(err)
 	}
 
-	volume, eTag, err := r.conn.GetStoragePoolVolume(r.Config.Pool, "custom", r.incusName)
+	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName, nil)
 	if err != nil {
 		return ErrCreate.WithText("fetching created volume").Wrap(err)
 	}
 
-	r.IncusVolume = volume
-	r.ETag = eTag
+	r.state.Store(&StorageVolumeState{IncusVolume: &volume.StorageVolume, ETag: eTag})
 	r.created = true
 
 	if r.Config.HostPath != "" {
-		if err := r.pushDirectoryContent(); err != nil {
+		if err := r.pushDirectoryContent(ctx); err != nil {
 			return ErrCreate.WithText("seeding volume from " + r.Config.HostPath).Wrap(err)
 		}
 	}
@@ -281,13 +318,21 @@ func (r *StorageVolume) create() error {
 }
 
 // pushDirectoryContent walks HostPath and copies every file and directory into
-// the volume via CreateStorageVolumeFile. Only called on first creation.
-func (r *StorageVolume) pushDirectoryContent() error {
+// the volume over SFTP. Only called on first creation.
+func (r *StorageVolume) pushDirectoryContent(ctx context.Context) error {
+	sftpConn, err := r.SFTP(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer r.client.WarnError(sftpConn.Close, "Failed to close a sFTP connection")
+
 	var uid, gid int64
 
 	if r.Config.ImageResource != nil {
 		if img, ok := r.Config.ImageResource.(*Image); ok {
-			uid, gid = int64(img.UID), int64(img.GID)
+			imageState := img.State()
+			uid, gid = int64(imageState.UID), int64(imageState.GID)
 		}
 	}
 
@@ -305,43 +350,46 @@ func (r *StorageVolume) pushDirectoryContent() error {
 			return nil
 		}
 
-		perm := 0o644
-		if d.IsDir() {
-			perm = 0o755
-		}
-
-		args := incusClient.InstanceFileArgs{
-			Mode: perm,
+		args := instanceFileArgs{
+			Mode: 0o644,
 			UID:  uid,
 			GID:  gid,
 		}
 
 		if d.IsDir() {
+			args.Mode = 0o755
 			args.Type = "directory"
-			return r.conn.CreateStorageVolumeFile(r.Config.Pool, "custom", r.incusName, rel, args)
+
+			return sftpCreateFile(r.client, sftpConn, rel, args, false)
 		}
 
 		f, err := root.Open(rel)
 		if err != nil {
 			return err
 		}
+
+		defer r.client.WarnError(f.Close, "Failed to close a seed file")
+
 		args.Type = "file"
 		args.Content = f
-		return r.conn.CreateStorageVolumeFile(r.Config.Pool, "custom", r.incusName, rel, args)
+
+		return sftpCreateFile(r.client, sftpConn, rel, args, true)
 	})
 }
 
 // Delete removes the storage volume from Incus.
 func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if !r.IsEnsured() {
-		r.IncusVolume = nil
-		r.ETag = ""
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return nil
 	}
 
-	if err := r.get(); err != nil {
+	if err := r.get(ctx); err != nil {
 		// Already gone server side
 		r.client.resources.Remove(r)
 		return err
@@ -350,29 +398,24 @@ func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionDelete, r, options, nil); err != nil {
-		r.IncusVolume = nil
-		r.ETag = ""
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return err
 	}
 
-	err := r.conn.DeleteStoragePoolVolume(r.Config.Pool, "custom", r.incusName)
-	err = r.client.hookAfter(ctx, ActionDelete, r, options, err)
+	conn, err := r.client.Connection()
 	if err != nil {
-		r.IncusVolume = nil
-		r.ETag = ""
-
-		r.client.resources.Remove(r)
 		return err
 	}
 
-	r.conn = nil
-	r.IncusVolume = nil
-	r.ETag = ""
+	err = conn.DeleteStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName)
+	err = r.client.hookAfter(ctx, ActionDelete, r, options, err)
 
+	r.clearState()
 	r.client.resources.Remove(r)
-	return nil
+
+	return err
 }
 
 var (

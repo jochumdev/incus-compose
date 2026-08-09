@@ -5,16 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sync"
+	"sync/atomic"
 
-	incusClient "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // ProfileConfig configures profile creation from a source profile.
 type ProfileConfig struct {
 	// SourceServer is the Incus server to copy the profile from.
 	// If nil, uses the global Incus client.
-	SourceServer *incusClient.ProtocolIncus
+	SourceServer *iclient.Connection
 
 	// SourceProject is the project containing the source profile.
 	SourceProject string
@@ -26,6 +29,13 @@ type ProfileConfig struct {
 	NetworkOnly bool
 }
 
+// ProfileState is what the last fetch read back from Incus.
+type ProfileState struct {
+	// IncusProfile is nil until the profile is ensured.
+	IncusProfile *incusApi.Profile
+	ETag         string
+}
+
 // Profile represents an Incus profile resource.
 type Profile struct {
 	*BaseResource
@@ -33,17 +43,15 @@ type Profile struct {
 	incusName string
 	created   bool
 
+	// mu serializes the actions; two workers may share one resource object.
+	// Nothing the actions call may take it again - it is not reentrant.
+	mu sync.Mutex
+
 	client *Client
 	Config ProfileConfig
 
-	// conn is this resource's own event-isolated Incus connection, set in
-	// Ensure() (which always runs before any other action) so concurrent
-	// workers never share a *ProtocolIncus. See Client.Connection.
-	conn *incusClient.ProtocolIncus
-
-	// State - nil means not ensured.
-	IncusProfile *incusApi.Profile
-	ETag         string
+	// state is swapped whole, so a reader never sees a half-updated profile.
+	state atomic.Pointer[ProfileState]
 }
 
 // GetConfig returns the configuration.
@@ -72,6 +80,9 @@ func newProfile(c *Client, name string, configGetter Config) (*Profile, error) {
 		Config:       *config,
 	}
 
+	// Every accessor dereferences this, so it must never be nil.
+	profile.state.Store(&ProfileState{})
+
 	return profile, nil
 }
 
@@ -87,7 +98,18 @@ func (r *Profile) IncusName() string {
 
 // IsEnsured returns true if the profile state has been fetched from Incus.
 func (r *Profile) IsEnsured() bool {
-	return r.IncusProfile != nil
+	return r.State().IncusProfile != nil
+}
+
+// State returns the profile state as of the last fetch. It is replaced whole,
+// never written into, so the result stays consistent for as long as it is held.
+func (r *Profile) State() *ProfileState {
+	return r.state.Load()
+}
+
+// clearState forgets the fetched profile.
+func (r *Profile) clearState() {
+	r.state.Store(&ProfileState{})
 }
 
 // Created returns true if the profile was created during the last Ensure call.
@@ -97,23 +119,25 @@ func (r *Profile) Created() bool {
 
 // Ensure retrieves an existing resource or creates a new one if args.Create is true.
 func (r *Profile) Ensure(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionEnsure, r, options, nil); err != nil {
 		return err
 	}
 
-	conn, err := r.client.Connection()
+	_, err := r.client.Connection()
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 	}
-	r.conn = conn
 
 	// Try to get existing
-	err = r.get()
+	err = r.get(ctx)
 	if err == nil {
 		if r.Config.SourceProfile != "" {
-			err = r.updateFromSource()
+			err = r.updateFromSource(ctx)
 		}
 		err = r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 
@@ -126,10 +150,10 @@ func (r *Profile) Ensure(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	err = r.create()
+	err = r.create(ctx)
 
 	// A concurrent creator may have won the race; adopt whatever is there.
-	if err != nil && r.get() == nil {
+	if err != nil && r.get(ctx) == nil {
 		err = nil
 	}
 
@@ -138,24 +162,27 @@ func (r *Profile) Ensure(ctx context.Context, opts ...Option) error {
 	return err
 }
 
-func (r *Profile) get() error {
-	profile, eTag, err := r.conn.GetProfile(r.incusName)
+func (r *Profile) get(ctx context.Context) error {
+	conn, err := r.client.Connection()
 	if err != nil {
-		r.IncusProfile = nil
-		r.ETag = ""
+		return err
+	}
+
+	profile, eTag, err := conn.GetProfile(ctx, r.incusName)
+	if err != nil {
+		r.clearState()
 		return ErrNotFound.Wrap(err)
 	}
 
-	r.IncusProfile = profile
-	r.ETag = eTag
+	r.state.Store(&ProfileState{IncusProfile: profile, ETag: eTag})
 
-	return err
+	return nil
 }
 
-func (r *Profile) create() error {
+func (r *Profile) create(ctx context.Context) error {
 	var postArgs incusApi.ProfilesPost
 	if r.Config.SourceProfile != "" {
-		sourceProfile, err := r.sourceProfile()
+		sourceProfile, err := r.sourceProfile(ctx)
 		if err != nil {
 			return err
 		}
@@ -175,22 +202,27 @@ func (r *Profile) create() error {
 		}
 	}
 
-	if err := r.conn.CreateProfile(postArgs); err != nil {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	if err := conn.CreateProfile(ctx, postArgs); err != nil {
 		return fmt.Errorf("creating profile %s: %w", r.Name(), err)
 	}
 
-	profile, eTag, err := r.conn.GetProfile(r.incusName)
+	profile, eTag, err := conn.GetProfile(ctx, r.incusName)
 	if err != nil {
 		return fmt.Errorf("fetching created profile %s: %w", r.Name(), err)
 	}
 
-	r.IncusProfile = profile
-	r.ETag = eTag
+	r.state.Store(&ProfileState{IncusProfile: profile, ETag: eTag})
 	r.created = true
+
 	return nil
 }
 
-func (r *Profile) sourceProfile() (*incusApi.Profile, error) {
+func (r *Profile) sourceProfile(ctx context.Context) (*incusApi.Profile, error) {
 	sourceServer := r.Config.SourceServer
 	if sourceServer == nil {
 		gConn, err := r.client.GlobalConnection()
@@ -201,14 +233,10 @@ func (r *Profile) sourceProfile() (*incusApi.Profile, error) {
 	}
 
 	if r.Config.SourceProject != "" {
-		projectServer, ok := sourceServer.UseProject(r.Config.SourceProject).(*incusClient.ProtocolIncus)
-		if !ok {
-			return nil, fmt.Errorf("using source project %s: cannot cast project-scoped client to ProtocolIncus", r.Config.SourceProject)
-		}
-		sourceServer = projectServer
+		sourceServer = sourceServer.WithProject(r.Config.SourceProject)
 	}
 
-	sourceProfile, _, err := sourceServer.GetProfile(r.Config.SourceProfile)
+	sourceProfile, _, err := sourceServer.GetProfile(ctx, r.Config.SourceProfile)
 	if err != nil {
 		return nil, fmt.Errorf("getting source profile %s:%s: %w", r.Config.SourceProject, r.Config.SourceProfile, err)
 	}
@@ -235,28 +263,35 @@ func (r *Profile) profilePutFromSource(sourceProfile *incusApi.Profile) incusApi
 	return incusApi.ProfilePut{Devices: devices}
 }
 
-func (r *Profile) updateFromSource() error {
-	sourceProfile, err := r.sourceProfile()
+func (r *Profile) updateFromSource(ctx context.Context) error {
+	sourceProfile, err := r.sourceProfile(ctx)
 	if err != nil {
 		return err
 	}
 
+	state := r.State()
+
 	profilePut := r.profilePutFromSource(sourceProfile)
 	if r.Config.NetworkOnly {
-		profilePut.Config = maps.Clone(r.IncusProfile.Config)
-		profilePut.Description = r.IncusProfile.Description
-		for name, device := range r.IncusProfile.Devices {
+		profilePut.Config = maps.Clone(state.IncusProfile.Config)
+		profilePut.Description = state.IncusProfile.Description
+		for name, device := range state.IncusProfile.Devices {
 			if device["type"] != "nic" {
 				profilePut.Devices[name] = maps.Clone(device)
 			}
 		}
 	}
 
-	if err := r.conn.UpdateProfile(r.incusName, profilePut, r.ETag); err != nil {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	if err := conn.UpdateProfile(ctx, r.incusName, profilePut, state.ETag); err != nil {
 		return fmt.Errorf("updating profile %s from source %s:%s: %w", r.Name(), r.Config.SourceProject, r.Config.SourceProfile, err)
 	}
 
-	return r.get()
+	return r.get(ctx)
 }
 
 // HasDevice returns true if the profile has a device with the given name.
@@ -265,8 +300,9 @@ func (r *Profile) HasDevice(name string) bool {
 		return false
 	}
 
-	if len(r.IncusProfile.Devices) > 0 {
-		for devName := range r.IncusProfile.Devices {
+	profile := r.State().IncusProfile
+	if len(profile.Devices) > 0 {
+		for devName := range profile.Devices {
 			if devName == name {
 				return true
 			}
@@ -278,12 +314,15 @@ func (r *Profile) HasDevice(name string) bool {
 
 // Delete removes the profile from Incus.
 func (r *Profile) Delete(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if !r.IsEnsured() {
 		r.client.resources.Remove(r)
 		return nil // Nothing to delete
 	}
 
-	if err := r.get(); err != nil {
+	if err := r.get(ctx); err != nil {
 		// Already gone server side
 		r.client.resources.Remove(r)
 		return err
@@ -292,29 +331,25 @@ func (r *Profile) Delete(ctx context.Context, opts ...Option) error {
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionDelete, r, options, nil); err != nil {
-		r.IncusProfile = nil
-		r.ETag = ""
+		r.clearState()
 
 		r.client.resources.Remove(r)
+		return err
+	}
+
+	conn, err := r.client.Connection()
+	if err != nil {
 		return err
 	}
 
 	// Do the actual work
-	err := r.conn.DeleteProfile(r.incusName)
+	err = conn.DeleteProfile(ctx, r.incusName)
 	err = r.client.hookAfter(ctx, ActionDelete, r, options, err)
-	if err != nil {
-		r.IncusProfile = nil
-		r.ETag = ""
 
-		r.client.resources.Remove(r)
-		return err
-	}
-
-	r.IncusProfile = nil
-	r.ETag = ""
-
+	r.clearState()
 	r.client.resources.Remove(r)
-	return nil
+
+	return err
 }
 
 var (

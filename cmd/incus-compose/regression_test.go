@@ -36,7 +36,7 @@ func TestNoDanglingNetworksAfterDown(t *testing.T) {
 	require.NoError(t, err)
 
 	networkName := client.SanitizeNetworkName(pn, "ic-", "default")
-	networkNames, err := conn.GetNetworkNames()
+	networkNames, err := conn.GetNetworkNames(t.Context())
 	require.NoError(t, err)
 
 	require.NotContains(t, networkNames, networkName, "network %q was not removed by down --project", networkName)
