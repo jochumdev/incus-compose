@@ -70,6 +70,10 @@ for correct semver ordering. Headings below preserve each release's announced fo
   up to two minutes, which could turn contention it would have ridden out into a
   reported timeout. Waiting for ic-healthd to come up is likewise the three
   seconds it claims rather than fifteen. (by @jochumdev)
+- A built image now carries its environment into the instance. The image's `ENV`
+  was dropped on the way in, so a service built from a Dockerfile came up without
+  the `PATH`, `HOME` and `TERM` the same image pulled from a registry gets.
+  (by @jochumdev)
 
 ## [v1.2.0-rc.3] - 2026-08-07
 
