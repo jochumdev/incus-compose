@@ -118,10 +118,10 @@ func TestStorageVolumeEnsure(t *testing.T) {
 				t.Helper()
 				vol, ok := r.(*StorageVolume)
 				require.True(t, ok)
-				require.NotNil(t, vol.IncusVolume)
-				require.Equal(t, "true", vol.IncusVolume.Config["security.shifted"])
-				require.Equal(t, "1000", vol.IncusVolume.Config["initial.uid"])
-				require.Equal(t, "1000", vol.IncusVolume.Config["initial.gid"])
+				require.NotNil(t, vol.State().IncusVolume)
+				require.Equal(t, "true", vol.State().IncusVolume.Config["security.shifted"])
+				require.Equal(t, "1000", vol.State().IncusVolume.Config["initial.uid"])
+				require.Equal(t, "1000", vol.State().IncusVolume.Config["initial.gid"])
 			},
 		},
 		{
@@ -133,7 +133,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 				t.Helper()
 				vol, ok := r.(*StorageVolume)
 				require.True(t, ok)
-				require.Equal(t, "5GiB", vol.IncusVolume.Config["size"])
+				require.Equal(t, "5GiB", vol.State().IncusVolume.Config["size"])
 			},
 		},
 	}
@@ -232,10 +232,10 @@ func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 
 	vol, ok := r.(*StorageVolume)
 	require.True(t, ok)
-	require.NotNil(t, vol.IncusVolume)
-	require.Equal(t, "true", vol.IncusVolume.Config["security.shifted"])
-	require.Equal(t, "65534", vol.IncusVolume.Config["initial.uid"])
-	require.Equal(t, "65534", vol.IncusVolume.Config["initial.gid"])
+	require.NotNil(t, vol.State().IncusVolume)
+	require.Equal(t, "true", vol.State().IncusVolume.Config["security.shifted"])
+	require.Equal(t, "65534", vol.State().IncusVolume.Config["initial.uid"])
+	require.Equal(t, "65534", vol.State().IncusVolume.Config["initial.gid"])
 }
 
 func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {

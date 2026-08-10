@@ -202,7 +202,7 @@ func TestInstanceConfig(t *testing.T) {
 	assert.NotContains(t, config, "oci.entrypoint")
 	assert.Equal(t, "true", config["boot.autostart"])
 	assert.Equal(t, "always", config[client.HealthKeyPrefix+"restart"])
-	assert.Equal(t, "2", config["limits.cpu"])
+	assert.Equal(t, "200ms/100ms", config["limits.cpu.allowance"])
 	assert.Equal(t, "512MiB", config["limits.memory"])
 	assert.NotContains(t, config, client.HealthStatusKey,
 		"ic-healthd is the only writer of the status; a value here is one it has to correct")
@@ -223,6 +223,8 @@ func TestInstanceConfigResourceLimits(t *testing.T) {
 
 	tests := []struct {
 		name       string
+		cpus       float32
+		memLimit   types.UnitBytes
 		limits     *types.Resource
 		xIncus     map[string]any
 		want       map[string]string
@@ -232,42 +234,127 @@ func TestInstanceConfigResourceLimits(t *testing.T) {
 			name:   "integer cpu and memory",
 			limits: &types.Resource{NanoCPUs: 2, MemoryBytes: 512 << 20},
 			want: map[string]string{
-				"limits.cpu":    "2",
-				"limits.memory": "512MiB",
+				"limits.cpu.allowance": "200ms/100ms",
+				"limits.memory":        "512MiB",
 			},
-			notPresent: []string{"limits.cpu.allowance"},
+			// limits.cpu pins a cpuset rather than capping usage, so compose
+			// cpus must never land there.
+			notPresent: []string{"limits.cpu"},
 		},
 		{
 			name:   "fractional cpu",
 			limits: &types.Resource{NanoCPUs: 0.5},
 			want: map[string]string{
-				"limits.cpu.allowance": "50%",
+				"limits.cpu.allowance": "50ms/100ms",
 			},
 			notPresent: []string{"limits.cpu", "limits.memory"},
 		},
 		{
-			name:   "x-incus overrides integer cpu and memory",
+			name:   "sub-millisecond cpu keeps a non-zero quota",
+			limits: &types.Resource{NanoCPUs: 0.001},
+			want: map[string]string{
+				"limits.cpu.allowance": "1ms/100ms",
+			},
+			notPresent: []string{"limits.cpu"},
+		},
+		{
+			name:     "service-level cpus and mem_limit",
+			cpus:     2,
+			memLimit: 512 << 20,
+			want: map[string]string{
+				"limits.cpu.allowance": "200ms/100ms",
+				"limits.memory":        "512MiB",
+			},
+			notPresent: []string{"limits.cpu"},
+		},
+		{
+			name: "service-level fractional cpus",
+			cpus: 0.5,
+			want: map[string]string{
+				"limits.cpu.allowance": "50ms/100ms",
+			},
+			notPresent: []string{"limits.cpu", "limits.memory"},
+		},
+		{
+			name:     "deploy limits win over service-level",
+			cpus:     1,
+			memLimit: 256 << 20,
+			limits:   &types.Resource{NanoCPUs: 4, MemoryBytes: 1 << 30},
+			want: map[string]string{
+				"limits.cpu.allowance": "400ms/100ms",
+				"limits.memory":        "1GiB",
+			},
+			notPresent: []string{"limits.cpu"},
+		},
+		{
+			name:   "service-level cpus fills what deploy leaves out",
+			cpus:   2,
+			limits: &types.Resource{MemoryBytes: 512 << 20},
+			want: map[string]string{
+				"limits.cpu.allowance": "200ms/100ms",
+				"limits.memory":        "512MiB",
+			},
+			notPresent: []string{"limits.cpu"},
+		},
+		{
+			name:     "service-level mem_limit fills what deploy leaves out",
+			memLimit: 512 << 20,
+			limits:   &types.Resource{NanoCPUs: 2},
+			want: map[string]string{
+				"limits.cpu.allowance": "200ms/100ms",
+				"limits.memory":        "512MiB",
+			},
+			notPresent: []string{"limits.cpu"},
+		},
+		{
+			name:   "deploy fractional cpus replaces a service-level value",
+			cpus:   4,
+			limits: &types.Resource{NanoCPUs: 0.25},
+			want: map[string]string{
+				"limits.cpu.allowance": "25ms/100ms",
+			},
+			notPresent: []string{"limits.cpu", "limits.memory"},
+		},
+		{
+			name:     "x-incus overrides service-level cpus and mem_limit",
+			cpus:     2,
+			memLimit: 512 << 20,
+			xIncus: map[string]any{
+				"limits.cpu.allowance": "400ms/100ms",
+				"limits.memory":        "1GiB",
+			},
+			want: map[string]string{
+				"limits.cpu.allowance": "400ms/100ms",
+				"limits.memory":        "1GiB",
+			},
+			notPresent: []string{"limits.cpu"},
+		},
+		{
+			name:   "x-incus overrides the allowance and memory",
 			limits: &types.Resource{NanoCPUs: 2, MemoryBytes: 512 << 20},
 			xIncus: map[string]any{
-				"limits.cpu":    "4",
-				"limits.memory": "1GiB",
+				"limits.cpu.allowance": "25%",
+				"limits.memory":        "1GiB",
 			},
 			want: map[string]string{
-				"limits.cpu":    "4",
-				"limits.memory": "1GiB",
+				"limits.cpu.allowance": "25%",
+				"limits.memory":        "1GiB",
 			},
-			notPresent: []string{"limits.cpu.allowance"},
+			notPresent: []string{"limits.cpu"},
 		},
 		{
-			name:   "x-incus overrides fractional cpu allowance",
-			limits: &types.Resource{NanoCPUs: 0.5},
+			// x-incus is raw passthrough, so pinning stays available to anyone
+			// who wants it alongside the allowance we derive.
+			name:   "x-incus can still pin a cpuset",
+			limits: &types.Resource{NanoCPUs: 2},
 			xIncus: map[string]any{
-				"limits.cpu.allowance": "25%",
+				"limits.cpu": "0-3",
 			},
 			want: map[string]string{
-				"limits.cpu.allowance": "25%",
+				"limits.cpu":           "0-3",
+				"limits.cpu.allowance": "200ms/100ms",
 			},
-			notPresent: []string{"limits.cpu", "limits.memory"},
+			notPresent: []string{"limits.memory"},
 		},
 	}
 
@@ -276,11 +363,16 @@ func TestInstanceConfigResourceLimits(t *testing.T) {
 			t.Parallel()
 
 			service := types.ServiceConfig{
-				Name: "web",
-				Deploy: &types.DeployConfig{
-					Resources: types.Resources{Limits: tt.limits},
-				},
+				Name:     "web",
+				CPUS:     tt.cpus,
+				MemLimit: tt.memLimit,
 			}
+			if tt.limits != nil {
+				service.Deploy = &types.DeployConfig{
+					Resources: types.Resources{Limits: tt.limits},
+				}
+			}
+
 			if tt.xIncus != nil {
 				service.Extensions = types.Extensions{"x-incus": tt.xIncus}
 			}

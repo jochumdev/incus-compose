@@ -2,83 +2,46 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 )
 
-// TestWithContextReturnsTheCall pins the pass-through, including the etag the
-// Incus client returns alongside most reads.
-func TestWithContextReturnsTheCall(t *testing.T) {
+// TestDialTrustsAnUnknownServerCert pins the one connection property the daemon
+// cannot get from anywhere else: it is handed a URL and a token, so it has no
+// server certificate to pin and has to accept whatever answers. Verifying would
+// fail here, because the test server signs its own.
+func TestDialTrustsAnUnknownServerCert(t *testing.T) {
 	t.Parallel()
 
-	want := errors.New("boom")
-
-	value, etag, err := withContext(t.Context(), func() (int, string, error) {
-		return 42, "etag-1", want
-	})
-
-	require.Equal(t, 42, value)
-	require.Equal(t, "etag-1", etag)
-	require.ErrorIs(t, err, want)
-}
-
-// TestWithContextGivesUpOnCancel is the whole reason the helper exists: the
-// Incus client takes no context, so a call that never answers wedges its caller.
-func TestWithContextGivesUpOnCancel(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	// Released on cleanup so the stand-in call cannot outlive the test.
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := withContext(ctx, func() (int, string, error) {
-			<-release
-			return 0, "", nil
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(incusApi.Response{
+			Type:       incusApi.SyncResponse,
+			StatusCode: http.StatusOK,
+			Metadata:   json.RawMessage(`{"environment":{"server_name":"test"}}`),
 		})
-		done <- err
-	}()
+	}))
+	t.Cleanup(server.Close)
 
-	cancel()
+	certPEM, keyPEM, err := generateClientCert()
+	require.NoError(t, err)
 
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(5 * time.Second):
-		t.Fatal("withContext did not return after its context was canceled")
-	}
-}
+	conn, err := dial(config{IncusURL: server.URL}, certPEM, keyPEM)
+	require.NoError(t, err)
 
-// TestConnectionArgsBoundsTheTransport pins the second half of the timeout
-// story: a request already in flight needs the transport's own ceiling.
-func TestConnectionArgsBoundsTheTransport(t *testing.T) {
-	t.Parallel()
-
-	args := connectionArgs("cert-pem", "key-pem", 7*time.Second)
-
-	require.Equal(t, "cert-pem", args.TLSClientCert)
-	require.Equal(t, "key-pem", args.TLSClientKey)
-	require.True(t, args.InsecureSkipVerify, "the daemon trusts the endpoint it was handed")
-	require.NotNil(t, args.TransportWrapper)
-
-	transport := &http.Transport{}
-	wrapped := args.TransportWrapper(transport)
-
-	require.Equal(t, 7*time.Second, transport.ResponseHeaderTimeout)
-	require.Same(t, transport, wrapped.Transport())
+	got, _, err := conn.GetServer(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "test", got.Environment.ServerName)
 }
 
 // TestGenerateClientCertIsUsableAsAClientCert pins the properties Incus checks

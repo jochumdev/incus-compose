@@ -211,45 +211,45 @@ func logs(ctx context.Context, p *project.Project, c *client.Client, args logsAr
 		return errLogged.Wrap(err)
 	}
 
-	listener, err := conn.GetEventsByType([]string{incusApi.EventTypeLifecycle})
+	listenCtx, stopListening := context.WithCancel(ctx)
+	defer stopListening()
+
+	events, err := conn.ListenEvents(listenCtx, []string{incusApi.EventTypeLifecycle}, false)
 	if err != nil {
 		c.LogError("Subscribing to events", "error", err)
 		return errLogged.Wrap(err)
 	}
-	defer listener.Disconnect()
 
 	defer formatter.stopStreams()
 
 	projectGone := make(chan struct{})
 	incusProject := c.IncusProject()
 
-	_, err = listener.AddHandler([]string{incusApi.EventTypeLifecycle}, func(event incusApi.Event) {
-		var lifecycle incusApi.EventLifecycle
-		if err := json.Unmarshal(event.Metadata, &lifecycle); err != nil {
-			return
-		}
+	go func() {
+		for event := range events {
+			var lifecycle incusApi.EventLifecycle
+			if err := json.Unmarshal(event.Metadata, &lifecycle); err != nil {
+				continue
+			}
 
-		if lifecycle.Action == incusApi.EventLifecycleProjectDeleted && lifecycle.Name == incusProject {
-			close(projectGone)
-			return
-		}
+			if lifecycle.Action == incusApi.EventLifecycleProjectDeleted && lifecycle.Name == incusProject {
+				close(projectGone)
+				return
+			}
 
-		inst, known := knownInstances[lifecycle.Name]
-		if !known {
-			return
-		}
+			inst, known := knownInstances[lifecycle.Name]
+			if !known {
+				continue
+			}
 
-		switch lifecycle.Action {
-		case incusApi.EventLifecycleInstanceStarted:
-			formatter.startStream(ctx, inst)
-		case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceDeleted, incusApi.EventLifecycleInstanceShutdown:
-			formatter.stopStream(lifecycle.Name)
+			switch lifecycle.Action {
+			case incusApi.EventLifecycleInstanceStarted:
+				formatter.startStream(ctx, inst)
+			case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceDeleted, incusApi.EventLifecycleInstanceShutdown:
+				formatter.stopStream(lifecycle.Name)
+			}
 		}
-	})
-	if err != nil {
-		c.LogError("Adding event handler", "error", err)
-		return errLogged.Wrap(err)
-	}
+	}()
 
 	for _, inst := range knownInstances {
 		formatter.startStream(ctx, inst)

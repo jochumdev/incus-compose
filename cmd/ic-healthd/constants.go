@@ -9,7 +9,8 @@ import (
 const maxRestartDelay = 5 * time.Minute
 const restartTimeout = 5 * time.Minute * 4
 
-// apiTimeout bounds an Incus API call, at the transport and at the caller.
+// apiTimeout bounds one Incus API call. Every call has to carry it: the
+// connection sets no deadline of its own, the context is the only bound.
 const apiTimeout = 30 * time.Second
 
 // Worker counts over every watched project. Restarts count apart: one holds its
@@ -37,8 +38,6 @@ const defaultProjectMarker = shared.HealthScopeKey + "=" + shared.HealthScopeGlo
 // Channel depths. The router blocks rather than drops, so these only buy slack
 // while a loop is between selects.
 const (
-	// intakeBuffer holds decoded events between the listener and the router.
-	intakeBuffer = 256
 	// projectBuffer holds one project's events between the router and its scheduler.
 	projectBuffer = 32
 	// resultBuffer holds one scheduler's action results.

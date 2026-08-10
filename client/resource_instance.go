@@ -8,22 +8,22 @@ import (
 	"io"
 	"io/fs"
 	"maps"
-	"net/http"
 	"os"
 	"path"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/avast/retry-go/v5"
-	"github.com/gorilla/websocket"
 	"github.com/kballard/go-shellquote"
-	incusClient "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 	"github.com/pkg/sftp"
 
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -117,6 +117,18 @@ func (c *InstanceConfig) GetConfig() any {
 	return c
 }
 
+type InstanceState struct {
+	// State - nil means not ensured.
+	IncusInstance *incusApi.Instance
+	ETag          string
+
+	// // UID/GID from the config or extracted from container (for volume shifting).
+	UID uint64
+	GID uint64
+
+	IncusInstanceFull *incusApi.InstanceFull
+}
+
 // Instance represents an Incus container or virtual machine.
 type Instance struct {
 	*BaseResource
@@ -126,31 +138,22 @@ type Instance struct {
 	created   bool
 	Config    InstanceConfig
 
-	mu *sync.Mutex
+	// mu serializes the actions; two workers may share one resource object.
+	// Nothing the actions call may take it again - it is not reentrant.
+	mu sync.Mutex
 
-	// Updated is broadcasted whenever an fetch() or some timeout happened.
-	Updated *sync.Cond
+	// updated is broadcast whenever state changes; its lock guards nothing else.
+	updated *sync.Cond
 
 	// deleteMarked indicates that this instance will be deleted after Ensure(),
 	// this is for down scaling instances.
 	deleteMarked bool
 
-	// conn is this resource's own event-isolated Incus connection, set in
-	// Ensure() (which always runs before any other action) so concurrent
-	// workers never share a *ProtocolIncus. See Client.Connection.
-	conn *incusClient.ProtocolIncus
-
 	// image is for internal use in create operations.
 	image *Image
 
-	// State - nil means not ensured.
-	IncusInstance *incusApi.Instance
-
-	// // UID/GID from the config or extracted from container (for volume shifting).
-	UID uint64
-	GID uint64
-
-	IncusInstanceFull *incusApi.InstanceFull
+	// state is swapped whole, so a reader never sees a half-updated instance.
+	state atomic.Pointer[InstanceState]
 }
 
 func newInstance(c *Client, name string, configGetter Config) (*Instance, error) {
@@ -177,16 +180,16 @@ func newInstance(c *Client, name string, configGetter Config) (*Instance, error)
 		config.Extensions = make(map[string]string)
 	}
 
-	mu := &sync.Mutex{}
-
 	inst := &Instance{
 		BaseResource: NewBaseResource(KindInstance, name, config.Priority),
 		client:       c,
 		incusName:    SanitizeIncusName(name, -1),
 		Config:       *config,
-		mu:           mu,
-		Updated:      sync.NewCond(mu),
+		updated:      sync.NewCond(&sync.Mutex{}),
 	}
+
+	// Every accessor dereferences this, so it must never be nil.
+	inst.state.Store(&InstanceState{})
 
 	return inst, nil
 }
@@ -203,7 +206,20 @@ func (r *Instance) IncusName() string {
 
 // IsEnsured returns true if the instance has been fetched/created.
 func (r *Instance) IsEnsured() bool {
-	return r.IncusInstance != nil
+	curr := r.state.Load()
+
+	return curr.IncusInstance != nil
+}
+
+// State returns the instance state as of the last fetch. It is replaced whole,
+// never written into, so the result stays consistent for as long as it is held.
+func (r *Instance) State() *InstanceState {
+	return r.state.Load()
+}
+
+// clearState forgets the fetched instance.
+func (r *Instance) clearState() {
+	r.state.Store(&InstanceState{})
 }
 
 // Created returns true if the instance was created during the last Ensure call.
@@ -222,17 +238,43 @@ func (r *Instance) ServiceName() string {
 // container may not have its DHCP lease(s) yet, so this gives it time. On
 // timeout it returns an error: DNSWatcher registers an AAAA-equivalent record
 // for any address family it waited for, so a missing one must not pass silently.
-func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) (ips []InterfaceIPs, err error) {
-	if err := r.fetch(); err != nil {
+func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]InterfaceIPs, error) {
+	// The device to network map comes from the instance and does not change
+	// while we wait; only its state does, which ips() reads each round.
+	err := r.fetch(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	// Cache if ipv6 is required per network. Incus brings up IPv6 automatically
-	// on OCI containers unless the network (or this NIC's own attachment)
-	// disables it. External networks opt out of the requirement entirely: we
-	// never configure them ourselves, and whether they actually hand out IPv6
-	// isn't something we can reliably know from our side.
+	networkIpv6 := r.expectedIPv6()
+
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		r.client.LogDebug("Waiting for IPs", "instance", r)
+
+		ips, err := r.ips(ctx)
+		if err == nil && !r.missingIPv6(ips, networkIpv6) {
+			return ips, nil
+		}
+
+		select {
+		case <-deadline.Done():
+			return nil, NewError("WaitIPs").WithText(fmt.Sprintf("timeout after: %v", timeout))
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// expectedIPv6 reports, per network, whether a global IPv6 address is required.
+// Incus brings up IPv6 automatically on OCI containers unless the network (or
+// this NIC's own attachment) disables it. External networks opt out entirely:
+// we never configure them ourselves, and whether they actually hand out IPv6
+// isn't something we can reliably know from our side.
+func (r *Instance) expectedIPv6() map[string]bool {
 	networkIpv6 := map[string]bool{}
+
 	for _, dev := range r.Config.Devices {
 		if dev.Config.DeviceType != InstanceDeviceTypeNic {
 			continue
@@ -264,130 +306,183 @@ func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) (ips []In
 		}
 	}
 
-	deadline, cancel := context.WithTimeout(ctx, timeout)
+	return networkIpv6
+}
 
-	for {
-		r.client.LogDebug("Waiting for IPs", "instance", r)
+// missingIPv6 reports whether a network that must hand out IPv6 has not yet.
+func (r *Instance) missingIPv6(ips []InterfaceIPs, networkIpv6 map[string]bool) bool {
+	for _, ip := range ips {
+		if len(ip.IPv6s) > 0 {
+			continue
+		}
 
-		if r.Running() {
-			ips, err = r.client.InstanceIPs(r.IncusName())
-			if err == nil {
-				needIPv6 := false
+		ipv6, ok := networkIpv6[ip.Network]
+		if !ok {
+			r.client.LogWarn("Found an unknown network", "resource", r, "network", ip.Network)
+			continue
+		}
 
-				for _, ip := range ips {
-					if len(ip.IPv6s) > 0 {
-						continue
-					}
+		if ipv6 {
+			return true
+		}
+	}
 
-					ipv6, ok := networkIpv6[ip.Network]
-					if !ok {
-						r.client.LogWarn("Found an unknown network", "resource", r, "network", ip.Network)
-						continue
-					}
+	return false
+}
 
-					// If we don't have an IPv6 yet but we need one wait again.
-					if ipv6 {
-						needIPv6 = true
-					}
-				}
+// ips reads the global addresses of each attached NIC, keyed by the network the
+// device is on. The instance must be ensured and running.
+func (r *Instance) ips(ctx context.Context) ([]InterfaceIPs, error) {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return nil, err
+	}
 
-				if !needIPv6 {
-					cancel()
-					return ips, nil
-				}
+	state, _, err := conn.GetInstanceState(ctx, r.incusName)
+	if err != nil {
+		return nil, err
+	}
+
+	if state.StatusCode != incusApi.Running {
+		return nil, ErrNotRunning.WithText("in ips")
+	}
+
+	info := r.State().IncusInstance
+	if info == nil {
+		return nil, ErrNotEnsured.WithResource(r)
+	}
+
+	result := []InterfaceIPs{}
+
+	for sDevice, sNetwork := range state.Network {
+		if sNetwork.Type == "loopback" || sNetwork.Addresses == nil {
+			continue
+		}
+
+		device, ok := info.Devices[sDevice]
+		if !ok {
+			continue
+		}
+
+		iPv4s := []string{}
+		iPv6s := []string{}
+		for _, addr := range sNetwork.Addresses {
+			if addr.Scope != "global" || addr.Address == "" {
+				continue
+			}
+
+			switch addr.Family {
+			case "inet":
+				iPv4s = append(iPv4s, addr.Address)
+			case "inet6":
+				iPv6s = append(iPv6s, addr.Address)
 			}
 		}
 
-		select {
-		case <-deadline.Done():
-			cancel()
-			return nil, NewError("WaitIPs").WithText(fmt.Sprintf("timeout after: %v", timeout))
-		case <-time.After(250 * time.Millisecond):
+		if len(iPv4s) < 1 && len(iPv6s) < 1 {
+			continue
 		}
+
+		result = append(result, InterfaceIPs{Network: device["network"], IPv4s: iPv4s, IPv6s: iPv6s})
 	}
+
+	if len(result) < 1 {
+		return nil, ErrNotFound.WithText("no Networks/IPs found")
+	}
+
+	return result, nil
 }
 
 // HasFull returns true if the instance has a full instance.
 func (r *Instance) HasFull() bool {
-	return r.IncusInstanceFull != nil
+	return r.State().IncusInstanceFull != nil
 }
 
-func (r *Instance) fetch() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.conn == nil {
-		conn, err := r.client.Connection()
-		if err != nil {
-			return err
-		}
-		r.conn = conn
-	}
-
-	// Fresh instance.
-	instance, _, err := r.conn.GetInstance(r.incusName)
+func (r *Instance) fetch(ctx context.Context) error {
+	conn, err := r.client.Connection()
 	if err != nil {
 		return err
 	}
-	r.IncusInstance = instance
 
-	r.UID = r.Config.UID
-	r.GID = r.Config.GID
+	// Fresh instance. The ETag covers the editable config only, not StatusCode,
+	// so it cannot be used to skip this.
+	instance, etag, err := conn.GetInstance(ctx, r.incusName, &iclient.GetInstanceArgs{Full: r.Config.Full})
+	if err != nil {
+		return err
+	}
 
-	if r.UID == 0 || r.GID == 0 {
+	newState := &InstanceState{}
+
+	newState.IncusInstance = &instance.Instance
+	newState.ETag = etag
+
+	newState.UID = r.Config.UID
+	newState.GID = r.Config.GID
+
+	if newState.UID == 0 || newState.GID == 0 {
 		var err error
-		r.UID, r.GID, err = extractUIDGID(r.IncusInstance)
+		newState.UID, newState.GID, err = extractUIDGID(newState.IncusInstance)
 		if err != nil {
 			return ErrInvalidFormat.WithText("extracting uid/gid").Wrap(err)
 		}
 	}
 
 	if r.Config.Full {
-		full, _, err := r.conn.GetInstanceFull(r.IncusInstance.Name)
-		if err != nil {
-			return err
-		}
-
-		r.IncusInstanceFull = full
+		newState.IncusInstanceFull = instance
 	}
 
-	// Let everyone know that we have updated.
-	r.Updated.Broadcast()
+	// Under the cond's lock: a waiter that has just evaluated its condition and
+	// not yet parked would otherwise miss the broadcast and wait out its timeout.
+	r.updated.L.Lock()
+	r.state.Store(newState)
+	r.updated.Broadcast()
+	r.updated.L.Unlock()
 
 	return nil
 }
 
 // Ensure retrieves an existing instance or creates a new one if args.Create is true.
 func (r *Instance) Ensure(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	scaleDown, err := r.ensure(ctx, opts...)
+	r.mu.Unlock()
+
+	if err != nil || !scaleDown {
+		return err
+	}
+
+	options := NewOptions(opts...)
+
+	err = r.Stop(ctx, OptionTimeout(options.Timeout), OptionForce())
+	if err != nil {
+		return err
+	}
+
+	return r.Delete(ctx)
+}
+
+// ensure fetches or creates the instance. The bool reports a marked instance
+// the caller must tear down, which Stop and Delete do outside mu.
+func (r *Instance) ensure(ctx context.Context, opts ...Option) (bool, error) {
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionEnsure, r, options, nil); err != nil {
-		return err
+		return false, err
 	}
 
 	// Try to get existing
 	// Check if exists
-	err := r.fetch()
+	err := r.fetch(ctx)
 	if err == nil {
 		// Keys only: a changed value still needs --recreate.
 		if addErr := r.addMissingConfig(ctx); addErr != nil {
-			return r.client.hookAfter(ctx, ActionEnsure, r, options, addErr)
+			return false, r.client.hookAfter(ctx, ActionEnsure, r, options, addErr)
 		}
 
 		err = r.ensured()
 		err = r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 
-		if err == nil && r.deleteMarked {
-			if err := r.Stop(ctx, OptionTimeout(options.Timeout), OptionForce()); err != nil {
-				return err
-			}
-
-			if err := r.Delete(ctx); err != nil {
-				return err
-			}
-		}
-
-		return err
+		return err == nil && r.deleteMarked, err
 	}
 
 	if !options.Create {
@@ -399,21 +494,23 @@ func (r *Instance) Ensure(ctx context.Context, opts ...Option) error {
 			r.client.resources.Remove(r)
 		}
 
-		return err
+		return false, err
 	}
 
 	err = r.create(ctx, opts...)
 	err = r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 
-	return err
+	return false, err
 }
 
 func (r *Instance) ensured() error {
 	if r.Config.Image == "" {
-		if alias, ok := r.IncusInstance.Config["user.image_alias"]; ok {
+		info := r.State().IncusInstance
+
+		if alias, ok := info.Config["user.image_alias"]; ok {
 			r.Config.Image = alias
 		} else {
-			r.Config.Image = r.client.ResolveImageFingerprint(r.IncusInstance.Config["volatile.base_image"])
+			r.Config.Image = r.client.ResolveImageFingerprint(info.Config["volatile.base_image"])
 		}
 	}
 
@@ -457,30 +554,31 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 
 	config := map[string]string{}
 
-	r.UID = r.Config.UID
-	r.GID = r.Config.GID
+	imageState := image.State()
 
-	if r.UID == 0 && r.GID == 0 {
+	// Locals: the fetch below resolves the fields from the created instance.
+	uid, gid := r.Config.UID, r.Config.GID
+
+	if uid == 0 && gid == 0 {
 		// Use UID/GID from image properties when available so volumes are created
 		// with the correct shifted config before the instance is created.
-		if image.UID > 0 || image.GID > 0 {
-			r.UID = image.UID
-			r.GID = image.GID
+		if imageState.UID > 0 || imageState.GID > 0 {
+			uid, gid = imageState.UID, imageState.GID
 		}
 	}
 
-	entrypoint := resolveEntrypoint(r.image.Entrypoint, r.Config.Entrypoint, r.Config.Command)
+	entrypoint := resolveEntrypoint(imageState.Entrypoint, r.Config.Entrypoint, r.Config.Command)
 	if entrypoint != "" {
 		config["oci.entrypoint"] = entrypoint
 	}
 
 	// Store UID/GID.
 	if !image.NativeIncus() {
-		if r.UID != image.UID {
-			config["oci.uid"] = strconv.FormatUint(r.UID, 10)
+		if uid != imageState.UID {
+			config["oci.uid"] = strconv.FormatUint(uid, 10)
 		}
-		if r.GID != image.GID {
-			config["oci.gid"] = strconv.FormatUint(r.GID, 10)
+		if gid != imageState.GID {
+			config["oci.gid"] = strconv.FormatUint(gid, 10)
 		}
 	}
 
@@ -493,8 +591,13 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
 	// Get image info from project
-	incusImage, _, err := r.conn.GetImage(image.IncusAlias.Target)
+	incusImage, _, err := conn.GetImage(ctx, imageState.IncusAlias.Target, nil)
 	if err != nil {
 		return ErrNotFound.WithText("getting image").Wrap(err)
 	}
@@ -528,14 +631,13 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 		},
 	}
 
-	// Create instance from project image.
-	op, err := r.conn.CreateInstanceFromImage(r.conn, *incusImage, req)
-	if err := r.client.hookRemoteOperation(ctx, ActionEnsure, r, options, op, err); err != nil {
+	op, err := conn.CreateInstance(ctx, req)
+	if err := r.client.hookOperation(ctx, ActionEnsure, r, options, op, err); err != nil {
 		return err
 	}
 
 	// Get instance to extract UID/GID
-	if err := r.fetch(); err != nil {
+	if err := r.fetch(ctx); err != nil {
 		return ErrCreate.WithText("fetching created instance").Wrap(err)
 	}
 
@@ -609,6 +711,9 @@ func (r *Instance) buildDevices() (map[string]map[string]string, error) {
 
 // Start starts the instance.
 func (r *Instance) Start(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	const action = ActionStart
 	options := NewOptions(opts...)
 
@@ -621,7 +726,7 @@ func (r *Instance) Start(ctx context.Context, opts ...Option) error {
 	}
 
 	if r.Running() {
-		err := r.SetHealthCheckingStopped(ctx, false)
+		err := r.setHealthCheckingStopped(ctx, false)
 		if err != nil {
 			return r.client.hookAfter(ctx, action, r, options, err)
 		}
@@ -630,17 +735,18 @@ func (r *Instance) Start(ctx context.Context, opts ...Option) error {
 	}
 
 	// Wait for the healthcheck to success if a test is defined.
-	_, hasTest := r.IncusInstance.Config[HealthKeyPrefix+"test"]
-	restart := slices.Contains(shared.RestartPolicies, r.IncusInstance.Config[HealthKeyPrefix+"restart"])
-	v, ok := r.IncusInstance.Config[HealthKeyPrefix+"daemon"]
-	isHealthd := ok && v == "true"
+	state := r.State()
+	_, hasTest := state.IncusInstance.Config[HealthKeyPrefix+"test"]
+	restart := slices.Contains(shared.RestartPolicies, state.IncusInstance.Config[HealthKeyPrefix+"restart"])
+	isHealthd := util.IsTrue(state.IncusInstance.Config[HealthKeyPrefix+"daemon"])
 
 	if !isHealthd && (hasTest || restart) && options.Healthd && !options.ExternalHealthd {
-		// Wait for healthd to be available for 3 seconds.
+		// Wait for healthd to be available for 3 seconds; fixed, the default delay doubles.
 		err := retry.New(
 			retry.Context(ctx),
 			retry.Attempts(6),
 			retry.Delay(500*time.Millisecond),
+			retry.DelayType(retry.FixedDelay),
 		).Do(func() error {
 			running, err := r.client.HealthdRunning()
 			if err != nil {
@@ -661,7 +767,7 @@ func (r *Instance) Start(ctx context.Context, opts ...Option) error {
 	startCtx, cancel := context.WithTimeout(ctx, options.Timeout)
 	defer cancel()
 
-	err := r.SetHealthCheckingStopped(startCtx, false)
+	err := r.setHealthCheckingStopped(startCtx, false)
 	if err != nil {
 		return r.client.hookAfter(ctx, action, r, options, err)
 	}
@@ -696,11 +802,12 @@ func (r *Instance) Start(ctx context.Context, opts ...Option) error {
 
 // Running returns true if the instance is running.
 func (r *Instance) Running() bool {
-	if !r.IsEnsured() {
+	state := r.State()
+	if state.IncusInstance == nil {
 		return false
 	}
 
-	return r.IncusInstance.StatusCode == incusApi.Running
+	return state.IncusInstance.StatusCode == incusApi.Running
 }
 
 // retryBusy waits out the instance's operation lock, then runs write. The lock
@@ -708,13 +815,15 @@ func (r *Instance) Running() bool {
 func retryBusy[T any](ctx context.Context, r *Instance, write func() (T, error)) (T, error) {
 	var out T
 
+	// Fixed and short: it only covers a lock holder waitBusyOperation cannot see.
 	err := retry.New(
 		retry.Context(ctx),
 		retry.Attempts(10),
 		retry.Delay(250*time.Millisecond),
+		retry.DelayType(retry.FixedDelay),
 		retry.LastErrorOnly(true),
 		retry.RetryIf(func(err error) bool {
-			return strings.Contains(err.Error(), "Instance is busy")
+			return errors.Is(err, iclient.ErrInstanceBusy)
 		}),
 	).Do(func() error {
 		err := r.waitBusyOperation(ctx)
@@ -733,48 +842,17 @@ func retryBusy[T any](ctx context.Context, r *Instance, write func() (T, error))
 // waitBusyOperation blocks until no queryable operation holds the instance's
 // operation lock.
 func (r *Instance) waitBusyOperation(ctx context.Context) error {
-	instanceURL := incusApi.NewURL().Path("1.0", "instances", r.incusName).String()
-
-	for {
-		if err := ctx.Err(); err != nil {
-			return ErrOperation.WithText("waiting for a pending instance operation").Wrap(err)
-		}
-
-		ops, err := r.conn.GetOperations()
-		if err != nil {
-			return ErrOperation.WithText("listing operations").Wrap(err)
-		}
-
-		busyOp := ""
-		for _, op := range ops {
-			if op.Class != incusApi.OperationClassTask || op.StatusCode.IsFinal() {
-				continue
-			}
-
-			if slices.Contains(op.Resources["instances"], instanceURL) {
-				busyOp = op.ID
-				break
-			}
-		}
-
-		if busyOp == "" {
-			return nil
-		}
-
-		// Wait server-side for the operation to finish, bounded by the ctx
-		// deadline. A NotFound just means it completed and was pruned between
-		// the listing and here.
-		timeoutSeconds := -1
-		deadline, ok := ctx.Deadline()
-		if ok {
-			timeoutSeconds = max(int(time.Until(deadline).Seconds()), 1)
-		}
-
-		_, _, err = r.conn.GetOperationWait(busyOp, timeoutSeconds)
-		if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
-			return ErrOperation.WithText("waiting for a pending instance operation").Wrap(err)
-		}
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
 	}
+
+	err = conn.WaitInstanceBusy(ctx, r.incusName)
+	if err != nil {
+		return ErrOperation.WithText("waiting for a pending instance operation").Wrap(err)
+	}
+
+	return nil
 }
 
 // See: https://pkg.go.dev/context#AfterFunc
@@ -815,8 +893,10 @@ func waitOnCond(ctx context.Context, cond *sync.Cond, conditionMet func() bool) 
 }
 
 func (r *Instance) waitForHealthCheck(ctx context.Context) error {
-	err := r.fetch()
-	if err == nil && r.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy {
+	err := r.fetch(ctx)
+	state := r.State()
+
+	if err == nil && state.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy {
 		r.client.LogDebug("Ready", "resource", r)
 
 		return nil
@@ -824,8 +904,16 @@ func (r *Instance) waitForHealthCheck(ctx context.Context) error {
 
 	err = waitOnCond(
 		ctx,
-		r.Updated,
-		func() bool { return r.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy },
+		r.updated,
+		func() bool {
+			// Nil until the first successful fetch, which may never land.
+			state := r.State()
+			if state.IncusInstance == nil {
+				return false
+			}
+
+			return state.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy
+		},
 	)
 	if err != nil {
 		return err
@@ -895,7 +983,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 	}
 
 	if options.Healthd {
-		_, isHealthd := r.IncusInstance.Config[HealthKeyPrefix+"daemon"]
+		_, isHealthd := r.State().IncusInstance.Config[HealthKeyPrefix+"daemon"]
 		if !isHealthd {
 			if err := r.waitForDependencies(ctx, ActionStart, options); err != nil {
 				return err
@@ -903,16 +991,24 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 		}
 	}
 
-	err := r.fetch()
+	err := r.fetch(ctx)
 	if err != nil {
 		return err
 	}
 
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	// Backing off suits this one: it waits for the instance's forkfile to come up.
 	sftpConn, err := retry.NewWithData[*sftp.Client](
+		retry.Context(ctx),
 		retry.Attempts(3),
 		retry.Delay(10*time.Second),
+		retry.LastErrorOnly(true),
 	).Do(func() (*sftp.Client, error) {
-		return r.conn.GetInstanceFileSFTP(r.incusName)
+		return conn.GetInstanceFileSFTP(ctx, r.incusName)
 	})
 	if err != nil {
 		return ErrCreate.WithText("connecting to instance SFTP").Wrap(err)
@@ -920,7 +1016,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 
 	// Push files while the instance is stopped: SFTP mounts the stopped rootfs,
 	// most apps need theier secrets before the actual start happened.
-	if err := r.PushFiles(sftpConn); err != nil {
+	if err := r.PushFiles(ctx, sftpConn); err != nil {
 		r.client.WarnError(sftpConn.Close, "Failed to close a sFTP connection")
 		return err
 	}
@@ -939,7 +1035,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 	}
 
 	// The wait may have let a concurrent start finish, re-check.
-	err = r.fetch()
+	err = r.fetch(ctx)
 	if err != nil {
 		return err
 	}
@@ -949,7 +1045,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 	}
 
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := r.conn.UpdateInstanceState(r.incusName, incusApi.InstanceStatePut{
+		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
 			Action:  "start",
 			Timeout: options.incusTimeout(),
 		}, "")
@@ -963,7 +1059,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 		return ErrOperation.WithText("starting an instance").Wrap(err)
 	}
 
-	err = r.fetch()
+	err = r.fetch(ctx)
 	if err != nil {
 		return ErrOperation.WithText("fetch after create").Wrap(err)
 	}
@@ -976,7 +1072,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 }
 
 // PushFiles pushes files into the instance over the instance's SFTP endpoint.
-func (r *Instance) PushFiles(sftpConn *sftp.Client) error {
+func (r *Instance) PushFiles(ctx context.Context, sftpConn *sftp.Client) error {
 	if !r.IsEnsured() {
 		return ErrNotEnsured
 	}
@@ -986,8 +1082,12 @@ func (r *Instance) PushFiles(sftpConn *sftp.Client) error {
 	}
 
 	if sftpConn == nil {
-		var err error
-		sftpConn, err = r.conn.GetInstanceFileSFTP(r.incusName)
+		conn, err := r.client.Connection()
+		if err != nil {
+			return err
+		}
+
+		sftpConn, err = conn.GetInstanceFileSFTP(ctx, r.incusName)
 		if err != nil {
 			return ErrCreate.WithText("connecting to instance SFTP").Wrap(err)
 		}
@@ -1021,12 +1121,14 @@ func (r *Instance) pushFile(sftpConn *sftp.Client, file InstanceFile) error {
 	}
 
 	// Resolve ownership: -1 falls back to the instance's oci.uid/oci.gid.
+	state := r.State()
+
 	uid, gid := file.UID, file.GID
 	if uid == -1 {
-		uid = int64(r.UID)
+		uid = int64(state.UID)
 	}
 	if gid == -1 {
-		gid = int64(r.GID)
+		gid = int64(state.GID)
 	}
 
 	// Create parent directories, owned by the instance user.
@@ -1056,13 +1158,12 @@ func (r *Instance) pushFile(sftpConn *sftp.Client, file InstanceFile) error {
 		}
 	}
 
-	args := incusClient.InstanceFileArgs{
-		Content:   file.Content,
-		UID:       uid,
-		GID:       gid,
-		Mode:      file.Mode,
-		Type:      "file",
-		WriteMode: "overwrite",
+	args := instanceFileArgs{
+		Content: file.Content,
+		UID:     uid,
+		GID:     gid,
+		Mode:    file.Mode,
+		Type:    "file",
 	}
 
 	err := sftpCreateFile(r.client, sftpConn, file.Target, args, true)
@@ -1075,9 +1176,21 @@ func (r *Instance) pushFile(sftpConn *sftp.Client, file InstanceFile) error {
 	return nil
 }
 
+// instanceFileArgs describes one file, directory or symlink to write over SFTP.
+// A UID, GID or Mode below zero keeps whatever the path already has.
+type instanceFileArgs struct {
+	Content io.Reader
+	UID     int64
+	GID     int64
+	Mode    int
+
+	// Type is "file", "directory" or "symlink".
+	Type string
+}
+
 // sftpSetOwnerMode
 // From: https://github.com/lxc/incus/blob/975d9869315b6db088c7c40ca5b37ee45e5ff8cf/cmd/incus/utils_sftp.go#L24
-func sftpSetOwnerMode(sftpConn *sftp.Client, targetPath string, args incusClient.InstanceFileArgs) error {
+func sftpSetOwnerMode(sftpConn *sftp.Client, targetPath string, args instanceFileArgs) error {
 	// Skip if not on UNIX.
 	_, err := sftpConn.StatVFS("/")
 	if err != nil {
@@ -1124,7 +1237,7 @@ func sftpSetOwnerMode(sftpConn *sftp.Client, targetPath string, args incusClient
 
 // sftpCreateFile
 // From: https://github.com/lxc/incus/blob/975d9869315b6db088c7c40ca5b37ee45e5ff8cf/cmd/incus/utils_sftp.go#L69
-func sftpCreateFile(c *Client, sftpConn *sftp.Client, targetPath string, args incusClient.InstanceFileArgs, push bool) error {
+func sftpCreateFile(c *Client, sftpConn *sftp.Client, targetPath string, args instanceFileArgs, push bool) error {
 	switch args.Type {
 	case "file":
 		file, err := sftpConn.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
@@ -1226,7 +1339,7 @@ func sftpRecursiveMkdir(c *Client, sftpConn *sftp.Client, p string, mode *os.Fil
 			modeArg = int(mode.Perm())
 		}
 
-		args := incusClient.InstanceFileArgs{
+		args := instanceFileArgs{
 			UID:  max(uid, 0),
 			GID:  max(gid, 0),
 			Mode: modeArg,
@@ -1245,6 +1358,9 @@ func sftpRecursiveMkdir(c *Client, sftpConn *sftp.Client, p string, mode *os.Fil
 
 // Stop stops the instance.
 func (r *Instance) Stop(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionStop, r, options, nil); err != nil {
@@ -1256,7 +1372,7 @@ func (r *Instance) Stop(ctx context.Context, opts ...Option) error {
 	}
 
 	if !r.Running() {
-		err := r.SetHealthCheckingStopped(ctx, true)
+		err := r.setHealthCheckingStopped(ctx, true)
 		if err != nil {
 			return r.client.hookAfter(ctx, ActionStop, r, options, err)
 		}
@@ -1264,7 +1380,7 @@ func (r *Instance) Stop(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, ActionStop, r, options, ErrNotRunning)
 	}
 
-	err := r.SetHealthCheckingStopped(ctx, true)
+	err := r.setHealthCheckingStopped(ctx, true)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionStop, r, options, err)
 	}
@@ -1288,7 +1404,7 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 	}
 
 	// The wait may have let a concurrent stop finish, re-check.
-	err = r.fetch()
+	err = r.fetch(ctx)
 	if err != nil {
 		return err
 	}
@@ -1297,8 +1413,13 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 		return nil
 	}
 
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := r.conn.UpdateInstanceState(r.incusName, incusApi.InstanceStatePut{
+		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
 			Action:  "stop",
 			Force:   options.Force,
 			Timeout: options.incusTimeout(),
@@ -1313,18 +1434,20 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 		return err
 	}
 
-	return r.fetch()
-}
-
-// instanceConfigPatch is a minimal instance PATCH body carrying only config keys.
-type instanceConfigPatch struct {
-	Config map[string]string `json:"config"`
+	return r.fetch(ctx)
 }
 
 // SetHealthCheckingStopped writes the user.healthcheck.stopped marker, which
 // tells ic-healthd a stop was deliberate. The status is ic-healthd's alone.
 func (r *Instance) SetHealthCheckingStopped(ctx context.Context, stopped bool) error {
-	if err := r.fetch(); err != nil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.setHealthCheckingStopped(ctx, stopped)
+}
+
+func (r *Instance) setHealthCheckingStopped(ctx context.Context, stopped bool) error {
+	if err := r.fetch(ctx); err != nil {
 		return err
 	}
 
@@ -1333,7 +1456,7 @@ func (r *Instance) SetHealthCheckingStopped(ctx context.Context, stopped bool) e
 		value = "true"
 	}
 
-	if r.IncusInstance.Config[HealthStoppedKey] == value {
+	if r.State().IncusInstance.Config[HealthStoppedKey] == value {
 		return nil
 	}
 
@@ -1342,35 +1465,28 @@ func (r *Instance) SetHealthCheckingStopped(ctx context.Context, stopped bool) e
 
 // patchConfig writes the given keys and only those.
 func (r *Instance) patchConfig(ctx context.Context, config map[string]string) error {
-	info, err := r.conn.GetConnectionInfo()
+	conn, err := r.client.Connection()
 	if err != nil {
 		return err
 	}
 
-	path := incusApi.NewURL().
-		Path("1.0", "instances", r.IncusName()).
-		Project(info.Project).
-		Target(info.Target).
-		String()
-
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		_, _, err := r.conn.RawQuery("PATCH", path, instanceConfigPatch{Config: config}, "")
-
-		return struct{}{}, err
+		return struct{}{}, conn.PatchInstanceConfig(ctx, r.IncusName(), config)
 	})
 	if err != nil {
 		return err
 	}
 
-	return r.fetch()
+	return r.fetch(ctx)
 }
 
 // addMissingConfig adds declared config keys the instance does not have yet.
 func (r *Instance) addMissingConfig(ctx context.Context) error {
 	missing := map[string]string{}
+	info := r.State().IncusInstance
 
 	for key, value := range r.Config.Extensions {
-		_, ok := r.IncusInstance.Config[key]
+		_, ok := info.Config[key]
 		if ok {
 			continue
 		}
@@ -1390,42 +1506,53 @@ func (r *Instance) addMissingConfig(ctx context.Context) error {
 // MarkDelete marks a instance to be deleted after Ensure(),
 // this is for down scaling instances.
 func (r *Instance) MarkDelete() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.deleteMarked = true
 }
 
 // Delete removes the instance from Incus.
 func (r *Instance) Delete(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionDelete, r, options, nil); err != nil {
-		r.IncusInstance = nil
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return err
 	}
 
 	if !r.IsEnsured() {
-		r.IncusInstance = nil
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return r.client.hookAfter(ctx, ActionDelete, r, options, ErrNotEnsured)
 	}
 
+	conn, err := r.client.Connection()
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionDelete, r, options, err)
+	}
+
 	// Do the delete
-	_, err := retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := r.conn.DeleteInstance(r.incusName)
+	_, err = retryBusy(ctx, r, func() (struct{}, error) {
+		op, err := conn.DeleteInstance(ctx, r.incusName)
 
 		return struct{}{}, r.client.hookOperation(ctx, ActionDelete, r, options, op, err)
 	})
 
 	if err := r.client.hookAfter(ctx, ActionDelete, r, options, err); err != nil {
-		r.IncusInstance = nil
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return err
 	}
 
-	r.IncusInstance = nil
+	r.clearState()
 
 	r.client.resources.Remove(r)
 	return nil
@@ -1433,22 +1560,21 @@ func (r *Instance) Delete(ctx context.Context, opts ...Option) error {
 
 // Log streams the instance console log to the outputHandler.
 func (r *Instance) Log(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionLog, r, options, nil); err != nil {
 		return err
 	}
 
-	if r.conn == nil {
-		conn, err := r.client.Connection()
-		if err != nil {
-			return r.client.hookAfter(ctx, ActionLog, r, options, err)
-		}
-
-		r.conn = conn
+	_, err := r.client.Connection()
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionLog, r, options, err)
 	}
 
-	err := r.fetch()
+	err = r.fetch(ctx)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionLog, r, options, err)
 	}
@@ -1466,19 +1592,24 @@ func (r *Instance) log(ctx context.Context, options Options) error {
 	}
 
 	if options.Follow {
-		if err := r.logBuffer(outputHandler); err != nil {
+		if err := r.logBuffer(ctx, outputHandler); err != nil {
 			return err
 		}
 		return r.logStream(ctx, options, outputHandler)
 	}
 
-	return r.logBuffer(outputHandler)
+	return r.logBuffer(ctx, outputHandler)
 }
 
 // logBuffer reads the saved console log buffer via GET /console (equivalent to
 // `incus console --show-log`). Used for non-follow log retrieval.
-func (r *Instance) logBuffer(outputHandler func(Action, Resource, []byte)) error {
-	reader, err := r.conn.GetInstanceConsoleLog(r.incusName, nil)
+func (r *Instance) logBuffer(ctx context.Context, outputHandler func(Action, Resource, []byte)) error {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	reader, err := conn.GetInstanceConsoleLog(ctx, r.incusName)
 	if err != nil {
 		return ErrOperation.WithText("getting console log").Wrap(err)
 	}
@@ -1493,47 +1624,25 @@ func (r *Instance) logBuffer(outputHandler func(Action, Resource, []byte)) error
 	return nil
 }
 
-// logStream streams the console using WebSocket until context is canceled.
+// logStream streams the console until the context is canceled.
 func (r *Instance) logStream(ctx context.Context, options Options, outputHandler func(Action, Resource, []byte)) error {
-	// Channel to signal disconnect
-	consoleDisconnect := make(chan bool)
-
-	// Terminal that writes to outputHandler
-	terminal := &logTerminal{
-		resource:      r,
-		outputHandler: outputHandler,
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
 	}
 
-	// Connect to console WebSocket
 	req := incusApi.InstanceConsolePost{
 		Type:  "console",
 		Force: true, // Take over existing console connections
 	}
 
-	// Control handler - required by Incus API, but we don't need window resize.
-	// We just wait for context cancellation; the library handles websocket cleanup.
-	controlHandler := func(_ *websocket.Conn) {
-		<-ctx.Done()
-	}
-
-	args := &incusClient.InstanceConsoleArgs{
-		Terminal:          terminal,
-		Control:           controlHandler,
-		ConsoleDisconnect: consoleDisconnect,
-	}
-
-	op, err := r.conn.ConsoleInstance(r.incusName, req, args)
+	op, err := conn.ConsoleInstance(ctx, r.incusName, req, &iclient.InstanceConsoleArgs{
+		Output: &logOutput{resource: r, outputHandler: outputHandler},
+	})
 	if err != nil {
 		return ErrOperation.WithText("connecting to console").Wrap(err)
 	}
 
-	// Handle context cancellation
-	go func() {
-		<-ctx.Done()
-		close(consoleDisconnect)
-	}()
-
-	// Wait for operation to complete using hookOperation
 	err = r.client.hookOperation(ctx, ActionLog, r, options, op, err)
 
 	// Context cancellation (including timeout) is not an error
@@ -1548,24 +1657,15 @@ func (r *Instance) logStream(ctx context.Context, options Options, outputHandler
 	return nil
 }
 
-// logTerminal implements io.ReadWriteCloser for console streaming.
-type logTerminal struct {
+// logOutput hands the console stream to the client's output handler.
+type logOutput struct {
 	resource      *Instance
 	outputHandler func(Action, Resource, []byte)
 }
 
-func (t *logTerminal) Write(p []byte) (int, error) {
+func (t *logOutput) Write(p []byte) (int, error) {
 	t.outputHandler(ActionLog, t.resource, p)
 	return len(p), nil
-}
-
-func (t *logTerminal) Read(_ []byte) (int, error) {
-	select {} // Block forever - we never send input
-}
-
-// Close implements io.Closer.
-func (t *logTerminal) Close() error {
-	return nil
 }
 
 // resolveEntrypoint builds oci.entrypoint from a compose entrypoint and command.

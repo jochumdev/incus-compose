@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/types"
+	"github.com/lxc/incus/v7/shared/util"
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/shared"
@@ -200,9 +202,7 @@ func instanceConfig(c *client.Client, service types.ServiceConfig, projectName s
 	}
 
 	// Resource limits
-	if service.Deploy != nil && service.Deploy.Resources.Limits != nil {
-		applyResourceLimits(config, service.Deploy.Resources.Limits)
-	}
+	applyResourceLimits(config, resourceLimits(service))
 
 	// The opt-in ic-healthd requires. Set before x-incus, so a service can turn
 	// it off again with `user.healthcheck.enabled: "false"`.
@@ -328,7 +328,7 @@ func instanceImage(c *client.Client, service types.ServiceConfig) (client.Resour
 	if !ok {
 		return nil, errors.Join(errs, errors.New("not an image"))
 	}
-	img.Config.Services = append(img.Config.Services, service.Name)
+	img.AddService(service.Name)
 
 	return image, errs
 }
@@ -622,7 +622,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 
 		shifted := true
 		es, ok := extensions["security.shifted"]
-		if ok && es != "true" {
+		if ok && !util.IsTrue(es) {
 			shifted = false
 		}
 
@@ -897,28 +897,60 @@ func instanceName(service types.ServiceConfig, index, scale int) string {
 	return name
 }
 
-// applyResourceLimits maps Docker Compose deploy.resources.limits to Incus config keys.
+// resourceLimits resolves the two ways compose expresses limits: the v2-era
+// service-level `cpus`/`mem_limit` and `deploy.resources.limits`, which wins
+// where both carry a value, as in docker compose.
 //
-// CPU mapping:
-//   - Integer cpus (e.g. 2.0): limits.cpu = "2" (pin to N CPUs)
-//   - Fractional cpus (e.g. 0.5): limits.cpu.allowance = "50%"
+// The loader rejects the two disagreeing, but only when the deploy block sets
+// the same key, so a service may legitimately arrive with one of each.
+func resourceLimits(service types.ServiceConfig) types.Resource {
+	limits := types.Resource{
+		NanoCPUs:    types.NanoCPUs(service.CPUS),
+		MemoryBytes: service.MemLimit,
+	}
+
+	if service.Deploy == nil || service.Deploy.Resources.Limits == nil {
+		return limits
+	}
+
+	deploy := service.Deploy.Resources.Limits
+	if deploy.NanoCPUs != 0 {
+		limits.NanoCPUs = deploy.NanoCPUs
+	}
+
+	if deploy.MemoryBytes != 0 {
+		limits.MemoryBytes = deploy.MemoryBytes
+	}
+
+	return limits
+}
+
+// applyResourceLimits maps Docker Compose resource limits to Incus config keys.
+//
+// CPU mapping: limits.cpu.allowance = "<cpus*100>ms/100ms".
 //
 // Memory mapping: limits.memory = human-readable size (GiB, MiB, KiB, or B).
-func applyResourceLimits(config map[string]string, limits *types.Resource) {
-	if limits == nil {
-		return
-	}
+func applyResourceLimits(config map[string]string, limits types.Resource) {
 	if limits.NanoCPUs != 0 {
-		cpus := limits.NanoCPUs.Value()
-		if cpus == float32(int(cpus)) {
-			config["limits.cpu"] = strconv.Itoa(int(cpus))
-		} else {
-			config["limits.cpu.allowance"] = fmt.Sprintf("%.0f%%", float64(cpus)*100)
-		}
+		config["limits.cpu.allowance"] = formatCPUAllowance(limits.NanoCPUs.Value())
 	}
 	if limits.MemoryBytes != 0 {
 		config["limits.memory"] = formatMemoryLimit(int64(limits.MemoryBytes))
 	}
+}
+
+// formatCPUAllowance converts a compose cpus count to an Incus CPU allowance.
+//
+// The time form is the one that caps: Incus reads it as a CFS quota over the
+// period, which is what compose `cpus` means. Its percentage form only sets
+// scheduler shares, so it bites under contention and never otherwise.
+func formatCPUAllowance(cpus float32) string {
+	const periodMS = 100
+
+	// Rounding a sub-millisecond quota down to 0 would stop the instance dead.
+	quota := max(int64(math.Round(float64(cpus)*periodMS)), 1)
+
+	return fmt.Sprintf("%dms/%dms", quota, periodMS)
 }
 
 // formatMemoryLimit converts bytes to a human-readable Incus memory limit string.

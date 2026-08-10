@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	incus "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -95,10 +95,23 @@ func testContainer(t *testing.T, c *client.Client, name string, keys map[string]
 }
 
 // testConn returns the project-scoped Incus connection the actions take.
-func testConn(t *testing.T, c *client.Client) incus.InstanceServer {
+func testConn(t *testing.T, c *client.Client) *iclient.Connection {
 	t.Helper()
 
-	conn, err := c.Connection()
+	return dialTestRemote(t).WithProject(c.Project())
+}
+
+// dialTestRemote dials the remote the test environment points at.
+func dialTestRemote(t *testing.T) *iclient.Connection {
+	t.Helper()
+
+	config, err := iclient.ReadConfig("")
+	require.NoError(t, err)
+
+	info, err := config.RemoteInfos(os.Getenv("INCUS_REMOTE"))
+	require.NoError(t, err)
+
+	conn, err := iclient.NewConnection(info)
 	require.NoError(t, err)
 
 	return conn
@@ -106,7 +119,7 @@ func testConn(t *testing.T, c *client.Client) incus.InstanceServer {
 
 // refusedConn returns a real client whose every call fails immediately, for the
 // state machine tests: they never want an answer, only somewhere to send.
-func refusedConn(t *testing.T) incus.InstanceServer {
+func refusedConn(t *testing.T) *iclient.Connection {
 	t.Helper()
 
 	var lc net.ListenConfig
@@ -117,10 +130,11 @@ func refusedConn(t *testing.T) incus.InstanceServer {
 	addr := ln.Addr().String()
 	require.NoError(t, ln.Close())
 
-	conn, err := incus.ConnectIncusWithContext(t.Context(), "https://"+addr, &incus.ConnectionArgs{
+	conn, err := iclient.NewConnection(&iclient.ConfigRemoteInfo{
+		Name:               "refused",
+		Addrs:              []string{"https://" + addr},
+		Protocol:           "incus",
 		InsecureSkipVerify: true,
-		SkipGetServer:      true,
-		SkipGetEvents:      true,
 	})
 	require.NoError(t, err)
 

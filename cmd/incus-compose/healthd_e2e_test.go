@@ -36,7 +36,7 @@ func waitHealthy(t *testing.T, c *client.Client, name string) {
 
 	var status string
 	require.Eventuallyf(t, func() bool {
-		inst, _, err := conn.GetInstance(name)
+		inst, _, err := conn.GetInstance(t.Context(), name, nil)
 		if err != nil {
 			return false
 		}
@@ -82,7 +82,7 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 	conn, err := hc.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(globalHealthdName)
+	inst, _, err := conn.GetInstance(ctx, globalHealthdName, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "disk", inst.Devices["root"]["type"])
 	assert.Equal(t, globalHealthdNetwork, inst.Devices["eth0"]["network"])
@@ -144,7 +144,7 @@ services:
 	conn, err := hc.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(globalHealthdName)
+	inst, _, err := conn.GetInstance(ctx, globalHealthdName, nil)
 	require.NoError(t, err)
 	assert.Equal(t, plannedNetworkNames(ctx, t, pn, compose), []string{inst.Devices["eth0"]["network"]})
 
@@ -359,12 +359,12 @@ func TestE2EHealthdMigratesToGlobal(t *testing.T) {
 	conn, err := c.Global().Connection()
 	require.NoError(t, err)
 
-	incusProject, etag, err := conn.GetProject(c.IncusProject())
+	incusProject, etag, err := conn.GetProject(ctx, c.IncusProject())
 	require.NoError(t, err)
 
 	writable := incusProject.Writable()
 	writable.Config[shared.HealthScopeKey] = shared.HealthScopeGlobal
-	require.NoError(t, conn.UpdateProject(c.IncusProject(), writable, etag))
+	require.NoError(t, conn.UpdateProject(ctx, c.IncusProject(), writable, etag))
 
 	_, err = runCommand(ctx, t, pn, "-f", healthdScopeCompose, "up", "--detach")
 	require.NoError(t, err)

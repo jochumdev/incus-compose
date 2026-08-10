@@ -19,6 +19,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -190,7 +191,7 @@ func healthdFloorLimits(carried map[string]string) {
 
 // healthdCreateToken creates the sidecar's trust token. The shared daemon must
 // reach projects that do not exist yet, so only a per-project one is restricted.
-func healthdCreateToken(c *client.Client, global bool) (string, error) {
+func healthdCreateToken(ctx context.Context, c *client.Client, global bool) (string, error) {
 	req := incusApi.CertificatesPost{
 		CertificatePut: incusApi.CertificatePut{
 			Name: healthdCertName(c.IncusProject(), global),
@@ -209,12 +210,20 @@ func healthdCreateToken(c *client.Client, global bool) (string, error) {
 		return "", err
 	}
 
-	op, err := conn.CreateCertificateToken(req)
+	// A token operation never finishes, only its first update carries the token.
+	tokenCtx, release := context.WithCancel(ctx)
+	defer release()
+
+	updates, err := conn.CreateCertificateToken(tokenCtx, req)
 	if err != nil {
 		return "", err
 	}
 
-	opAPI := op.Get()
+	opAPI, ok := <-updates
+	if !ok {
+		return "", errors.New("the certificate token operation reported nothing")
+	}
+
 	addToken, err := opAPI.ToCertificateAddToken()
 	if err != nil {
 		return "", fmt.Errorf("converting operation to certificate add token: %w", err)
@@ -224,13 +233,13 @@ func healthdCreateToken(c *client.Client, global bool) (string, error) {
 }
 
 // healthdRevokeCert removes the healthd's trust-store certificate, if any.
-func healthdRevokeCert(c *client.Client, global bool) error {
+func healthdRevokeCert(ctx context.Context, c *client.Client, global bool) error {
 	gConn, err := c.GlobalConnection()
 	if err != nil {
 		return fmt.Errorf("while getting a global connection: %w", err)
 	}
 
-	certs, err := gConn.GetCertificates()
+	certs, err := gConn.GetCertificates(ctx)
 	if err != nil {
 		return fmt.Errorf("listing certificates: %w", err)
 	}
@@ -240,7 +249,7 @@ func healthdRevokeCert(c *client.Client, global bool) error {
 		if cert.Name != want {
 			continue
 		}
-		if err := gConn.DeleteCertificate(cert.Fingerprint); err != nil {
+		if err := gConn.DeleteCertificate(ctx, cert.Fingerprint); err != nil {
 			return fmt.Errorf("deleting certificate %s: %w", cert.Fingerprint, err)
 		}
 	}
@@ -368,7 +377,7 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 			return err
 		}
 
-		incusInstance, _, err := conn.GetInstance(r.IncusName())
+		incusInstance, _, err := conn.GetInstance(ctx, r.IncusName(), nil)
 		if err == nil {
 			// No need to setup the instance when we already did that.
 			_, ok := incusInstance.Config["environment.INCUS_COMPOSE_HEALTHD_INCUS"]
@@ -401,7 +410,7 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 			incusURL = u.String()
 		}
 
-		token, err := healthdCreateToken(c, params.global)
+		token, err := healthdCreateToken(ctx, c, params.global)
 		if err != nil {
 			c.LogWarn("Failed to get a token", "error", err)
 			token = ""
@@ -483,11 +492,12 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 				return err
 			}
 
-			op, err := conn.ExecInstance(inst.IncusName(), execReq, nil)
+			op, err := conn.ExecInstance(ctx, inst.IncusName(), execReq, nil)
 			if err != nil {
 				return err
 			}
-			if err := op.Wait(); err != nil {
+
+			if _, err := iclient.WaitOperation(ctx, op); err != nil {
 				return err
 			}
 		}
@@ -659,7 +669,7 @@ func healthdIncusURL(c *client.Client, params healthdParams, network *client.Net
 			return nil, fmt.Errorf("failed to get the url: %w", err)
 		}
 
-		cidr := network.IncusNetwork.Config["ipv4.address"]
+		cidr := network.State().IncusNetwork.Config["ipv4.address"]
 		if cidr == "" {
 			return nil, fmt.Errorf("ip of network %q is empty", network.Name())
 		}
@@ -718,7 +728,7 @@ func healthdTeardown(ctx context.Context, c *client.Client, global bool, timeout
 		return fmt.Errorf("deleting healthd resources: %w", err)
 	}
 
-	if err := healthdRevokeCert(c, global); err != nil {
+	if err := healthdRevokeCert(ctx, c, global); err != nil {
 		return fmt.Errorf("revoking the healthd cert: %w", err)
 	}
 
@@ -750,7 +760,7 @@ func healthdResolve(p *project.Project, c *client.Client) (*client.Client, *clie
 	return hc, inst, nil
 }
 
-func healthdReload(c *client.Client, h *client.Instance) error {
+func healthdReload(ctx context.Context, c *client.Client, h *client.Instance) error {
 	req := incusApi.InstanceExecPost{
 		Command:     []string{"sh", "-c", "pids=\"$(pidof ic-healthd)\" && for pid in $pids; do kill -HUP \"$pid\"; done"},
 		WaitForWS:   true,
@@ -762,12 +772,14 @@ func healthdReload(c *client.Client, h *client.Instance) error {
 		return err
 	}
 
-	op, err := conn.ExecInstance(h.IncusName(), req, nil)
+	op, err := conn.ExecInstance(ctx, h.IncusName(), req, nil)
 	if err != nil {
 		return err
 	}
 
-	return op.Wait()
+	_, err = iclient.WaitOperation(ctx, op)
+
+	return err
 }
 
 func newHealthdCommand() *cli.Command {

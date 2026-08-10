@@ -15,7 +15,6 @@ import (
 
 	"github.com/creativeprojects/go-selfupdate"
 	"github.com/lmittmann/tint"
-	"github.com/lxc/incus/v7/shared/cliconfig"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
@@ -367,19 +366,7 @@ func newRootCommand() *cli.Command {
 			}
 
 			// Connect to Incus server.
-			// Priority: INCUS_COMPOSE_URL -> INCUS_REMOTE/--remote -> incus CLI default remote
-			// Use Incus CLI config (explicit --remote flag, or configured default remote)
-			conf, err := cliconfig.LoadConfig("")
-			if err != nil {
-				return ctx, err
-			}
-
-			remote := cmd.String("remote")
-			if remote == "" {
-				remote = conf.DefaultRemote
-			}
-
-			server, err := conf.GetInstanceServer(remote)
+			conn, err := client.DialRemote("", cmd.String("remote"))
 			if err != nil {
 				return ctx, err
 			}
@@ -395,7 +382,7 @@ func newRootCommand() *cli.Command {
 				client.ClientLogger(logger),
 				client.ClientStdout(cmd.Writer),
 				client.ClientStderrWriter(logWriter),
-				client.ClientProvideInstanceServer(server),
+				client.ClientProvideConnection(conn),
 				client.ClientCacheProject(cmd.String("image-cache")),
 				client.ClientDefaultStoragePool(cmd.String("storage-pool")),
 			}

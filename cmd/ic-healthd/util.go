@@ -12,12 +12,9 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
-	"net/http"
 	"os"
 	"strings"
 	"time"
-
-	incus "github.com/lxc/incus/v7/client"
 )
 
 // levelTrace is below slog's Debug, for the per-event and per-check lines that
@@ -131,55 +128,4 @@ func generateClientCert() (certPEM, keyPEM []byte, err error) {
 	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 	return certPEM, keyPEM, nil
-}
-
-// timeoutTransport adapts *http.Transport to incus.HTTPTransporter.
-type timeoutTransport struct {
-	wrapped *http.Transport
-}
-
-// RoundTrip implements http.RoundTripper.
-func (t *timeoutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return t.wrapped.RoundTrip(req)
-}
-
-// Transport returns the wrapped transport.
-func (t *timeoutTransport) Transport() *http.Transport {
-	return t.wrapped
-}
-
-// connectionArgs builds the daemon's Incus connection arguments.
-func connectionArgs(certPEM, keyPEM string, timeout time.Duration) *incus.ConnectionArgs {
-	return &incus.ConnectionArgs{
-		TLSClientCert:      certPEM,
-		TLSClientKey:       keyPEM,
-		InsecureSkipVerify: true,
-		TransportWrapper: func(t *http.Transport) incus.HTTPTransporter {
-			t.ResponseHeaderTimeout = timeout
-			return &timeoutTransport{wrapped: t}
-		},
-	}
-}
-
-// withContext runs call on its own goroutine and gives up when ctx is done.
-func withContext[T any](ctx context.Context, call func() (T, string, error)) (T, string, error) {
-	type result struct {
-		value T
-		etag  string
-		err   error
-	}
-
-	ch := make(chan result, 1)
-	go func() {
-		value, etag, err := call()
-		ch <- result{value: value, etag: etag, err: err}
-	}()
-
-	select {
-	case r := <-ch:
-		return r.value, r.etag, r.err
-	case <-ctx.Done():
-		var zero T
-		return zero, "", ctx.Err()
-	}
 }

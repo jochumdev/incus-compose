@@ -43,7 +43,7 @@ func newHealthdReloadCommand() *cli.Command {
 				return errLogged.Wrap(err)
 			}
 
-			if err := healthdReload(hc, h); err != nil {
+			if err := healthdReload(ctx, hc, h); err != nil {
 				hc.LogError("Reloading healthd", "error", err)
 				return errLogged.Wrap(err)
 			}

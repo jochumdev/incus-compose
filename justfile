@@ -32,7 +32,7 @@ test folder="./..." *args: lint
     export DATE=`date +%Y%m%d-%H%M%S`; \
       gotestsum --hide-summary=skipped --format testname --jsonfile=test/logs/${DATE}.json --packages={{ folder }} \
         --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num 10 --jsonfile test/logs/${DATE}.json'" \
-        -- -parallel {{ v_test_procs }} -timeout 20m -covermode atomic -coverprofile test/logs/${DATE}-cover.out -v "${@:2}"; \
+        -- -race -parallel {{ v_test_procs }} -timeout 20m -covermode atomic -coverprofile test/logs/${DATE}-cover.out -v "${@:2}"; \
 
 # Run local unit-tests, incus-facing tests are skipped.
 [env("INCUS_COMPOSE_TEST_LOCAL", "1")]
@@ -84,7 +84,12 @@ test-log pattern="" test="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    log=$(ls -t test/logs/*.json 2>/dev/null | head -1)
+    log=""
+    for candidate in test/logs/*.json; do
+      [[ -f "${candidate}" ]] || continue
+      [[ -z "${log}" || "${candidate}" -nt "${log}" ]] && log="${candidate}"
+    done
+
     if [[ -z "${log}" ]]; then
       echo "no test log yet: run just test first" >&2
       exit 1
@@ -98,22 +103,26 @@ test-log pattern="" test="":
       select="${select} | select(.Test != null and (.Test | startswith(\"{{ test }}\")))"
     fi
 
+    set +e
     if [[ -z "{{ pattern }}" ]]; then
       jq -r "${select} | .Output | rtrimstr(\"\n\")" "${log}"
-      exit 0
+    else
+      jq -r "${select} | .Output | rtrimstr(\"\n\")" "${log}" | grep -E "{{ pattern }}"
     fi
-
-    set +e
-    jq -r "${select} | .Output | rtrimstr(\"\n\")" "${log}" | grep -E "{{ pattern }}"
     status=$?
     set -e
 
-    # 1 is grep finding nothing, 141 a closed pipe (`| head`).
-    case "${status}" in
-      0|141) ;;
-      1) echo "nothing matching '{{ pattern }}'" >&2 ;;
-      *) exit "${status}" ;;
-    esac
+    # 141 is a closed pipe, which is what `just test-log | head` looks like.
+    if [[ "${status}" == 141 ]]; then
+      exit 0
+    fi
+
+    if [[ "${status}" == 1 && -n "{{ pattern }}" ]]; then
+      echo "nothing matching '{{ pattern }}'" >&2
+      exit 0
+    fi
+
+    exit "${status}"
 
 [private]
 log-run logfile="" cmd="":
@@ -124,10 +133,12 @@ log-run logfile="" cmd="":
 # Lint all files.
 lint folder="./...":
     shellcheck **/*.sh
+    npx --yes prettier --check .
     golangci-lint run {{ folder }}
 
 # Lint and fix all files. Imports are gopls' job, not this one - see AGENTS.md.
 fix folder="./...":
+    npx --yes prettier --write .
     golangci-lint run --fix {{ folder }}
 
 # Dev install creates your dev environment: `just dev-install [container] [listen] [project] [image]`

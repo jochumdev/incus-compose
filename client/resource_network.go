@@ -10,9 +10,10 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
-	incusClient "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
 )
 
@@ -45,6 +46,13 @@ type NetworkConfig struct {
 	OverrideName string
 }
 
+// NetworkState is what the last fetch read back from Incus.
+type NetworkState struct {
+	// IncusNetwork is nil until the network is ensured.
+	IncusNetwork *incusApi.Network
+	ETag         string
+}
+
 // Network represents an Incus bridge network.
 type Network struct {
 	*BaseResource
@@ -55,17 +63,15 @@ type Network struct {
 	created     bool
 	Config      NetworkConfig
 
+	// mu serializes the actions; two workers may share one resource object.
+	// Nothing the actions call may take it again - it is not reentrant.
+	mu sync.Mutex
+
 	// CNames is a map of cnames indexed by target.
 	CNames map[string][]string
 
-	// conn is this resource's own event-isolated Incus connection, set in
-	// Ensure() (which always runs before any other action) so concurrent
-	// workers never share a *ProtocolIncus. See Client.Connection.
-	conn *incusClient.ProtocolIncus
-
-	// State - nil means not ensured.
-	IncusNetwork *incusApi.Network
-	ETag         string
+	// state is swapped whole, so a reader never sees a half-updated network.
+	state atomic.Pointer[NetworkState]
 }
 
 // GetConfig returns the configuration.
@@ -110,6 +116,9 @@ func newNetwork(c *Client, name string, configGetter Config) (*Network, error) {
 	} else {
 		network.incusName = name
 	}
+
+	// Every accessor dereferences this, so it must never be nil.
+	network.state.Store(&NetworkState{})
 
 	return network, nil
 }
@@ -156,7 +165,18 @@ func (r *Network) IncusName() string {
 
 // IsEnsured returns true if the network state has been fetched from Incus.
 func (r *Network) IsEnsured() bool {
-	return r.IncusNetwork != nil
+	return r.State().IncusNetwork != nil
+}
+
+// State returns the network state as of the last fetch. It is replaced whole,
+// never written into, so the result stays consistent for as long as it is held.
+func (r *Network) State() *NetworkState {
+	return r.state.Load()
+}
+
+// clearState forgets the fetched network.
+func (r *Network) clearState() {
+	r.state.Store(&NetworkState{})
 }
 
 // Created returns true if the network was created during the last Ensure call.
@@ -166,33 +186,31 @@ func (r *Network) Created() bool {
 
 // Ensure retrieves an existing network or creates a new one if args.Create is true.
 func (r *Network) Ensure(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionEnsure, r, options, nil); err != nil {
 		return err
 	}
 
-	// Networks are global, not project-scoped, so this resource caches a
-	// connection scoped to the default project (it must keep working even after
-	// the resource's own project is removed, e.g. the existence check in Delete
-	// during DeleteProject).
-	conn, err := r.client.GlobalConnection()
+	_, err := r.client.GlobalConnection()
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 	}
-	r.conn = conn
 
 	// Try to get existing network.
 	// External networks probe each candidate name in resolution order.
 	if r.Config.External {
 		for _, candidate := range r.candidateNames() {
 			r.incusName = candidate
-			if err = r.get(); err == nil {
+			if err = r.get(ctx); err == nil {
 				break
 			}
 		}
 	} else {
-		err = r.get()
+		err = r.get(ctx)
 	}
 
 	if err == nil {
@@ -217,7 +235,7 @@ func (r *Network) Ensure(ctx context.Context, opts ...Option) error {
 	err = r.create(ctx)
 
 	// A concurrent creator may have won the race; adopt whatever is there.
-	if err != nil && r.get() == nil {
+	if err != nil && r.get(ctx) == nil {
 		err = nil
 	}
 
@@ -226,18 +244,21 @@ func (r *Network) Ensure(ctx context.Context, opts ...Option) error {
 	return err
 }
 
-func (r *Network) get() error {
-	network, eTag, err := r.conn.GetNetwork(r.incusName)
+func (r *Network) get(ctx context.Context) error {
+	conn, err := r.client.GlobalConnection()
 	if err != nil {
-		r.IncusNetwork = nil
-		r.ETag = ""
+		return err
+	}
+
+	network, eTag, err := conn.GetNetwork(ctx, r.incusName)
+	if err != nil {
+		r.clearState()
 		return ErrNotFound.Wrap(err)
 	}
 
-	r.IncusNetwork = network
-	r.ETag = eTag
+	r.state.Store(&NetworkState{IncusNetwork: network, ETag: eTag})
 
-	return err
+	return nil
 }
 
 func (r *Network) create(ctx context.Context) error {
@@ -256,7 +277,12 @@ func (r *Network) create(ctx context.Context) error {
 		},
 	}
 
-	if err := r.conn.CreateNetwork(req); err != nil {
+	conn, err := r.client.GlobalConnection()
+	if err != nil {
+		return err
+	}
+
+	if err := conn.CreateNetwork(ctx, req); err != nil {
 		return fmt.Errorf("creating network %q: %w", r.Name(), err)
 	}
 
@@ -267,12 +293,12 @@ func (r *Network) create(ctx context.Context) error {
 	defer cancel()
 	interval := 100 * time.Millisecond
 	for {
-		nw, eTag, err := r.conn.GetNetwork(r.incusName)
+		nw, eTag, err := conn.GetNetwork(ctx, r.incusName)
 		if err == nil {
 			if nw.Status == incusApi.NetworkStatusCreated || nw.Status == "Created" {
-				r.IncusNetwork = nw
-				r.ETag = eTag
+				r.state.Store(&NetworkState{IncusNetwork: nw, ETag: eTag})
 				r.created = true
+
 				return nil
 			}
 		}
@@ -322,11 +348,13 @@ func networkCreateConfig(extensions map[string]string) (map[string]string, error
 // Delete removes the network from Incus.
 // External networks are never deleted.
 func (r *Network) Delete(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	options := NewOptions(opts...)
 
 	if err := r.client.hookBefore(ctx, ActionDelete, r, options, nil); err != nil {
-		r.IncusNetwork = nil
-		r.ETag = ""
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return err
@@ -339,22 +367,25 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 
 	if r.Config.External {
 		// External networks are not managed - don't delete them
-		r.IncusNetwork = nil
-		r.ETag = ""
+		r.clearState()
 
 		r.client.resources.Remove(r)
 		return r.client.hookAfter(ctx, ActionDelete, r, options, nil)
 	}
 
-	if err := r.get(); err != nil {
+	if err := r.get(ctx); err != nil {
 		// Already gone server side
 		r.client.resources.Remove(r)
 		return r.client.hookAfter(ctx, ActionDelete, r, options, ErrNotFound.Wrap(err))
 	}
 
-	err := r.conn.DeleteNetwork(r.incusName)
-	r.IncusNetwork = nil
-	r.ETag = ""
+	conn, err := r.client.GlobalConnection()
+	if err != nil {
+		return err
+	}
+
+	err = conn.DeleteNetwork(ctx, r.incusName)
+	r.clearState()
 
 	r.client.resources.Remove(r)
 	return r.client.hookAfter(ctx, ActionDelete, r, options, err)
@@ -364,12 +395,17 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 // ownedServices with newIPs (preserving all other records), and writes back.
 // Setting raw.dnsmasq disables AppArmor for the dnsmasq process (not containers).
 // The update is idempotent: if the resulting config is unchanged, dnsmasq is not restarted.
-func (r *Network) updateDNSAliases(ownedServices []string, newIPs map[string][]string) error {
+func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, newIPs map[string][]string) error {
 	if !r.IsEnsured() {
 		return nil
 	}
 
-	net, etag, err := r.conn.GetNetwork(r.incusName)
+	conn, err := r.client.GlobalConnection()
+	if err != nil {
+		return err
+	}
+
+	net, etag, err := conn.GetNetwork(ctx, r.incusName)
 	if err != nil {
 		return fmt.Errorf("reading network %q: %w", r.Name(), err)
 	}
@@ -451,7 +487,7 @@ func (r *Network) updateDNSAliases(ownedServices []string, newIPs map[string][]s
 		put.Config["raw.dnsmasq"] = raw
 	}
 
-	if err := r.conn.UpdateNetwork(r.incusName, put, etag); err != nil {
+	if err := conn.UpdateNetwork(ctx, r.incusName, put, etag); err != nil {
 		return fmt.Errorf("updating dnsmasq records for network %q: %w", r.Name(), err)
 	}
 

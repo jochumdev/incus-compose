@@ -28,7 +28,7 @@ func ensuredLockTestVolume(t *testing.T, c *Client, name string) *StorageVolume 
 func lockTestSFTP(t *testing.T, vol *StorageVolume) *sftp.Client {
 	t.Helper()
 
-	sc, err := vol.SFTP()
+	sc, err := vol.SFTP(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sc.Close() })
 	return sc
@@ -44,7 +44,7 @@ func TestStorageVolumeLock_NotEnsured(t *testing.T) {
 	vol, ok := r.(*StorageVolume)
 	require.True(t, ok)
 
-	_, err = vol.SFTP()
+	_, err = vol.SFTP(t.Context())
 	require.ErrorIs(t, err, ErrNotEnsured)
 
 	_, err = vol.Lock(t.Context(), nil, "test.lock", 0)
@@ -168,7 +168,7 @@ func TestStorageVolumeLock_ConcurrentDistinctLocks(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			sc, err := vol.SFTP()
+			sc, err := vol.SFTP(t.Context())
 			if err != nil {
 				errs[i] = err
 				return

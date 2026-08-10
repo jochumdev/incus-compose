@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // ----------------------------------------------------------------------------
@@ -367,4 +369,15 @@ func TestError_MethodsDoNotMutateSentinel(t *testing.T) {
 	// Original should be unchanged
 	assert.Equal(t, originalMsg, original.Error())
 	assert.Nil(t, errors.Unwrap(original))
+}
+
+// retryBusy stands on this: iclient's sentinel must survive ErrOperation.Wrap.
+func TestError_Wrap_PreservesForeignSentinel(t *testing.T) {
+	busy := fmt.Errorf("%w: operation 1234: Instance is busy", iclient.ErrInstanceBusy)
+
+	wrapped := ErrOperation.Wrap(busy)
+
+	assert.True(t, errors.Is(wrapped, iclient.ErrInstanceBusy), "the sentinel must survive Wrap")
+	assert.True(t, errors.Is(wrapped, ErrOperation), "and so must our own")
+	assert.False(t, errors.Is(wrapped, ErrNotFound))
 }

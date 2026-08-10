@@ -14,9 +14,10 @@ import (
 	"slices"
 	"sync"
 
-	incusClient "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -30,15 +31,18 @@ type Client struct {
 	incusProject string
 	created      bool
 
-	incus      *incusClient.ProtocolIncus
+	incus      *iclient.Connection
 	imageCache *Client
 	logger     *slog.Logger
+
+	// healthdMu guards the caches below; every instance start asks for them.
+	healthdMu sync.Mutex
 
 	// Cache for FindHealthd
 	healthd string
 
 	// Cache for healthdTarget, which may point at another project.
-	healthdConn *incusClient.ProtocolIncus
+	healthdConn *iclient.Connection
 	healthdName string
 
 	// Resource storage
@@ -56,8 +60,7 @@ type Client struct {
 	// hookAfter is called after any action
 	hookAfter func(ctx context.Context, action Action, r Resource, args Options, err error) error
 
-	hookOperation       func(ctx context.Context, action Action, r Resource, args Options, op incusClient.Operation, err error) error
-	hookRemoteOperation func(ctx context.Context, action Action, r Resource, args Options, op incusClient.RemoteOperation, err error) error
+	hookOperation func(ctx context.Context, action Action, r Resource, args Options, op <-chan incusApi.Operation, err error) error
 
 	// hookConnected is called once when the client is ready, before any action.
 	hookConnected func(err error) error
@@ -70,12 +73,6 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool) (*
 	config := c.config
 	config.DescriptionFormat = fmt.Sprintf(config.DescriptionFormat, name) + ":%s"
 
-	incus := c.incus.UseProject(incusName)
-	pIncus, ok := incus.(*incusClient.ProtocolIncus)
-	if !ok {
-		return nil, ErrConnectionFailed.WithText("cannot cast project-scoped client to ProtocolIncus")
-	}
-
 	cp := &Client{
 		ctx:          c.ctx,
 		globalClient: c,
@@ -83,15 +80,14 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool) (*
 		project:      name,
 		incusProject: incusName,
 		created:      created,
-		incus:        pIncus,
+		incus:        c.incus.WithProject(incusName),
 		imageCache:   c.imageCache,
 		logger:       c.logger.With("project", name),
 
 		hookBefore: c.hookBefore,
 		hookAfter:  c.hookAfter,
 
-		hookOperation:       c.hookOperation,
-		hookRemoteOperation: c.hookRemoteOperation,
+		hookOperation: c.hookOperation,
 
 		hookConnected: func(err error) error { return err },
 		hookDone:      func(err error) error { return err },
@@ -128,6 +124,10 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool) (*
 // Clone returns a copy of the client, where you can add independent hooks and resources.
 // Resources are NOT shared.
 func (c *Client) Clone() *Client {
+	c.healthdMu.Lock()
+	healthd, healthdConn, healthdName := c.healthd, c.healthdConn, c.healthdName
+	c.healthdMu.Unlock()
+
 	clone := &Client{
 		ctx:          c.ctx,
 		globalClient: c.globalClient,
@@ -142,15 +142,14 @@ func (c *Client) Clone() *Client {
 		hookBefore: c.hookBefore,
 		hookAfter:  c.hookAfter,
 
-		hookOperation:       c.hookOperation,
-		hookRemoteOperation: c.hookRemoteOperation,
+		hookOperation: c.hookOperation,
 
 		hookConnected: c.hookConnected,
 		hookDone:      c.hookDone,
 
-		healthd:     c.healthd,
-		healthdConn: c.healthdConn,
-		healthdName: c.healthdName,
+		healthd:     healthd,
+		healthdConn: healthdConn,
+		healthdName: healthdName,
 	}
 
 	c.clonesMu.Lock()
@@ -179,13 +178,8 @@ func (c *Client) Global() *GlobalClient {
 }
 
 // GlobalConnection returns the global incus connection (with the default project).
-func (c *Client) GlobalConnection() (*incusClient.ProtocolIncus, error) {
-	incus, ok := c.incus.UseProject("default").(*incusClient.ProtocolIncus)
-	if !ok {
-		return nil, ErrConnectionFailed.WithText("cannot cast project-scoped client to ProtocolIncus")
-	}
-
-	return incus, nil
+func (c *Client) GlobalConnection() (*iclient.Connection, error) {
+	return c.globalClient.Connection()
 }
 
 // Project returns the user-facing project name.
@@ -243,17 +237,13 @@ func (c *Client) WarnError(f func() error, message string) {
 	}
 }
 
-// Connection returns a fresh, event-isolated project-scoped client.
-//
-// Each call returns its own *ProtocolIncus (with its own event-listener state)
-// that shares the underlying HTTP transp^ort, which is safe for concurrent use.
-func (c *Client) Connection() (*incusClient.ProtocolIncus, error) {
-	incus, ok := c.incus.UseProject(c.incusProject).(*incusClient.ProtocolIncus)
-	if !ok {
-		return nil, ErrConnectionFailed.WithText("cannot cast project-scoped client to ProtocolIncus")
+// Connection returns the project-scoped Incus connection, safe for concurrent use.
+func (c *Client) Connection() (*iclient.Connection, error) {
+	if c.incus == nil {
+		return nil, ErrDisconnected
 	}
 
-	return incus, nil
+	return c.incus, nil
 }
 
 // Config returns a copy of the clients config.
@@ -409,23 +399,30 @@ func (c *Client) Done() error {
 // FindHealthd returns the name of the healthd instance in the project,
 // identified by user.healthcheck.daemon=true.
 func (c *Client) FindHealthd() (string, error) {
-	if c.healthd != "" {
-		return c.healthd, nil
+	c.healthdMu.Lock()
+	cached := c.healthd
+	c.healthdMu.Unlock()
+
+	if cached != "" {
+		return cached, nil
 	}
 
 	if c.incus == nil {
 		return "", ErrNotFound.WithText(": within FindHealthd")
 	}
 
-	instances, err := c.incus.GetInstances("")
+	instances, err := c.incus.GetInstances(c.ctx, nil)
 	if err != nil {
 		return "", ErrUnknown.Wrap(fmt.Errorf("listing instances: %w", err))
 	}
 
 	for _, inst := range instances {
-		if inst.Config[HealthKeyPrefix+"daemon"] == "true" {
+		if util.IsTrue(inst.Config[HealthKeyPrefix+"daemon"]) {
+			c.healthdMu.Lock()
 			c.healthd = inst.Name
-			return c.healthd, nil
+			c.healthdMu.Unlock()
+
+			return inst.Name, nil
 		}
 	}
 
@@ -440,7 +437,7 @@ func (c *Client) HealthdRunning() (bool, error) {
 		return false, err
 	}
 
-	state, _, err := conn.GetInstanceState(name)
+	state, _, err := conn.GetInstanceState(c.ctx, name)
 	if err != nil {
 		return false, fmt.Errorf("getting the healthd %q instance state: %w", name, err)
 	}
@@ -450,9 +447,13 @@ func (c *Client) HealthdRunning() (bool, error) {
 
 // healthdTarget locates the daemon watching this project. Every instance start
 // asks, so the answer is cached; it cannot change while a command runs.
-func (c *Client) healthdTarget() (*incusClient.ProtocolIncus, string, error) {
-	if c.healthdConn != nil {
-		return c.healthdConn, c.healthdName, nil
+func (c *Client) healthdTarget() (*iclient.Connection, string, error) {
+	c.healthdMu.Lock()
+	cachedConn, cachedName := c.healthdConn, c.healthdName
+	c.healthdMu.Unlock()
+
+	if cachedConn != nil {
+		return cachedConn, cachedName, nil
 	}
 
 	if c.incus == nil {
@@ -466,25 +467,22 @@ func (c *Client) healthdTarget() (*incusClient.ProtocolIncus, string, error) {
 
 	conn := c.incus
 	if cfg[shared.HealthScopeKey] == shared.HealthScopeGlobal {
-		global, ok := c.globalClient.incus.UseProject(c.config.SystemProject).(*incusClient.ProtocolIncus)
-		if !ok {
-			return nil, "", ErrConnectionFailed.WithText("cannot cast the healthd project client to ProtocolIncus")
-		}
-
-		conn = global
+		conn = c.globalClient.incus.WithProject(c.config.SystemProject)
 	}
 
-	instances, err := conn.GetInstances("")
+	instances, err := conn.GetInstances(c.ctx, nil)
 	if err != nil {
 		return nil, "", ErrUnknown.Wrap(fmt.Errorf("listing instances: %w", err))
 	}
 
 	for _, inst := range instances {
-		if inst.Config[HealthKeyPrefix+"daemon"] != "true" {
+		if !util.IsTrue(inst.Config[HealthKeyPrefix+"daemon"]) {
 			continue
 		}
 
+		c.healthdMu.Lock()
 		c.healthdConn, c.healthdName = conn, inst.Name
+		c.healthdMu.Unlock()
 
 		return conn, inst.Name, nil
 	}
@@ -498,70 +496,8 @@ func (c *Client) InstanceExists(name string) (bool, error) {
 		return false, nil
 	}
 
-	_, _, err := c.incus.GetInstance(SanitizeIncusName(name, -1))
+	_, _, err := c.incus.GetInstance(c.ctx, SanitizeIncusName(name, -1), nil)
 	return err == nil, nil
-}
-
-// InstanceIPs fetches the global IPv4 and IPv6 addresses of a named
-// instance directly from Incus, without going through an Instance resource.
-func (c *Client) InstanceIPs(incusName string) (ips []InterfaceIPs, err error) {
-	state, _, err := c.incus.GetInstanceState(incusName)
-	if err != nil {
-		return nil, err
-	}
-
-	if state.Status != "Running" {
-		return nil, ErrNotRunning.WithText("in InstanceIPs")
-	}
-
-	result := []InterfaceIPs{}
-
-	for sDevice, sNetwork := range state.Network {
-		if sNetwork.Type == "loopback" || sNetwork.Addresses == nil {
-			continue
-		}
-
-		res, err := c.Resource(KindInstance, incusName, &InstanceConfig{})
-		if err != nil {
-			return nil, err
-		}
-
-		inst, ok := res.(*Instance)
-		if !ok || !inst.IsEnsured() {
-			continue
-		}
-
-		devices, ok := inst.IncusInstance.Devices[sDevice]
-		if !ok {
-			return result, nil
-		}
-
-		network := devices["network"]
-
-		iPv4s := []string{}
-		iPv6s := []string{}
-		for _, addr := range sNetwork.Addresses {
-			if addr.Scope == "global" && addr.Family == "inet" && addr.Address != "" {
-				iPv4s = append(iPv4s, addr.Address)
-			}
-			if addr.Scope == "global" && addr.Family == "inet6" && addr.Address != "" {
-				iPv6s = append(iPv6s, addr.Address)
-			}
-		}
-
-		if len(iPv4s) < 1 && len(iPv6s) < 1 {
-			// No ip found
-			continue
-		}
-
-		result = append(result, InterfaceIPs{Network: network, IPv4s: iPv4s, IPv6s: iPv6s})
-	}
-
-	if len(result) < 1 {
-		return nil, ErrNotFound.WithText("no Networks/IPs found")
-	}
-
-	return result, nil
 }
 
 // ResolveImageFingerprint returns the first alias name for the given fingerprint,
@@ -570,7 +506,7 @@ func (c *Client) ResolveImageFingerprint(fingerprint string) string {
 	if fingerprint == "" {
 		return ""
 	}
-	img, _, err := c.globalClient.incus.GetImage(fingerprint)
+	img, _, err := c.globalClient.incus.GetImage(c.ctx, fingerprint, nil)
 	if err == nil && img != nil && len(img.Aliases) > 0 {
 		return img.Aliases[0].Name
 	}

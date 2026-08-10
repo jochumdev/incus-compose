@@ -453,7 +453,7 @@ func dnsServiceIPs(t *testing.T, c *client.Client, networks []string, service st
 
 	var ips []string
 	for _, name := range networks {
-		net, _, err := conn.GetNetwork(name)
+		net, _, err := conn.GetNetwork(t.Context(), name)
 		require.NoError(t, err, "for network %q", name)
 		netIps, _, _ := client.DNSmasqParse(net.Config["raw.dnsmasq"])
 		ips = append(ips, netIps[service]...)
@@ -547,7 +547,7 @@ func TestDNSCnameAliasAcrossProjects(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	net, _, err := conn.GetNetwork(networkName)
+	net, _, err := conn.GetNetwork(ctx, networkName)
 	require.NoError(t, err)
 
 	ipv4Regex := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`)

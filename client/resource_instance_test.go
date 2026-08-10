@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/shared"
@@ -159,19 +158,10 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 	require.True(t, ok)
 
 	// Stand in for ic-healthd reporting, and for a key nobody declared.
-	info, err := conn.GetConnectionInfo()
-	require.NoError(t, err)
-	_, _, err = conn.RawQuery("PATCH", incusApi.NewURL().
-		Path("1.0", "instances", inst.IncusName()).
-		Project(info.Project).
-		Target(info.Target).
-		String(), instanceConfigPatch{
-		Config: map[string]string{
-			HealthStatusKey: HealthStatusHealthy,
-			"user.theirs":   "set-by-hand",
-		},
-	}, "")
-	require.NoError(t, err)
+	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(), map[string]string{
+		HealthStatusKey: HealthStatusHealthy,
+		"user.theirs":   "set-by-hand",
+	}))
 
 	// Declare one new key, and a different value for one already carried.
 	inst.Config.Extensions["user.added.later"] = "true"
@@ -179,7 +169,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 
 	require.NoError(t, RunAction(ctx, inst, ActionEnsure))
 
-	got, _, err := conn.GetInstance(inst.IncusName())
+	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "true", got.Config["user.added.later"], "a declared key the instance lacks must be added")
@@ -224,26 +214,18 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	before, _, err := conn.GetInstance(inst.IncusName())
+	before, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, before.Description, "fixture needs a description to detect wiping")
 	require.NotEmpty(t, before.Devices, "fixture needs devices to detect wiping")
 
 	// Stand in for ic-healthd writing its own key.
-	info, err := conn.GetConnectionInfo()
-	require.NoError(t, err)
-	_, _, err = conn.RawQuery("PATCH", incusApi.NewURL().
-		Path("1.0", "instances", inst.IncusName()).
-		Project(info.Project).
-		Target(info.Target).
-		String(), instanceConfigPatch{
-		Config: map[string]string{HealthStatusKey: HealthStatusHealthy},
-	}, "")
-	require.NoError(t, err)
+	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(),
+		map[string]string{HealthStatusKey: HealthStatusHealthy}))
 
 	require.NoError(t, inst.SetHealthCheckingStopped(ctx, false))
 
-	got, _, err := conn.GetInstance(inst.IncusName())
+	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "false", got.Config[HealthStoppedKey], "the key we asked for must be written")
@@ -287,20 +269,12 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	info, err := conn.GetConnectionInfo()
-	require.NoError(t, err)
-
 	// Stand in for ic-healthd reporting a verdict, once the wait below is parked.
 	go func() {
 		time.Sleep(2 * time.Second)
 
-		_, _, _ = conn.RawQuery("PATCH", incusApi.NewURL().
-			Path("1.0", "instances", inst.IncusName()).
-			Project(info.Project).
-			Target(info.Target).
-			String(), instanceConfigPatch{
-			Config: map[string]string{HealthStatusKey: HealthStatusHealthy},
-		}, "")
+		_ = conn.PatchInstanceConfig(ctx, inst.IncusName(),
+			map[string]string{HealthStatusKey: HealthStatusHealthy})
 	}()
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -338,26 +312,18 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	got, _, err := conn.GetInstance(inst.IncusName())
+	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Empty(t, got.Config[HealthStatusKey],
 		"with a daemon to report, the instance is created without a status of its own")
 
 	// Stand in for ic-healthd having reported on it.
-	info, err := conn.GetConnectionInfo()
-	require.NoError(t, err)
-	_, _, err = conn.RawQuery("PATCH", incusApi.NewURL().
-		Path("1.0", "instances", inst.IncusName()).
-		Project(info.Project).
-		Target(info.Target).
-		String(), instanceConfigPatch{
-		Config: map[string]string{HealthStatusKey: HealthStatusHealthy},
-	}, "")
-	require.NoError(t, err)
+	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(),
+		map[string]string{HealthStatusKey: HealthStatusHealthy}))
 
 	require.NoError(t, inst.SetHealthCheckingStopped(ctx, true))
 
-	got, _, err = conn.GetInstance(inst.IncusName())
+	got, _, err = conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Equal(t, "true", got.Config[HealthStoppedKey], "the marker is what a stop writes")
 	require.Equal(t, HealthStatusHealthy, got.Config[HealthStatusKey],
@@ -365,7 +331,7 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 
 	require.NoError(t, inst.SetHealthCheckingStopped(ctx, false))
 
-	got, _, err = conn.GetInstance(inst.IncusName())
+	got, _, err = conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Equal(t, "false", got.Config[HealthStoppedKey])
 	require.Equal(t, HealthStatusHealthy, got.Config[HealthStatusKey])
@@ -399,7 +365,7 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	got, _, err := conn.GetInstance(inst.IncusName())
+	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Equal(t, shared.HealthStatusUnknown, got.Config[HealthStatusKey])
 	require.Empty(t, got.Config[HealthStoppedKey], "there is no daemon to hold back")

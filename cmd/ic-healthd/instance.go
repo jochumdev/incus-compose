@@ -9,47 +9,28 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/avast/retry-go/v5"
-	incus "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/util"
 	"github.com/panjf2000/ants/v2"
 
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
 )
 
-func patchInstanceConfig(ctx context.Context, conn incus.InstanceServer, instance string, config map[string]string) error {
+func patchInstanceConfig(ctx context.Context, conn *iclient.Connection, instance string, config map[string]string) error {
 	log := logger(ctx)
 
 	// Bounded because this runs on the Run loop.
 	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
 
-	info, err := conn.GetConnectionInfo()
-	if err != nil {
-		return err
-	}
+	log.Log(ctx, levelTrace, "Updating an instances config", "instance", instance, "patch", config)
 
-	log.Log(ctx, levelTrace, "Updating an instances config", "project", info.Project, "instance", instance, "patch", config)
-
-	path := incusApi.NewURL().
-		Path("1.0", "instances", instance).
-		Project(info.Project).
-		Target(info.Target).
-		String()
-
-	return retryBusy(ctx, func() error {
-		_, _, err := withContext(ctx, func() (struct{}, string, error) {
-			_, _, patchErr := conn.RawQuery("PATCH", path, struct {
-				Config map[string]string `json:"config"`
-			}{Config: config}, "")
-
-			return struct{}{}, "", patchErr
-		})
-
-		return err
+	return retryBusy(ctx, conn, instance, func() error {
+		return conn.PatchInstanceConfig(ctx, instance, config)
 	})
 }
 
@@ -85,20 +66,38 @@ func releasePools(p *pools) {
 // retryBusy runs write again while Incus rejects it for the instance's
 // operation lock. The lock is taken by the driver, so a caller that creates an
 // operation must do its wait inside write.
-func retryBusy(ctx context.Context, write func() error) error {
+//
+// The wait happens after a rejection rather than before every write: the
+// daemon writes a status on each transition, and a lock check in front of all
+// of them would be an extra round trip per instance per transition.
+func retryBusy(ctx context.Context, conn *iclient.Connection, name string, write func() error) error {
 	return retry.New(
 		retry.Context(ctx),
 		retry.Attempts(6),
 		retry.Delay(250*time.Millisecond),
 		retry.LastErrorOnly(true),
 		retry.RetryIf(func(err error) bool {
-			return strings.Contains(err.Error(), "Instance is busy")
+			return errors.Is(err, iclient.ErrInstanceBusy)
 		}),
-	).Do(write)
+	).Do(func() error {
+		err := write()
+		if !errors.Is(err, iclient.ErrInstanceBusy) {
+			return err
+		}
+
+		// Start the next attempt when the instance is free rather than on a
+		// fixed delay that may well land while the lock is still held.
+		waitErr := conn.WaitInstanceBusy(ctx, name)
+		if waitErr != nil {
+			return waitErr
+		}
+
+		return err
+	})
 }
 
 // writeInstanceStatus persists status into the daemon's own instance, when it knows its identity.
-func writeInstanceStatus(ctx context.Context, conn incus.InstanceServer, instance string, status string) error {
+func writeInstanceStatus(ctx context.Context, conn *iclient.Connection, instance string, status string) error {
 	return patchInstanceConfig(ctx, conn, instance, map[string]string{shared.HealthStatusKey: status})
 }
 
@@ -201,15 +200,20 @@ func baseRestartDelay(cfg *instanceConfig) time.Duration {
 	return max(min(cfg.interval*time.Duration(cfg.retries), maxRestartDelay), defaultRestartDelay)
 }
 
-func getInstance(ctx context.Context, conn incus.InstanceServer, name string) (*incusApi.Instance, string, error) {
-	return withContext(ctx, func() (*incusApi.Instance, string, error) {
-		i, etag, err := conn.GetInstance(name)
-		return i, etag, err
-	})
+func getInstance(ctx context.Context, conn *iclient.Connection, name string) (*incusApi.Instance, error) {
+	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+
+	inst, _, err := conn.GetInstance(ctx, name, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &inst.Instance, nil
 }
 
 func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
-	if inst.Config[shared.HealthIgnoreKey] == "true" {
+	if util.IsTrue(inst.Config[shared.HealthIgnoreKey]) {
 		return nil, ErrInstanceIgnored
 	}
 
@@ -218,7 +222,7 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 
 	// Watching is opt-in. One that looks like it wants checking but never
 	// opted in is reported rather than assumed.
-	if inst.Config[shared.HealthEnabledKey] != "true" {
+	if !util.IsTrue(inst.Config[shared.HealthEnabledKey]) {
 		if wantsChecking {
 			return nil, ErrInstanceNotEnabled
 		}
@@ -313,11 +317,11 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 
 // discoverOne re-reads one instance and reports it on its own goroutine, so the
 // loop never blocks on the API call.
-func discoverOne(ctx context.Context, conn incus.InstanceServer, results chan instanceResult, name string) {
+func discoverOne(ctx context.Context, conn *iclient.Connection, results chan instanceResult, name string) {
 	go func() {
 		res := instanceResult{kind: instanceResultDiscovered, name: name}
 
-		inst, _, err := getInstance(ctx, conn, name)
+		inst, err := getInstance(ctx, conn, name)
 		if err != nil {
 			res.err = err
 		} else {
@@ -334,7 +338,7 @@ func discoverOne(ctx context.Context, conn incus.InstanceServer, results chan in
 
 // handleInstanceEvent does what the name says, all operations MUST be non-blocking.
 // goroutines are not allowed to modify instances or its values.
-func handleInstanceEvent(ctx context.Context, conn incus.InstanceServer, instances map[string]*instance, results chan instanceResult, ev instanceEvent) {
+func handleInstanceEvent(ctx context.Context, conn *iclient.Connection, instances map[string]*instance, results chan instanceResult, ev instanceEvent) {
 	log := logger(ctx)
 
 	switch ev.Action {
@@ -399,19 +403,19 @@ func handleInstanceEvent(ctx context.Context, conn incus.InstanceServer, instanc
 }
 
 // instanceRestartAction starts an instance unless it was stopped on purpose, and reports the outcome.
-func instanceRestartAction(ctx context.Context, conn incus.InstanceServer, name string) instanceResult {
+func instanceRestartAction(ctx context.Context, conn *iclient.Connection, name string) instanceResult {
 	res := instanceResult{kind: instanceResultRestarted, name: name}
 
-	inst, _, err := getInstance(ctx, conn, name)
+	inst, err := getInstance(ctx, conn, name)
 	switch {
 	case err != nil:
 		res.err = err
 		return res
-	case inst.Config[shared.HealthStoppedKey] == "true":
+	case util.IsTrue(inst.Config[shared.HealthStoppedKey]):
 		res.err = ErrIntentionallyStopped
 		return res
 	default:
-		state, _, err := conn.GetInstanceState(name)
+		state, _, err := conn.GetInstanceState(ctx, name)
 		if err != nil {
 			res.err = err
 			return res
@@ -424,14 +428,7 @@ func instanceRestartAction(ctx context.Context, conn incus.InstanceServer, name 
 				Force:   true,
 			}
 
-			err := retryBusy(ctx, func() error {
-				op, err := conn.UpdateInstanceState(name, stopReq, "")
-				if err != nil {
-					return err
-				}
-
-				return op.WaitContext(ctx)
-			})
+			err := setInstanceState(ctx, conn, name, stopReq)
 			if err != nil {
 				res.err = err
 				return res
@@ -439,89 +436,81 @@ func instanceRestartAction(ctx context.Context, conn incus.InstanceServer, name 
 		}
 	}
 
-	startReq := incusApi.InstanceStatePut{
+	res.err = setInstanceState(ctx, conn, name, incusApi.InstanceStatePut{
 		Action:  "start",
 		Timeout: -1,
-	}
-
-	res.err = retryBusy(ctx, func() error {
-		op, err := conn.UpdateInstanceState(name, startReq, "")
-		if err != nil {
-			return err
-		}
-
-		return op.WaitContext(ctx)
 	})
 
 	return res
 }
 
-func instanceExec(ctx context.Context, conn incus.InstanceServer, name string, cmd []string) (int, string, string, error) {
-	log := logger(ctx)
+// setInstanceState runs a state change to its end. The wait is inside the
+// retry because Incus reports the instance's operation lock on the operation,
+// not on the request that started it.
+func setInstanceState(ctx context.Context, conn *iclient.Connection, name string, state incusApi.InstanceStatePut) error {
+	return retryBusy(ctx, conn, name, func() error {
+		op, err := conn.UpdateInstanceState(ctx, name, state, "")
+		if err != nil {
+			return err
+		}
 
-	req := incusApi.InstanceExecPost{
-		Command:     cmd,
-		WaitForWS:   true,
-		Interactive: false,
-	}
+		_, err = iclient.WaitOperation(ctx, op)
 
+		return err
+	})
+}
+
+func instanceExec(ctx context.Context, conn *iclient.Connection, name string, cmd []string) (int, string, string, error) {
 	var stdout, stderr bytes.Buffer
-	args := incus.InstanceExecArgs{
-		Stdin:    nil,
-		Stdout:   &stdout,
-		Stderr:   &stderr,
-		DataDone: make(chan bool),
-	}
 
-	// A timed-out call leaves any operation it creates for the server to reap.
-	op, _, err := withContext(ctx, func() (incus.Operation, string, error) {
-		op, err := conn.ExecInstance(name, req, &args)
-		return op, "", err
+	updates, err := conn.ExecInstance(ctx, name, incusApi.InstanceExecPost{Command: cmd}, &iclient.InstanceExecArgs{
+		Stdout: &stdout,
+		Stderr: &stderr,
 	})
 	if err != nil {
 		return -1, "", "", err
 	}
 
-	select {
-	case <-args.DataDone:
-	case <-ctx.Done():
-		// ctx is already done, so give Cancel its own budget to get out.
-		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), apiTimeout)
-		defer cancel()
-
-		_, _, cancelErr := withContext(cancelCtx, func() (struct{}, string, error) {
-			return struct{}{}, "", op.Cancel()
-		})
-		if cancelErr != nil {
-			log.Debug("Canceling exec operation", "instance", name, "error", cancelErr)
-		}
-
-		return -1, "", "", ctx.Err()
-	}
-
-	// WaitContext, not Wait: an operation whose completion never arrives would
-	// block this checker for good, and it is the only caller on its goroutine.
-	err = op.WaitContext(ctx)
+	// The channel closes once the output has drained too, so by here the
+	// buffers hold everything the command wrote.
+	op, err := iclient.WaitOperation(ctx, updates)
 	if err != nil {
+		cancelExec(ctx, conn, name, op)
+
 		return -1, stdout.String(), stderr.String(), err
 	}
 
-	opAPI := op.Get()
-	if exitCode, ok := opAPI.Metadata["return"].(float64); ok {
-		return int(exitCode), stdout.String(), stderr.String(), nil
+	exitCode, ok := op.Metadata["return"].(float64)
+	if !ok {
+		return -1, "", "", nil
 	}
 
-	return -1, "", "", nil
+	return int(exitCode), stdout.String(), stderr.String(), nil
 }
 
-func instanceCheckAction(ctx context.Context, conn incus.InstanceServer, name string, cfg *instanceConfig) instanceResult {
+// cancelExec asks the server to reap an exec the checker gave up on, so the
+// command does not keep running in the instance after its probe timed out.
+func cancelExec(ctx context.Context, conn *iclient.Connection, name string, op incusApi.Operation) {
+	if op.ID == "" || ctx.Err() == nil {
+		return
+	}
+
+	// ctx is already done, so the cancel needs a budget of its own.
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), apiTimeout)
+	defer cancel()
+
+	err := conn.CancelOperation(cancelCtx, op)
+	if err != nil {
+		logger(ctx).Debug("Canceling exec operation", "instance", name, "error", err)
+	}
+}
+
+func instanceCheckAction(ctx context.Context, conn *iclient.Connection, name string, cfg *instanceConfig) instanceResult {
 	log := logger(ctx)
 
 	res := instanceResult{kind: instanceResultChecked, name: name}
 
-	inst, _, err := withContext(ctx, func() (*incusApi.InstanceState, string, error) {
-		return conn.GetInstanceState(name)
-	})
+	inst, _, err := conn.GetInstanceState(ctx, name)
 	if err != nil {
 		log.Debug("Fetching instance status error", "instance", name, "error", err)
 
@@ -570,7 +559,7 @@ func instanceCheckAction(ctx context.Context, conn incus.InstanceServer, name st
 
 // instanceStatusAction writes user.healthcheck.status, the only key the daemon
 // owns on a watched instance.
-func instanceStatusAction(ctx context.Context, conn incus.InstanceServer, name, status string) instanceResult {
+func instanceStatusAction(ctx context.Context, conn *iclient.Connection, name, status string) instanceResult {
 	res := instanceResult{kind: instanceResultStatus, name: name, status: status}
 	res.err = patchInstanceConfig(ctx, conn, name, map[string]string{shared.HealthStatusKey: status})
 
@@ -579,7 +568,7 @@ func instanceStatusAction(ctx context.Context, conn incus.InstanceServer, name, 
 
 // reportStatus writes status when it differs from what the instance last had,
 // so a write only happens on a transition.
-func reportStatus(ctx context.Context, conn incus.InstanceServer, results chan<- instanceResult, inst *instance, status string) {
+func reportStatus(ctx context.Context, conn *iclient.Connection, results chan<- instanceResult, inst *instance, status string) {
 	if status == inst.status {
 		return
 	}
@@ -622,7 +611,7 @@ func checkFailed(inst *instance, now time.Time) string {
 	return shared.HealthStatusUnhealthy
 }
 
-func runInstanceActions(ctx context.Context, conn incus.InstanceServer, pool *pools, instances map[string]*instance, results chan<- instanceResult) time.Time {
+func runInstanceActions(ctx context.Context, conn *iclient.Connection, pool *pools, instances map[string]*instance, results chan<- instanceResult) time.Time {
 	log := logger(ctx)
 
 	var earliest time.Time
@@ -744,7 +733,7 @@ func runInstanceActions(ctx context.Context, conn incus.InstanceServer, pool *po
 
 // handleInstanceResult applies one action's outcome. Like handleInstanceEvent it
 // must not block: the status write it may start runs on its own goroutine.
-func handleInstanceResult(ctx context.Context, conn incus.InstanceServer, instances map[string]*instance, results chan<- instanceResult, res instanceResult) {
+func handleInstanceResult(ctx context.Context, conn *iclient.Connection, instances map[string]*instance, results chan<- instanceResult, res instanceResult) {
 	log := logger(ctx)
 
 	switch res.kind {

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"sync"
 
-	incusClient "github.com/lxc/incus/v7/client"
 	incusApi "github.com/lxc/incus/v7/shared/api"
-	"github.com/lxc/incus/v7/shared/cliconfig"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // SwapWriter is an io.Writer whose destination can be swapped at runtime.
@@ -68,8 +68,8 @@ type ClientConfig struct {
 	// DescriptionFormat is the format string for resource descriptions (default: "incus-compose: %s").
 	DescriptionFormat string
 
-	// ProvidedInstanceServer allows injecting an existing connection (for testing).
-	ProvidedInstanceServer incusClient.InstanceServer
+	// ProvidedConnection allows injecting an existing connection (for testing).
+	ProvidedConnection *iclient.Connection
 
 	// CacheProject is the project name to use as image cache.
 	// If set, the project will be created if it doesn't exist.
@@ -117,17 +117,10 @@ func ClientDescriptionFormat(n string) ClientOption {
 	return func(c *ClientConfig) { c.DescriptionFormat = n }
 }
 
-// ClientProvideConnection injects existing connections (for testing).
-func ClientProvideConnection(instances incusClient.InstanceServer) ClientOption {
+// ClientProvideConnection injects an existing Incus connection.
+func ClientProvideConnection(conn *iclient.Connection) ClientOption {
 	return func(c *ClientConfig) {
-		c.ProvidedInstanceServer = instances
-	}
-}
-
-// ClientProvideInstanceServer injects an existing instance server connection.
-func ClientProvideInstanceServer(server incusClient.InstanceServer) ClientOption {
-	return func(c *ClientConfig) {
-		c.ProvidedInstanceServer = server
+		c.ProvidedConnection = conn
 	}
 }
 
@@ -151,12 +144,20 @@ type GlobalClient struct {
 	stdout    io.Writer
 	stderr    *SwapWriter
 	projects  []*Client
-	cliConfig *cliconfig.Config
+	cliConfig *iclient.Config
 
-	incus      *incusClient.ProtocolIncus
+	// mu guards the connection state below; Connect writes it while workers read it.
+	mu sync.Mutex
+
+	incus      *iclient.Connection
 	imageCache *Client
 	unix       bool
 	connected  bool
+
+	// Read once at connect: GetServer memoizes into the shared *ProtocolIncus,
+	// so calling it per service/network/port both races and re-queries.
+	apiExtensions []string
+	httpsAddress  string
 
 	// Cache for ConnectionIP()
 	connectionIPs []net.IP
@@ -172,8 +173,7 @@ type GlobalClient struct {
 	// outputHandler is called when a resource produces output (e.g., logs).
 	outputHandler func(action Action, r Resource, data []byte)
 
-	hookOperation       func(ctx context.Context, action Action, r Resource, args Options, op incusClient.Operation, err error) error
-	hookRemoteOperation func(ctx context.Context, action Action, r Resource, args Options, op incusClient.RemoteOperation, err error) error
+	hookOperation func(ctx context.Context, action Action, r Resource, args Options, op <-chan incusApi.Operation, err error) error
 }
 
 // New creates a new Client with the provided context and logger.
@@ -193,7 +193,10 @@ func New(ctx context.Context, opts ...ClientOption) *GlobalClient {
 	}
 
 	// Load CLI config by default for image server resolution
-	cliConf, _ := cliconfig.LoadConfig(cliconfig.DefaultConfig().ConfigDir)
+	cliConf, err := iclient.ReadConfig("")
+	if err != nil {
+		cliConf = iclient.ConfigDefaultConfig()
+	}
 
 	c := &GlobalClient{
 		ctx:       ctx,
@@ -221,9 +224,7 @@ func New(ctx context.Context, opts ...ClientOption) *GlobalClient {
 		return ErrUnknown.WithResource(r).Wrap(err)
 	}
 
-	AddWellKnownRegistriesHook(c)
-
-	c.hookOperation = func(ctx context.Context, action Action, r Resource, args Options, op incusClient.Operation, err error) error {
+	c.hookOperation = func(ctx context.Context, action Action, r Resource, args Options, op <-chan incusApi.Operation, err error) error {
 		if err != nil {
 			return err
 		}
@@ -232,43 +233,7 @@ func New(ctx context.Context, opts ...ClientOption) *GlobalClient {
 			return ErrNilPointer
 		}
 
-		if c.progressHandler != nil {
-			_, err := op.AddHandler(func(opAPI incusApi.Operation) {
-				c.reportProgress(action, r, args, opAPI)
-			})
-			if err != nil {
-				return ErrOperation.Wrap(err)
-			}
-		}
-
-		err = errors.Join(err, op.WaitContext(ctx))
-		if err != nil {
-			return ErrOperation.Wrap(err)
-		}
-
-		return nil
-	}
-
-	c.hookRemoteOperation = func(_ context.Context, action Action, r Resource, args Options, op incusClient.RemoteOperation, err error) error {
-		// Note: ctx is accepted for API consistency but RemoteOperation doesn't support WaitContext
-		if err != nil {
-			return err
-		}
-
-		if op == nil {
-			return ErrNilPointer
-		}
-
-		if c.progressHandler != nil {
-			_, err := op.AddHandler(func(opAPI incusApi.Operation) {
-				c.reportProgress(action, r, args, opAPI)
-			})
-			if err != nil {
-				return ErrOperation.Wrap(err)
-			}
-		}
-
-		err = errors.Join(err, op.Wait())
+		_, err = iclient.WaitOperation(ctx, c.watchOperation(ctx, action, r, args, op))
 		if err != nil {
 			return ErrOperation.Wrap(err)
 		}
@@ -279,46 +244,46 @@ func New(ctx context.Context, opts ...ClientOption) *GlobalClient {
 	return c
 }
 
+// watchOperation reports an operation's updates to the progress handler on the way past.
+func (c *GlobalClient) watchOperation(ctx context.Context, action Action, r Resource, args Options, updates <-chan incusApi.Operation) <-chan incusApi.Operation {
+	if c.progressHandler == nil {
+		return updates
+	}
+
+	out := make(chan incusApi.Operation)
+
+	go func() {
+		defer close(out)
+
+		for update := range updates {
+			c.reportProgress(action, r, args, update)
+
+			select {
+			case out <- update:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return out
+}
+
 // NewTestClient creates a new GlobalClient for testing.
 func NewTestClient(ctx context.Context) (*GlobalClient, error) {
-	// Priority: INCUS_REMOTE -> INCUS_COMPOSE_URL -> "local" remote
-	var opts []ClientOption
-
-	// 1. If INCUS_REMOTE is set, use Incus CLI config
-	if remote, ok := os.LookupEnv("INCUS_REMOTE"); ok {
-		slog.DebugContext(ctx, "Connecting", "remote", remote)
-
-		conf, err := cliconfig.LoadConfig("")
-		if err != nil {
-			return nil, ErrConnectionFailed.Wrap(err)
-		}
-
-		server, err := conf.GetInstanceServer(remote)
-		if err != nil {
-			return nil, ErrConnectionFailed.Wrap(err)
-		}
-
-		opts = []ClientOption{
-			ClientProvideConnection(server),
-		}
-	} else {
-		// 3. Fall back to "local" remote
-		slog.DebugContext(ctx, "Connecting", "remote", "local")
-
-		conf, err := cliconfig.LoadConfig("")
-		if err != nil {
-			return nil, ErrConnectionFailed.Wrap(err)
-		}
-
-		server, err := conf.GetInstanceServer("local")
-		if err != nil {
-			return nil, ErrConnectionFailed.Wrap(err)
-		}
-
-		opts = []ClientOption{
-			ClientProvideConnection(server),
-		}
+	remote, ok := os.LookupEnv("INCUS_REMOTE")
+	if !ok {
+		remote = "local"
 	}
+
+	slog.DebugContext(ctx, "Connecting", "remote", remote)
+
+	conn, err := DialRemote("", remote)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := []ClientOption{ClientProvideConnection(conn)}
 
 	pool, ok := os.LookupEnv("INCUS_COMPOSE_STORAGE_POOL")
 	if ok {
@@ -360,35 +325,54 @@ func NewOfflineClient(ctx context.Context, projectName string) *Client {
 	}
 }
 
-// Connect establishes a connection to the Incus server.
-func (c *GlobalClient) Connect() error {
-	if c.config.ProvidedInstanceServer == nil {
-		return errors.New("provide a ProvidedInstanceServer")
+// DialRemote connects to a remote of the Incus CLI configuration at path.
+// An empty path is the default location, an empty remote the default remote.
+func DialRemote(path string, remote string) (*iclient.Connection, error) {
+	config, err := iclient.ReadConfig(path)
+	if err != nil {
+		return nil, ErrConnectionFailed.Wrap(err)
 	}
 
-	info, err := c.config.ProvidedInstanceServer.GetConnectionInfo()
+	info, err := config.RemoteInfos(remote)
+	if err != nil {
+		return nil, ErrConnectionFailed.Wrap(err)
+	}
+
+	conn, err := iclient.NewConnection(info)
+	if err != nil {
+		return nil, ErrConnectionFailed.Wrap(err)
+	}
+
+	return conn, nil
+}
+
+// Connect establishes a connection to the Incus server.
+func (c *GlobalClient) Connect() error {
+	if c.config.ProvidedConnection == nil {
+		return errors.New("provide a ProvidedConnection")
+	}
+
+	// Force "default" project for global client - project-scoped clients are created via EnsureProject.
+	incus := c.config.ProvidedConnection.WithProject("default")
+
+	info, err := incus.GetConnectionInfo(c.ctx)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrConnectionFailed, err)
 	}
 
+	c.mu.Lock()
 	c.config.URL = info.URL
 	c.unix = info.SocketPath != ""
-
-	// Force "default" project for global client - project-scoped clients are created via EnsureProject.
-	pIncus, ok := c.config.ProvidedInstanceServer.UseProject("default").(*incusClient.ProtocolIncus)
-	if !ok {
-		return fmt.Errorf("%w: cannot cast to ProtocolIncus", ErrConnectionFailed)
-	}
-
-	c.incus = pIncus
+	c.incus = incus
 	c.connected = true
+	c.mu.Unlock()
 
 	c.logger.Debug("Connected", "url", c.config.URL)
 
 	// Image caching copies images between Incus projects using pull mode, which
 	// needs the server reachable over the network. Fail early with a clear
 	// message instead of a cryptic copy error later.
-	server, _, err := c.incus.GetServer()
+	server, _, err := c.incus.GetServer(c.ctx)
 	if err != nil {
 		return ErrConnectionFailed.Wrap(err)
 	}
@@ -396,6 +380,11 @@ func (c *GlobalClient) Connect() error {
 	if server.Config["core.https_address"] == "" {
 		return ErrServerNotListening
 	}
+
+	c.mu.Lock()
+	c.apiExtensions = server.APIExtensions
+	c.httpsAddress = server.Config["core.https_address"]
+	c.mu.Unlock()
 
 	if c.config.DefaultStoragePool == "detect" {
 		if err := c.detectStoragePool(); err != nil {
@@ -406,25 +395,22 @@ func (c *GlobalClient) Connect() error {
 	return c.setupImageCache()
 }
 
-// Connection returns a fresh, event-isolated connection scoped to the default
-// project.
-//
-// Like Client.Connection, each call returns its own *ProtocolIncus (with its
-// own event-listener state) sharing the underlying HTTP transport, so
-// concurrent workers never race on the library's skipEvents field.
-func (c *GlobalClient) Connection() (*incusClient.ProtocolIncus, error) {
-	incus, ok := c.incus.UseProject("default").(*incusClient.ProtocolIncus)
-	if !ok {
-		return nil, ErrConnectionFailed.WithText("cannot cast global client to ProtocolIncus")
+// Connection returns the connection scoped to the default project, safe for concurrent use.
+func (c *GlobalClient) Connection() (*iclient.Connection, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.connected {
+		return nil, ErrDisconnected
 	}
 
-	return incus, nil
+	return c.incus, nil
 }
 
 // detectStoragePool prefers the storage pool used by the default profile's
 // root disk device, falling back to the first storage pool on the server.
 func (c *GlobalClient) detectStoragePool() error {
-	profile, _, err := c.incus.GetProfile("default")
+	profile, _, err := c.incus.GetProfile(c.ctx, "default")
 	if err == nil {
 		for _, device := range profile.Devices {
 			if device["type"] == "disk" && device["path"] == "/" && device["pool"] != "" {
@@ -434,7 +420,7 @@ func (c *GlobalClient) detectStoragePool() error {
 		}
 	}
 
-	names, err := c.incus.GetStoragePoolNames()
+	names, err := c.incus.GetStoragePoolNames(c.ctx)
 	if err != nil {
 		return fmt.Errorf("detecting storage pool: %w", err)
 	}
@@ -511,23 +497,29 @@ func (c *GlobalClient) IsDebugging() bool {
 
 // IsConnected returns true if the client is connected.
 func (c *GlobalClient) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return c.connected
 }
 
 // IsRemote returns true if connected via network (not unix socket).
 func (c *GlobalClient) IsRemote() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return !c.unix
 }
 
 // CliConfig returns the CLI config for image server resolution.
-func (c *GlobalClient) CliConfig() *cliconfig.Config {
+func (c *GlobalClient) CliConfig() *iclient.Config {
 	return c.cliConfig
 }
 
 func (c *GlobalClient) getProject(name string) (*Client, error) {
 	incusName := SanitizeProjectName(name)
 
-	_, _, err := c.incus.GetProject(incusName)
+	_, _, err := c.incus.GetProject(c.ctx, incusName)
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +563,7 @@ func EnsureProjectWithSkipHealthd() EnsureProjectOption {
 func (c *GlobalClient) ProjectConfig(name string) (map[string]string, error) {
 	incusName := SanitizeProjectName(name)
 
-	project, _, err := c.incus.GetProject(incusName)
+	project, _, err := c.incus.GetProject(c.ctx, incusName)
 	if incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 		return map[string]string{}, nil
 	}
@@ -585,7 +577,7 @@ func (c *GlobalClient) ProjectConfig(name string) (map[string]string, error) {
 // ProjectsWithConfig returns the names of the Incus projects carrying key set
 // to value.
 func (c *GlobalClient) ProjectsWithConfig(key, value string) ([]string, error) {
-	projects, err := c.incus.GetProjects()
+	projects, err := c.incus.GetProjects(c.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)
 	}
@@ -608,7 +600,7 @@ func (c *GlobalClient) AddMissingProjectConfig(name string, config map[string]st
 
 	incusName := SanitizeProjectName(name)
 
-	project, etag, err := c.incus.GetProject(incusName)
+	project, etag, err := c.incus.GetProject(c.ctx, incusName)
 	if err != nil {
 		return fmt.Errorf("reading project %s: %w", incusName, err)
 	}
@@ -637,7 +629,7 @@ func (c *GlobalClient) AddMissingProjectConfig(name string, config map[string]st
 	slices.Sort(missing)
 	c.logger.DebugContext(c.ctx, "Adding missing project config", "name", name, "incus_name", incusName, "keys", missing)
 
-	err = c.incus.UpdateProject(incusName, writable, etag)
+	err = c.incus.UpdateProject(c.ctx, incusName, writable, etag)
 	if err != nil {
 		return fmt.Errorf("updating project %s: %w", incusName, err)
 	}
@@ -655,7 +647,7 @@ func (c *GlobalClient) createProject(name string, config map[string]string) (*Cl
 	}
 
 	// Create project
-	err := c.incus.CreateProject(incusApi.ProjectsPost{
+	err := c.incus.CreateProject(c.ctx, incusApi.ProjectsPost{
 		Name: incusName,
 		ProjectPut: incusApi.ProjectPut{
 			Description: fmt.Sprintf(c.config.DescriptionFormat, name),
@@ -673,7 +665,7 @@ func (c *GlobalClient) createProject(name string, config map[string]string) (*Cl
 // EnsureProject ensures a project exists and returns a Client for it.
 // Options control whether the project is created if it doesn't exist and what config to apply.
 func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (*Client, error) {
-	if !c.connected {
+	if !c.IsConnected() {
 		return nil, ErrDisconnected
 	}
 
@@ -709,7 +701,7 @@ func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (
 
 // DeleteProject deletes a project and removes it from the cache.
 func (c *GlobalClient) DeleteProject(name string, force bool) error {
-	if !c.connected {
+	if !c.IsConnected() {
 		return ErrDisconnected
 	}
 
@@ -717,12 +709,7 @@ func (c *GlobalClient) DeleteProject(name string, force bool) error {
 
 	// c.logger.DebugContext(c.Ctx, "Deleting project", "name", name, "incus_name", incusName)
 
-	var err error
-	if force {
-		err = c.incus.DeleteProjectForce(incusName)
-	} else {
-		err = c.incus.DeleteProject(incusName)
-	}
+	err := c.incus.DeleteProject(c.ctx, incusName, &iclient.DeleteProjectArgs{Force: force})
 	if err != nil {
 		return err
 	}
@@ -878,7 +865,7 @@ func (c *GlobalClient) SetProgressHandler(handler func(action Action, r Resource
 // The addresses are returned without CIDR notation.
 // Addresses for which the network config key is absent or set to "none" are omitted.
 func (c *GlobalClient) NetworkBridgeIPs(networkName string) (ipv4 []string, ipv6 []string, err error) {
-	network, _, err := c.incus.GetNetwork(networkName)
+	network, _, err := c.incus.GetNetwork(c.ctx, networkName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting network %s: %w", networkName, err)
 	}
@@ -989,33 +976,24 @@ func (c *GlobalClient) SameHost() error {
 
 // HTTPSAddress returns the core.https_address of the incus server.
 func (c *GlobalClient) HTTPSAddress() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.connected {
 		return "", ErrDisconnected
 	}
 
-	server, _, err := c.incus.GetServer()
-	if err != nil {
-		return "", ErrConnectionFailed.Wrap(err)
+	if c.httpsAddress == "" {
+		return "", NewError("core.https_address is not set on the server")
 	}
 
-	a, ok := server.Config["core.https_address"]
-	if ok && a != "" {
-		return a, nil
-	}
-
-	return "", NewError("core.https_address is not set on the server")
+	return c.httpsAddress, nil
 }
 
 // HasExtension returns whether the server has the given extension.
 func (c *GlobalClient) HasExtension(ext string) bool {
-	if !c.connected {
-		return false
-	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	server, _, err := c.incus.GetServer()
-	if err != nil {
-		return false
-	}
-
-	return slices.Contains(server.APIExtensions, ext)
+	return slices.Contains(c.apiExtensions, ext)
 }

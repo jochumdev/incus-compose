@@ -9,6 +9,68 @@ Version numbering moved from `0.0.1` to `1.0.0` at beta11 (1.0.0 is the intended
 final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced form.
 
+## [Unreleased]
+
+### Changed
+
+- **library**: the Incus API is reached through `iclient` instead of
+  `github.com/lxc/incus/v7/client`, which cannot be used from several goroutines
+  at once. `Client.Connection`, `Client.GlobalConnection` and
+  `GlobalClient.Connection` now hand back an `*iclient.Connection`, which is safe
+  to share; `GlobalClient.CliConfig` returns an `*iclient.Config`;
+  `ClientProvideConnection` and `ProfileConfig.SourceServer` take the new type;
+  `Instance.PushFiles` takes a context. `ClientProvideInstanceServer` is removed
+  as a duplicate of `ClientProvideConnection`, and `AddWellKnownRegistriesHook`
+  because a well-known registry is now resolved where the image source is,
+  without writing to the shared CLI configuration. New:
+  `client.DialRemote(path, remote)`. (by @jochumdev)
+- `--pull always` on an image from an OCI registry re-downloads it rather than
+  keeping a cached copy whose digest still matches. Deciding that needed a
+  client-side registry lookup; resolving the reference is now left to the Incus
+  server. Native `incus:` remotes are unaffected. (by @jochumdev)
+- **library**: what a resource last read back from Incus moved off the resource
+  into a state struct - `Instance.State()`, `Image.State()`, `Network.State()`,
+  `Profile.State()`, `StorageVolume.State()`. `IncusInstance`,
+  `IncusInstanceFull`, `IncusAlias`, `IncusNetwork`, `IncusProfile`,
+  `IncusVolume`, `ETag` and the image's `UID`/`GID`/`Entrypoint`/`Cwd` are no
+  longer fields you read directly. The state is swapped whole, so what `State()`
+  hands back never changes under you. (by @jochumdev)
+
+### Added
+
+- **library**: `Image.AddService` records a compose service against an image.
+  Several services usually share one image object, so appending to
+  `ImageConfig.Services` by hand raced. (by @jochumdev)
+
+### Fixed
+
+- Working on several services at once no longer races. Every worker drove one
+  shared Incus client, whose event-listener state cannot be used from more than
+  one goroutine; each has its own connection now. The races that sat on top of
+  it are gone with it: two workers setting up the image lock volume at the same
+  time, simultaneous starts resolving which ic-healthd watches the project, and
+  a wait for an instance's addresses that trusted a lifecycle event and stalled
+  DNS registration until the timeout when one arrived late. (by @jochumdev)
+- ic-healthd gives up on an Incus call that stops answering instead of leaking
+  the goroutine waiting on it, so a health check or a restart that times out no
+  longer costs the daemon anything. A probe abandoned mid-command also has its
+  exec canceled, rather than leaving it running in the container. (by @jochumdev)
+- ic-healthd waits for the instance's operation lock to clear before retrying a
+  write it rejected, instead of retrying on a fixed delay that could expire six
+  times while a slow stop was still running. (by @jochumdev)
+- Loading a compose file reads the server's API extensions once at connect
+  rather than once per service, network and published port. (by @jochumdev)
+- Waiting for an image to appear in the cache gives up after the five minutes it
+  was meant to, and stops when the command is canceled. The retry took its delay
+  as a starting point for exponential backoff and ignored cancellation, so ten
+  attempts could span hours that no interrupt would end. (by @jochumdev)
+- A start or stop held up by another operation on the same instance no longer
+  spends its `--timeout` on backing off. The wait for the instance lock is
+  server-side and already correct; the retry around it doubled its delay on top,
+  up to two minutes, which could turn contention it would have ridden out into a
+  reported timeout. Waiting for ic-healthd to come up is likewise the three
+  seconds it claims rather than fifteen. (by @jochumdev)
+
 ## [v1.2.0-rc.3] - 2026-08-07
 
 ### Changed

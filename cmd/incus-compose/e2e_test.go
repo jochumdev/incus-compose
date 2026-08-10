@@ -110,7 +110,7 @@ func TestE2EEntrypointReplacesImageEntrypoint(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance("backend1-1")
+	inst, _, err := conn.GetInstance(ctx, "backend1-1", nil)
 	require.NoError(t, err)
 
 	// The busybox entrypoint is "sh"; an append would prefix it here. The shell
@@ -401,7 +401,7 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 	for _, name := range networks {
 		conn, err := c.Connection()
 		require.NoError(t, err)
-		_, _, err = conn.GetNetwork(name)
+		_, _, err = conn.GetNetwork(ctx, name)
 		require.NoError(t, err, "for network %q", name)
 	}
 
@@ -412,7 +412,7 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 	for _, name := range networks {
 		conn, err := c.Connection()
 		require.NoError(t, err)
-		_, _, err = conn.GetNetwork(name)
+		_, _, err = conn.GetNetwork(ctx, name)
 		require.Error(t, err, "for network %q", name)
 	}
 }
@@ -704,7 +704,7 @@ func TestE2EExternalNetwork(t *testing.T) {
 	conn, err := gc.Connection()
 	require.NoError(t, err)
 
-	_, _, err = conn.GetNetwork("incusbr0")
+	_, _, err = conn.GetNetwork(ctx, "incusbr0")
 	if err != nil {
 		t.Skipf("No incusbr0: %v", err)
 	}
