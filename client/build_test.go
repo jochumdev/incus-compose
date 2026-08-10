@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -172,6 +174,72 @@ func TestBuildConfigWithInlineDockerfileRejectsDockerfile(t *testing.T) {
 		DockerfileInline: "FROM docker.io/alpine:latest\n",
 	})
 	require.Error(t, err)
+}
+
+func TestPutEnv(t *testing.T) {
+	t.Parallel()
+
+	env := putEnv(slices.Clone(ociDefaultEnv), "PATH=/opt/bin", true)
+	require.Equal(t, []string{"PATH=/opt/bin", "TERM=xterm"}, env)
+
+	env = putEnv(env, "TERM=dumb", false)
+	require.Equal(t, []string{"PATH=/opt/bin", "TERM=xterm"}, env)
+
+	env = putEnv(env, "HOME=/root", false)
+	require.Equal(t, []string{"PATH=/opt/bin", "TERM=xterm", "HOME=/root"}, env)
+
+	env = putEnv(env, "NOTANASSIGNMENT", true)
+	require.Equal(t, []string{"PATH=/opt/bin", "TERM=xterm", "HOME=/root"}, env)
+}
+
+func writeRootfsTar(t *testing.T, files map[string]string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "rootfs.tar")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, f.Close()) }()
+
+	tw := tar.NewWriter(f)
+	for name, content := range files {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(content)),
+		}))
+		_, err = tw.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+
+	return path
+}
+
+func TestRootfsHome(t *testing.T) {
+	t.Parallel()
+
+	passwd := "root:x:0:0:root:/root:/bin/sh\nnobody:x:65534:65534:nobody:/:/sbin/nologin\napp:x:1000:1000::/home/app:/bin/sh\n"
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		uid   uint64
+		home  string
+	}{
+		{"root", map[string]string{"etc/passwd": passwd}, 0, "/root"},
+		{"named user", map[string]string{"etc/passwd": passwd}, 1000, "/home/app"},
+		{"dot prefixed entry", map[string]string{"./etc/passwd": passwd}, 0, "/root"},
+		{"no entry for uid", map[string]string{"etc/passwd": passwd}, 42, ""},
+		{"no passwd file", map[string]string{"etc/hosts": "127.0.0.1 localhost\n"}, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home, err := rootfsHome(writeRootfsTar(t, tt.files), tt.uid)
+			require.NoError(t, err)
+			require.Equal(t, tt.home, home)
+		})
+	}
 }
 
 func TestBuildArgs_Docker(t *testing.T) {

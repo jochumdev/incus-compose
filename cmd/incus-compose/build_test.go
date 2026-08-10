@@ -113,6 +113,49 @@ RUN echo "built by incus-compose"
 	require.Error(t, client.RunAction(ctx, r, client.ActionEnsure))
 }
 
+// TestE2EBuildImageEnvironment pins the built image to the environment.* keys
+// Incus derives itself when it unpacks a pulled OCI image.
+func TestE2EBuildImageEnvironment(t *testing.T) {
+	skipE2E(t)
+	skipLocal(t)
+	skipIfNoBuilder(t)
+	t.Parallel()
+
+	ctx := t.Context()
+	pn := t.Name()
+	dir := writeTempFiles(t, map[string]string{
+		"Dockerfile": `FROM docker.io/alpine:latest
+ENV GREETING=hello
+ENV PATH=/opt/bin:/usr/bin
+`,
+		"compose.yaml": `services:
+  app:
+    build:
+      no_cache: true
+      context: .
+`})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	t.Cleanup(func() {
+		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+	})
+
+	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	inst, _, err := conn.GetInstance(ctx, "app-1", nil)
+	require.NoError(t, err)
+
+	require.Equal(t, "hello", inst.Config["environment.GREETING"])
+	require.Equal(t, "/opt/bin:/usr/bin", inst.Config["environment.PATH"])
+	require.Equal(t, "/root", inst.Config["environment.HOME"])
+	require.Equal(t, "xterm", inst.Config["environment.TERM"])
+}
+
 func TestBuildCommandWithNoBuildServices(t *testing.T) {
 	skipLocal(t)
 	t.Parallel()

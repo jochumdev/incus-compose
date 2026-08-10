@@ -2,13 +2,16 @@ package client
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -166,10 +169,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 		_ = rmi.Run()
 	}()
 
-	// Generate config.json from the built image's OCI config. Incus's LXC
-	// driver only reads Process.Args, Process.Cwd, and Process.User.{UID,GID}
-	// from this file, so a handcrafted minimal OCI Runtime Spec is enough -
-	// no need to save the whole image to disk and unpack it with umoci.
+	// Incus reads only Process.{Args,Env,Cwd,User} out of config.json, so inspecting beats saving the image and unpacking it with umoci.
 	inspect := exec.CommandContext(ctx, builder, "inspect", tmpTag) //nolint:gosec
 	inspect.Stderr = stderr
 	c.LogDebug("Executing", "command", builder, "args", inspect.Args[1:])
@@ -234,10 +234,25 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 		}
 	}
 
+	env := slices.Clone(ociDefaultEnv)
+	for _, entry := range toStrings(imgCfg["Env"]) {
+		env = putEnv(env, entry, true)
+	}
+
+	home, err := rootfsHome(rootfsPath, uid)
+	if err != nil {
+		_ = os.Remove(rootfsPath)
+		return nil, nil, fmt.Errorf("reading /etc/passwd from the built rootfs: %w", err)
+	}
+	if home != "" {
+		env = putEnv(env, "HOME="+home, false)
+	}
+
 	configJSON, err := json.Marshal(rspecs.Spec{
 		Version: rspecs.Version,
 		Process: &rspecs.Process{
 			Args: append(toStrings(imgCfg["Entrypoint"]), toStrings(imgCfg["Cmd"])...),
+			Env:  env,
 			Cwd:  cwd,
 			User: rspecs.User{UID: uint32(uid), GID: uint32(gid)},
 		},
@@ -252,6 +267,63 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 		return nil, nil, fmt.Errorf("opening rootfs: %w", err)
 	}
 	return &tempFile{File: f, path: rootfsPath}, configJSON, nil
+}
+
+// ociDefaultEnv is what umoci seeds a runtime spec with, so a built image gets the environment.* keys a pulled one does.
+var ociDefaultEnv = []string{
+	"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	"TERM=xterm",
+}
+
+// putEnv sets entry in env, replacing a value already there only when clobber.
+func putEnv(env []string, entry string, clobber bool) []string {
+	name, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return env
+	}
+
+	for i, e := range env {
+		if strings.HasPrefix(e, name+"=") {
+			if clobber {
+				env[i] = entry
+			}
+			return env
+		}
+	}
+	return append(env, entry)
+}
+
+// rootfsHome returns uid's home from the rootfs tar's /etc/passwd, or "" when there is no entry.
+func rootfsHome(path string, uid uint64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+
+		if strings.TrimPrefix(hdr.Name, "./") != "etc/passwd" {
+			continue
+		}
+
+		scanner := bufio.NewScanner(tr)
+		for scanner.Scan() {
+			fields := strings.Split(scanner.Text(), ":")
+			if len(fields) >= 6 && fields[2] == strconv.FormatUint(uid, 10) {
+				return fields[5], nil
+			}
+		}
+		return "", scanner.Err()
+	}
 }
 
 func buildConfigWithInlineDockerfile(cfg *BuildConfig) (*BuildConfig, func(), error) {
