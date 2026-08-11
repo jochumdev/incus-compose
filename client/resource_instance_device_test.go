@@ -221,6 +221,43 @@ func TestDiskDevices(t *testing.T) {
 	}
 }
 
+func TestNicDevices(t *testing.T) {
+	t.Parallel()
+
+	testCases := []DeviceTestCase{
+		{
+			Name: "nic_managed_network",
+			Device: InstanceDevice{
+				Name: "eth0",
+				Config: InstanceDeviceConfig{
+					DeviceType:  InstanceDeviceTypeNic,
+					NetworkName: "incusbr0",
+				},
+			},
+		},
+		{
+			// Regression test: an unmanaged host bridge (nictype + parent, no
+			// managed network) must be passed through, not rejected. Incus
+			// itself accepts this device shape directly.
+			Name: "nic_unmanaged_bridge",
+			Device: InstanceDevice{
+				Name: "eth1",
+				Config: InstanceDeviceConfig{
+					DeviceType: InstanceDeviceTypeNic,
+					Extensions: map[string]string{
+						"nictype": "bridged",
+						"parent":  "br0",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		runDeviceTest(t, tc)
+	}
+}
+
 func TestTmpfsDevices(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +303,23 @@ func TestDeviceErrors(t *testing.T) {
 			Name: "eth0",
 			Config: InstanceDeviceConfig{
 				DeviceType: InstanceDeviceTypeNic,
+			},
+		}
+		_, _, err := device.ToIncusDevice()
+		require.Error(t, err)
+	})
+
+	// The nictype exemption is narrow: an unrelated extension must not also
+	// satisfy it.
+	t.Run("nic_no_network_unrelated_extension", func(t *testing.T) {
+		t.Parallel()
+		device := InstanceDevice{
+			Name: "eth0",
+			Config: InstanceDeviceConfig{
+				DeviceType: InstanceDeviceTypeNic,
+				Extensions: map[string]string{
+					"mtu": "1500",
+				},
 			},
 		}
 		_, _, err := device.ToIncusDevice()
