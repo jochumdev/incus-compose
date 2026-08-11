@@ -149,11 +149,11 @@ dev-install container_name="local:ict" listen='127.0.0.1:1443' project='default'
 
 # Run commands in the nested incus.
 incus *args:
-    @echo "Using remote '${INCUS_REMOTE-"local"}':"
-    incus {{ args }}
+    @echo "Using remote '${INCUS_REMOTE-"local"}': incus $*" >&2
+    @incus "$@"
 
 # Build ic-healthd binary
-build-healthd: lint
+build-healthd:
     CGO_ENABLED=0 go build -tags=netgo -ldflags="-w -s -X github.com/lxc/incus-compose/cmd/ic-healthd/version.Version=`git describe --tags --always --long --dirty="-dirty"`" -trimpath -o bin/ic-healthd ./cmd/ic-healthd
 
 # Build ic-healthd container image
@@ -199,7 +199,7 @@ update-healthd *args="--trace": build-healthd-image
     just run healthd up {{ args }}
 
 # Build a dev binary
-build: lint update-healthd
+build: update-healthd
     #!/usr/bin/env bash
     set -euo pipefail
 
