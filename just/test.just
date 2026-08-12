@@ -13,9 +13,9 @@ v_test_timeout := env("TEST_TIMEOUT", "20m")
 test folder="./..." *args: lint
     mkdir -p test/logs
     export DATE=`date +%Y%m%d-%H%M%S`; \
-      gotestsum --hide-summary=skipped --format testname --jsonfile=test/logs/${DATE}.json --packages={{ folder }} \
-        --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num 10 --jsonfile test/logs/${DATE}.json'" \
-        -- -race -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -covermode atomic -coverprofile test/logs/${DATE}-cover.out -v "${@:2}"
+      gotestsum --hide-summary=skipped --format testname --jsonfile=work/logs/${DATE}.json --packages={{ folder }} \
+        --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num 10 --jsonfile work/logs/${DATE}.json'" \
+        -- -race -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -covermode atomic -coverprofile work/logs/${DATE}-cover.out -v "${@:2}"
 
 # Run local unit-tests, incus-facing tests are skipped.
 [env("INCUS_COMPOSE_TEST_LOCAL", "1")]
@@ -43,7 +43,7 @@ test-all folder="./..." *args:
 # Run the tests with a race detector.
 test-race folder="./..." *args:
     mkdir -p test/logs
-    gotestsum --hide-summary=skipped --jsonfile=test/logs/`date +%Y%m%d-%H%M%S`.json --packages={{ folder }} -- -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -race -v "${@:2}"
+    gotestsum --hide-summary=skipped --jsonfile=work/logs/`date +%Y%m%d-%H%M%S`.json --packages={{ folder }} -- -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -race -v "${@:2}"
 
 # Update snapshots for long running tests.
 [env("INCUS_COMPOSE_TEST_E2E", "1")]
@@ -70,13 +70,13 @@ update-snapshots folder="./..." *args:
 # On a terminal it follows until Ctrl-C, so it can be started while a run is
 # going; piped it reads once and exits. The newest log is picked at startup, so
 # a run launched after this is not the one being followed.
-[doc("Plain text of the newest test/logs/*.json. Follows on a terminal")]
+[doc("Plain text of the newest work/logs/*.json. Follows on a terminal")]
 test-log pattern="" test="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     log=""
-    for candidate in test/logs/*.json; do
+    for candidate in work/logs/*.json; do
       [[ -f "${candidate}" ]] || continue
       [[ -z "${log}" || "${candidate}" -nt "${log}" ]] && log="${candidate}"
     done
