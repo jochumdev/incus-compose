@@ -13,6 +13,12 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Changed
 
+- `up --build` now recreates the instances of the services whose image it
+  rebuilt, so the new image is what they run. Previously the image was rebuilt
+  but the existing instances kept the old one until `--recreate` was passed as
+  well. A service that only consumes an image another service builds is
+  recreated too; everything else is left alone. (by @jochumdev)
+
 - **library**: the Incus API is reached through `iclient` instead of
   `github.com/lxc/incus/v7/client`, which cannot be used from several goroutines
   at once. `Client.Connection`, `Client.GlobalConnection` and

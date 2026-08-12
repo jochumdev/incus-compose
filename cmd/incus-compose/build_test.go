@@ -156,6 +156,59 @@ ENV PATH=/opt/bin:/usr/bin
 	require.Equal(t, "xterm", inst.Config["environment.TERM"])
 }
 
+// TestE2EUpBuildRecreates pins that --build recreates the instances whose image
+// it rebuilt, and leaves every other service running as it was.
+func TestE2EUpBuildRecreates(t *testing.T) {
+	skipE2E(t)
+	skipLocal(t)
+	skipIfNoBuilder(t)
+	t.Parallel()
+
+	ctx := t.Context()
+	pn := t.Name()
+	dir := writeTempFiles(t, map[string]string{
+		"Dockerfile": `FROM docker.io/alpine:latest
+RUN echo "built by incus-compose"
+`,
+		"compose.yaml": `services:
+  app:
+    build:
+      no_cache: true
+      context: .
+  plain:
+    image: images:alpine/edge
+`})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	t.Cleanup(func() {
+		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+	})
+
+	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	uuid := func(name string) string {
+		inst, _, err := conn.GetInstance(ctx, name, nil)
+		require.NoError(t, err)
+
+		return inst.Config["volatile.uuid"]
+	}
+
+	app, plain := uuid("app-1"), uuid("plain-1")
+	require.NotEmpty(t, app)
+	require.NotEmpty(t, plain)
+
+	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-start", "--no-healthd", "--build")
+	require.NoError(t, err)
+
+	require.NotEqual(t, app, uuid("app-1"), "--build must recreate the service it rebuilt")
+	require.Equal(t, plain, uuid("plain-1"), "--build must leave a service it did not rebuild alone")
+}
+
 func TestBuildCommandWithNoBuildServices(t *testing.T) {
 	skipLocal(t)
 	t.Parallel()
