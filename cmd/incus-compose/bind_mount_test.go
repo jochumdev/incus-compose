@@ -10,11 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestBindMounts(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	pn := t.Name()
 	compose := "../../test/fixtures/with-bind-mounts/compose.yaml"
@@ -49,7 +50,7 @@ func TestBindMounts(t *testing.T) {
 
 func TestBindMountErrorsOnRemote(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	pn := t.Name()
 	compose := "../../test/fixtures/with-bind-mounts/compose.yaml"
@@ -70,7 +71,7 @@ func TestBindMountErrorsOnRemote(t *testing.T) {
 
 func TestSeededBindMounts(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	pn := t.Name()
 	compose := "../../test/fixtures/with-seeded-bind-mounts/compose.yaml"
@@ -102,7 +103,7 @@ func TestSeededBindMounts(t *testing.T) {
 
 func TestBindMountNoShift(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	pn := t.Name()
 	compose := "../../test/fixtures/with-bind-mount-no-shift/compose.yaml"

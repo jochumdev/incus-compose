@@ -12,6 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // operationServer answers /1.0/events over a websocket and every other path
@@ -257,7 +259,7 @@ func TestIncusGetOperationsFlattens(t *testing.T) {
 }
 
 func TestIncusOperationsAgainstRealIncus(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	conn := testConnection(t)

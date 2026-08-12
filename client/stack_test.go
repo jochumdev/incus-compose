@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -111,7 +113,7 @@ func TestAddDeduplicatesSamePointer(t *testing.T) {
 // Uses tiny busybox variants to minimize bandwidth.
 func TestParallelImageDownload(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-parallel-")
 
@@ -145,7 +147,7 @@ func TestParallelImageDownload(t *testing.T) {
 
 func TestStackHooksWithStack(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-hooks-")
 
@@ -184,7 +186,7 @@ func TestStackHooksWithStack(t *testing.T) {
 
 func TestStackErrorAggregation(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-erragg-")
 
@@ -206,7 +208,7 @@ func TestStackErrorAggregation(t *testing.T) {
 
 func TestStackInstanceWithSecrets(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-secrets-")
 
@@ -264,7 +266,7 @@ func TestStackInstanceWithSecrets(t *testing.T) {
 
 func TestStackEnsureWithoutCreate_Fails(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-nocreate-")
 
@@ -278,7 +280,7 @@ func TestStackEnsureWithoutCreate_Fails(t *testing.T) {
 
 func TestStackSingleProfileEnsure(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-profile-")
 
@@ -297,7 +299,7 @@ func TestStackSingleProfileEnsure(t *testing.T) {
 
 func TestStackProfileAndNetworkMixedPriorities(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-mixed-")
 
@@ -319,7 +321,7 @@ func TestStackProfileAndNetworkMixedPriorities(t *testing.T) {
 
 func TestStackSimple(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-simple-")
 
@@ -362,7 +364,7 @@ func TestStackSimple(t *testing.T) {
 
 func TestStackScale(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stack-scale-")
 

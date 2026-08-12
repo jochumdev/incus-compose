@@ -14,16 +14,9 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
-
-// skipLocal skips a test that needs a real Incus server.
-func skipLocal(t *testing.T) {
-	t.Helper()
-
-	if os.Getenv("INCUS_COMPOSE_TEST_LOCAL") != "" {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_LOCAL is set, run `just test` for this test")
-	}
-}
 
 // testConnection dials the remote the test environment points at.
 func testConnection(t *testing.T) *Connection {
@@ -213,7 +206,7 @@ func TestIncusSocketPathFromDir(t *testing.T) {
 }
 
 func TestIncusGetInstanceNames(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	conn := testConnection(t)
@@ -228,7 +221,7 @@ func TestIncusGetInstanceNames(t *testing.T) {
 }
 
 func TestIncusGetInstancesRecursion(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -251,7 +244,7 @@ func TestIncusGetInstancesRecursion(t *testing.T) {
 // TestIncusGetInstanceNotFound pins the error mapping: an API error envelope
 // has to come back as a 404 StatusError, not as a decode failure or a nil.
 func TestIncusGetInstanceNotFound(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -269,7 +262,7 @@ func TestIncusGetInstanceNotFound(t *testing.T) {
 // TestIncusGetInstanceRoundTrip only runs where the remote already has an
 // instance; it checks the single-instance calls agree with the list ones.
 func TestIncusGetInstanceRoundTrip(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -301,7 +294,7 @@ func TestIncusGetInstanceRoundTrip(t *testing.T) {
 // TestIncusUnknownProjectIsEmpty pins what the server actually does: an
 // unknown project is an empty collection, not a 404.
 func TestIncusUnknownProjectIsEmpty(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	config, err := ReadConfig("")
@@ -647,13 +640,4 @@ func TestIncusContextCancelled(t *testing.T) {
 
 	_, err = conn.GetInstanceNames(ctx, nil)
 	require.ErrorIs(t, err, context.Canceled)
-}
-
-// skipE2E skips a slow test that drives a real registry.
-func skipE2E(t *testing.T) {
-	t.Helper()
-
-	if os.Getenv("INCUS_COMPOSE_TEST_E2E") == "" {
-		t.Skip("Skipping: set INCUS_COMPOSE_TEST_E2E=1, or run `just test-e2e`")
-	}
 }

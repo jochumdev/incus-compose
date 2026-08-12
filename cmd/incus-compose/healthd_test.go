@@ -10,6 +10,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/project"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestParseHealthdNetwork(t *testing.T) {
@@ -90,8 +91,8 @@ func TestParseHealthdNetwork(t *testing.T) {
 // This test is very buggy and the root of a lot of pain for me.
 // func TestLifecycleHealthd(t *testing.T) {
 // 	t.Parallel()
-// 	skipLocal(t)
-// 	skipE2E(t)
+// 	testlib.SkipLocal(t)
+// 	testlib.SkipE2E(t)
 
 // 	ctx := context.Background()
 // 	pn := t.Name()
@@ -142,8 +143,8 @@ func TestParseHealthdNetwork(t *testing.T) {
 // }
 
 func TestNoHealthdSkipsHealthdInstance(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -174,8 +175,8 @@ func TestNoHealthdSkipsHealthdInstance(t *testing.T) {
 }
 
 func TestNoHealthdWhenNotNeeded(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 	t.Parallel()
 
 	ctx := t.Context()

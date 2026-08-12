@@ -4,34 +4,24 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/bradleyjkemp/cupaloy/v2"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 var snapshotter = cupaloy.New(cupaloy.SnapshotSubdirectory(filepath.Join("..", "test", "snapshots", "examples")))
 
-func skipExamples(t *testing.T) {
-	_, ok := os.LookupEnv("INCUS_COMPOSE_TEST_EXAMPLES")
-	if !ok {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_EXAMPLES is not set, run `just test-examples` for this test")
-	}
-}
-
 func runCommand(ctx context.Context, t *testing.T, projectName string, args ...string) (*bytes.Buffer, error) {
 	t.Helper()
 
-	projectName = strings.ToLower(strings.ReplaceAll(projectName, "/", "-"))
-
-	mArgs := []string{"run", "--", "github.com/lxc/incus-compose/cmd/incus-compose/...", "--debug", "--project-name", projectName}
-	mArgs = append(mArgs, args...)
+	mArgs := append([]string{"run", "--", "github.com/lxc/incus-compose/cmd/incus-compose/..."},
+		testlib.Args(projectName, args...)...)
 	slog.DebugContext(ctx, "Running", "args", mArgs)
 
 	stdout := &bytes.Buffer{}
@@ -43,19 +33,10 @@ func runCommand(ctx context.Context, t *testing.T, projectName string, args ...s
 	return stdout, err
 }
 
-// stripOutput removes dynamic content (IP addresses, network hashes) for snapshot comparison.
 func stripOutput(t *testing.T, output *bytes.Buffer) string {
 	t.Helper()
 
-	ipv4Regex := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`)
-	ipv6Regex := regexp.MustCompile(`(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}`)
-	healthdImageRegex := regexp.MustCompile("ic-healthd:[0-9a-z.-]+")
-	outStr := ipv4Regex.ReplaceAllString(output.String(), "-stripped-")
-	outStr = ipv6Regex.ReplaceAllString(outStr, "-stripped-")
-	outStr = healthdImageRegex.ReplaceAllString(outStr, "ic-healthd:-stripped-")
-
-	// Cupaloy adds a newline, 2 lines are bad for my editors format on save.
-	return strings.Trim(outStr, "\n")
+	return testlib.Strip(output.String())
 }
 
 // func TestMain(m *testing.M) {
@@ -72,7 +53,7 @@ func stripOutput(t *testing.T, output *bytes.Buffer) string {
 
 func TestExample(t *testing.T) {
 	t.Parallel()
-	skipExamples(t)
+	testlib.SkipExamples(t)
 
 	examples := []struct {
 		name string

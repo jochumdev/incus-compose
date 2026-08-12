@@ -11,6 +11,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestFormatMemoryLimit(t *testing.T) {
@@ -162,7 +163,7 @@ func TestInstanceName(t *testing.T) {
 
 func TestInstanceConfig(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	gc, err := client.NewTestClient(t.Context())
 	require.NoError(t, err)
@@ -415,7 +416,7 @@ func TestInstanceConfigSysctls(t *testing.T) {
 
 func TestInstanceConfigMinimal(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	gc, err := client.NewTestClient(t.Context())
 	require.NoError(t, err)
@@ -435,7 +436,7 @@ func TestInstanceConfigMinimal(t *testing.T) {
 
 func TestInstanceConfigXIncusOverrides(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	gc, err := client.NewTestClient(t.Context())
 	require.NoError(t, err)
@@ -863,7 +864,7 @@ func TestInstanceImage(t *testing.T) {
 
 func TestInstanceNetworkDevices(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	gc, err := client.NewTestClient(t.Context())
 	require.NoError(t, err)
@@ -962,7 +963,7 @@ func TestInstanceNetworkDevices(t *testing.T) {
 
 func TestInstanceProxyDevices(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	gc, err := client.NewTestClient(t.Context())
 	require.NoError(t, err)

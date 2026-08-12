@@ -13,6 +13,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 const healthdScopeCompose = "../../test/fixtures/healthd-scope/compose.yaml"
@@ -51,8 +52,8 @@ func waitHealthy(t *testing.T, c *client.Client, name string) {
 // own, one shared daemon in its own project, and the project marked so the
 // daemon picks it up.
 func TestE2EHealthdGlobalScope(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -96,13 +97,13 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 //
 // Not parallel: it recreates the daemon every other project uses.
 func TestE2EHealthdGlobalComposeNetwork(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := strings.ToLower(t.Name())
 
-	dir := writeTempFiles(t, map[string]string{"compose.yaml": `x-incus-compose:
+	dir := testlib.WriteTempFiles(t, map[string]string{"compose.yaml": `x-incus-compose:
   healthd:
     network: ` + pn + `:hnet
 networks:
@@ -154,8 +155,8 @@ services:
 
 // TestE2EHealthdProjectScope keeps the old topology when asked for it.
 func TestE2EHealthdProjectScope(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -181,8 +182,8 @@ func TestE2EHealthdProjectScope(t *testing.T) {
 // TestE2EHealthdCoexistence is the load-bearing case: a project-scoped daemon
 // and the shared one must both work and neither may watch the other's project.
 func TestE2EHealthdCoexistence(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	globalPN := t.Name() + "-global"
@@ -245,8 +246,8 @@ func TestE2EHealthdCoexistence(t *testing.T) {
 //
 // Not parallel: it creates and removes the daemon every other project uses.
 func TestE2EHealthdNoComposeFile(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	dir := t.TempDir()
@@ -295,8 +296,8 @@ func TestE2EHealthdNoComposeFile(t *testing.T) {
 //
 // Not parallel: it removes the daemon every other project uses.
 func TestE2EHealthdDownNeedsForce(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	one := t.Name() + "-one"
@@ -335,8 +336,8 @@ func TestE2EHealthdDownNeedsForce(t *testing.T) {
 // TestE2EHealthdMigratesToGlobal covers the upgrade path: the project sidecar is
 // removed before the project is marked, so the two never overlap.
 func TestE2EHealthdMigratesToGlobal(t *testing.T) {
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()

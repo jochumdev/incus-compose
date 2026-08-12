@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -129,7 +130,7 @@ func TestResolveEntrypoint(t *testing.T) {
 // values: a missing one is added, an existing one keeps what it holds.
 func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "ensure-addmissing-")
 
@@ -184,7 +185,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 // SetHealthCheckingStopped relies on.
 func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "patch-config-")
 
@@ -242,7 +243,7 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 // are kept fresh by the project client's listener; nothing else wakes them.
 func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "clone-events-")
 
@@ -288,7 +289,7 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 // writes the intent marker ic-healthd reads, and nothing else.
 func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "stopped-status-")
 
@@ -341,7 +342,7 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 // with no daemon to report, the instance says so.
 func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "nohealthd-status-")
 

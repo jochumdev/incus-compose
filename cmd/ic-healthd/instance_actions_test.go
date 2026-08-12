@@ -9,12 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // TestInstanceExecReportsTheExitCode pins the signal every check is built on.
 func TestInstanceExecReportsTheExitCode(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-exec-")
 	name := testContainer(t, c, "web", nil, true)
@@ -44,7 +45,7 @@ func TestInstanceExecReportsTheExitCode(t *testing.T) {
 // a failing check leaves to debug with.
 func TestInstanceExecCapturesOutput(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-exec-out-")
 	name := testContainer(t, c, "web", nil, true)
@@ -62,7 +63,7 @@ func TestInstanceExecCapturesOutput(t *testing.T) {
 // a command that never returns must not hold its instance for good.
 func TestInstanceExecHonoursTheContext(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-exec-ctx-")
 	name := testContainer(t, c, "web", nil, true)
@@ -88,7 +89,7 @@ func TestInstanceExecHonoursTheContext(t *testing.T) {
 // the health verdict the scheduler acts on.
 func TestInstanceCheckActionVerdicts(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-check-")
 	name := testContainer(t, c, "web", nil, true)
@@ -131,7 +132,7 @@ func TestInstanceCheckActionVerdicts(t *testing.T) {
 // a lifecycle fact, so the scheduler neither counts it nor writes a verdict.
 func TestInstanceCheckActionNotRunning(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-check-down-")
 	name := testContainer(t, c, "web", nil, false)
@@ -149,7 +150,7 @@ func TestInstanceCheckActionNotRunning(t *testing.T) {
 // not merely left alone.
 func TestInstanceRestartActionRestarts(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-restart-")
 	name := testContainer(t, c, "web", nil, true)
@@ -173,7 +174,7 @@ func TestInstanceRestartActionRestarts(t *testing.T) {
 // instance is already down, so there is nothing to stop first.
 func TestInstanceRestartActionStartsAStoppedInstance(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-restart-down-")
 	name := testContainer(t, c, "web", nil, false)
@@ -191,7 +192,7 @@ func TestInstanceRestartActionStartsAStoppedInstance(t *testing.T) {
 // never happen: undoing an `incus-compose stop`.
 func TestInstanceRestartActionRefusesAnIntentionalStop(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-restart-marked-")
 	name := testContainer(t, c, "web", map[string]string{shared.HealthStoppedKey: "true"}, false)
@@ -211,7 +212,7 @@ func TestInstanceRestartActionRefusesAnIntentionalStop(t *testing.T) {
 // patch, not a replace: it must not disturb keys it does not own.
 func TestPatchInstanceConfigWritesOnlyItsKeys(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-patch-")
 	name := testContainer(t, c, "web", map[string]string{
@@ -235,7 +236,7 @@ func TestPatchInstanceConfigWritesOnlyItsKeys(t *testing.T) {
 // incus-compose wrote to what the scheduler runs on.
 func TestDiscoverInstanceReadsTheLiveKeys(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-discover-one-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{

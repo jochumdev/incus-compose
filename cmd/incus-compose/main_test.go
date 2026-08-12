@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -16,23 +15,10 @@ import (
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 var snapshotter = cupaloy.New(cupaloy.SnapshotSubdirectory(filepath.Join("..", "..", "test", "snapshots", "e2e")))
-
-func skipLocal(t *testing.T) {
-	_, ok := os.LookupEnv("INCUS_COMPOSE_TEST_LOCAL")
-	if ok {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_LOCAL is set, run `just test` for this test")
-	}
-}
-
-func skipE2E(t *testing.T) {
-	_, ok := os.LookupEnv("INCUS_COMPOSE_TEST_E2E")
-	if !ok {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_E2E is not set, run `just test-e2e` for this test")
-	}
-}
 
 func skipNo73(t *testing.T, c *client.Client) {
 	if !c.Global().HasExtension(shared.Incus73Extension) {
@@ -49,10 +35,7 @@ func skipNotSameHost(t *testing.T, gc *client.GlobalClient) {
 func runCommand(ctx context.Context, t *testing.T, projectName string, args ...string) (*bytes.Buffer, error) {
 	t.Helper()
 
-	projectName = strings.ToLower(strings.ReplaceAll(projectName, "/", "-"))
-
-	mArgs := []string{"incus-compose", "--debug", "--project-name", projectName}
-	mArgs = append(mArgs, args...)
+	mArgs := append([]string{"incus-compose"}, testlib.Args(projectName, args...)...)
 	t.Log("Running", mArgs)
 
 	stdout := &bytes.Buffer{}
@@ -86,15 +69,15 @@ func runCommandSnapshotList(ctx context.Context, t *testing.T, projectName strin
 	// This makes sure that health status settles and makes tests less flaky.
 	time.Sleep(500 * time.Millisecond)
 
-	projectName = strings.ToLower(strings.ReplaceAll(projectName, "/", "-"))
-	listArgs := []string{"incus-compose", "--debug", "--project-name", projectName}
+	forwarded := []string{}
 	for i, a := range args {
 		if (a == "-f" || a == "--file") && i+1 < len(args) {
-			listArgs = append(listArgs, a, args[i+1])
+			forwarded = append(forwarded, a, args[i+1])
 		}
 	}
 
-	listArgs = append(listArgs, "list", "--format=json")
+	forwarded = append(forwarded, "list", "--format=json")
+	listArgs := append([]string{"incus-compose"}, testlib.Args(projectName, forwarded...)...)
 
 	t.Log("Running", listArgs)
 
@@ -108,35 +91,23 @@ func runCommandSnapshotList(ctx context.Context, t *testing.T, projectName strin
 	snapshotter.SnapshotT(t, stripOutput(t, stdout, strip))
 }
 
-// stripOutput removes dynamic content (IP addresses, network hashes) for snapshot comparison.
 func stripOutput(t *testing.T, output *bytes.Buffer, stripHealth bool) string {
 	t.Helper()
 
-	ipv4Regex := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`)
-	ipv6Regex := regexp.MustCompile(`(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}`)
-	healthdImageRegex := regexp.MustCompile("ic-healthd:[0-9a-z.-]+")
-	outStr := ipv4Regex.ReplaceAllString(output.String(), "-stripped-")
-	outStr = ipv6Regex.ReplaceAllString(outStr, "-stripped-")
-	outStr = healthdImageRegex.ReplaceAllString(outStr, "ic-healthd:-stripped-")
-
 	if stripHealth {
-		healthRegex := regexp.MustCompile(`"health": "[a-zA-Z]+",`)
-		outStr = healthRegex.ReplaceAllString(outStr, `"health": "-stripped-",`)
+		return testlib.StripHealth(output.String())
 	}
 
-	// Cupaloy adds a newline, 2 lines are bad for my editors format on save.
-	return strings.Trim(outStr, "\n")
+	return testlib.Strip(output.String())
 }
 
 func plannedNetworkNames(ctx context.Context, t *testing.T, projectName, compose string) []string {
 	t.Helper()
 
-	projectName = strings.ToLower(strings.ReplaceAll(projectName, "/", "-"))
-
 	p, err := project.New().Load(ctx, project.LoadFiles([]string{compose}))
 	require.NoError(t, err)
 
-	c := client.NewOfflineClient(ctx, projectName)
+	c := client.NewOfflineClient(ctx, testlib.ProjectName(projectName))
 	allResources, err := p.Resources(c)
 	require.NoError(t, err)
 
@@ -384,7 +355,7 @@ func TestConfigFilterByService(t *testing.T) {
 }
 
 func TestUpDownUpSimple(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -420,7 +391,7 @@ func TestUpDownUpSimple(t *testing.T) {
 }
 
 func TestNormalLifecycle(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -465,7 +436,7 @@ func dnsServiceIPs(t *testing.T, c *client.Client, networks []string, service st
 // downscales to a single instance with --scale and verifies both the surplus
 // instances and their DNS records are removed while the survivor keeps resolving.
 func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -517,7 +488,7 @@ func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
 // Snapshotting dns's network raw.dnsmasq confirms both projects' cnames
 // coexist without clobbering each other.
 func TestDNSCnameAliasAcrossProjects(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -550,19 +521,5 @@ func TestDNSCnameAliasAcrossProjects(t *testing.T) {
 	net, _, err := conn.GetNetwork(ctx, networkName)
 	require.NoError(t, err)
 
-	ipv4Regex := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`)
-	ipv6Regex := regexp.MustCompile(`(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}`)
-
-	lines := strings.Split(net.Config["raw.dnsmasq"], "\n")
-	kept := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if ipv6Regex.MatchString(line) {
-			continue
-		}
-		kept = append(kept, line)
-	}
-
-	outStr := ipv4Regex.ReplaceAllString(strings.Join(kept, "\n"), "-stripped-")
-
-	snapshotter.SnapshotT(t, outStr)
+	snapshotter.SnapshotT(t, testlib.Strip(testlib.StripIPv6Lines(net.Config["raw.dnsmasq"])))
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/lxc/incus-compose/cmd/incus-compose/version"
 	"github.com/lxc/incus-compose/project"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestVersionCommand(t *testing.T) {
@@ -40,7 +41,7 @@ func TestResolveHealthdImage(t *testing.T) {
 func TestBuiltServices(t *testing.T) {
 	t.Parallel()
 
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"Dockerfile": "FROM docker.io/alpine:latest\n",
 		"compose.yaml": `name: built
 services:
