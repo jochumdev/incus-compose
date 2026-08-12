@@ -29,6 +29,7 @@ discussable - always ask before guessing.
 
 - Code comments should be no longer than one line, unless they are required to cover complex unintuitive logic.
 - Never explain previous behaviour in comments.
+- Comments are not safeguards, they are informal. An API is safe to use from several goroutines because it is mutex-free or confined to one, never because a comment says it is.
 - Commit messages should similarly be kept as short and to the point as possible, no need to summarize the whole issue. Keep the conventional `<type>(<scope>): <description>` format from CONTRIBUTING.md.
 - Do not use `go vet`, `gci` or any of those diagnostics tools, use gopls.
 - You don't need to capture tests on your own use `just test-log` to get the last log.
@@ -58,6 +59,7 @@ commands instead of raw `go` (see `just --list`).
 ## Working in this repo
 
 - Check existing patterns in the codebase before creating new ones.
+- In most cases we do not enforce security by comments, we enforce by code and architecture.
 - Think through framework/library behavior before coding.
 - Keep code direct - no unnecessary intermediate variables; use `_` for unused parameters.
 - If cycling (same approach, no progress), stop and ask.
