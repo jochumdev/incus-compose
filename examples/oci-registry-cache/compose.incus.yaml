@@ -1,36 +1,36 @@
 services:
   docker-registry:
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
+      test: ["CMD", "wget", "-q", "http://127.0.0.1:5000"]
       interval: 5s
       timeout: 5s
       retries: 6
       start_period: 30s
-      start_interval: 1s
+      start_interval: 5s
     networks:
       default:
         ipv4_address: ${DOCKERIO_IPV4}/${IPV4_NETMASK}
 
   ghcr-registry:
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
+      test: ["CMD", "wget", "-q", "http://127.0.0.1:5000"]
       interval: 5s
       timeout: 5s
       retries: 6
       start_period: 30s
-      start_interval: 1s
+      start_interval: 5s
     networks:
       default:
         ipv4_address: ${GHCRIO_IPV4}/${IPV4_NETMASK}
 
   gitlab-registry:
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
+      test: ["CMD", "wget", "-q", "http://127.0.0.1:5000"]
       interval: 5s
       timeout: 5s
       retries: 6
       start_period: 30s
-      start_interval: 1s
+      start_interval: 5s
     networks:
       default:
         ipv4_address: ${GITLAB_IPV4}/${IPV4_NETMASK}

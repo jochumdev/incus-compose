@@ -15,7 +15,7 @@ Recorded during the beta - the workflow is unchanged in current releases:
 
 ## Why incus-compose?
 
-[Incus](https://linuxcontainers.org/incus/) provides powerful system containers and virtual machines with superior security and isolation, but lacks the declarative multi-container orchestration that Docker Compose offers. This tool bridges that gap:
+[Incus](https://linuxcontainers.org/incus/) provides system containers and virtual machines with strong isolation, but lacks the declarative multi-container orchestration that Docker Compose offers. This tool bridges that gap:
 
 - Use existing `docker-compose.yml` files with Incus containers
 - Leverage Incus's native OCI registry support for image pulling
@@ -35,7 +35,7 @@ Status: **Stable**.
 - Familiar commands: `up`, `down`, `start`, `stop`, `restart`, `list` (and `ps`), `logs`, `exec`, `config`, plus `build`, `healthd`, `incus` (pass-through), and `self-update`
 - Compose project parsing via compose-go: `.env` interpolation, profiles, `depends_on`, secrets, and configs
 - Automatic `compose.incus.yaml` override file - keep the upstream compose file untouched and put Incus tuning next to it [doc](https://docs.incus-compose.org/compose-compatibility#incus-override-file)
-- Windows and macOS clients: No Docker Desktop, no WSL, no local Linux VM. `incus-compose` and the `incus` client are portable Go binaries — from a Windows or macOS desktop you drive a remote Incus host over HTTPS and manage OCI containers, LXC system containers, and VMs directly. See [Installing on Windows](https://docs.incus-compose.org/getting-started/windows).
+- Windows and macOS clients: No Docker Desktop, no WSL, no local Linux VM. `incus-compose` and the `incus` client are portable Go binaries: from a Windows or macOS desktop you drive a remote Incus host over HTTPS and manage OCI containers, LXC system containers, and VMs directly. See [Installing on Windows](https://docs.incus-compose.org/getting-started/windows).
 - Configuration via `INCUS_COMPOSE_*` environment variables for every flag, with a configurable parallel worker count [doc](https://docs.incus-compose.org/environment-variables)
 
 **Images:**

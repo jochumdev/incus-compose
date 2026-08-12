@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,7 +30,7 @@ func newUpCommand() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:    "no-start",
-				Usage:   "Don't start containers after creating",
+				Usage:   "Don't start containers after creating (implies --detach)",
 				Sources: cli.EnvVars("INCUS_COMPOSE_UP_NO_START"),
 			},
 			&cli.DurationFlag{
@@ -207,18 +208,34 @@ func newUpCommand() *cli.Command {
 				runOptions = append(runOptions, client.OptionExternalHealthd())
 			}
 
-			if cmd.Bool("recreate") {
+			scale := parseScale(cmd.StringSlice("scale"))
+			args := filterResourcesArgs{
+				OnlyServices:     cmd.Args().Slice(),
+				WithDependencies: !cmd.Bool("no-deps"),
+			}
+
+			// A rebuilt image only reaches an instance created from it again.
+			recreate := cmd.Bool("recreate")
+			downServices, downNoDeps := cmd.Args().Slice(), cmd.Bool("no-deps")
+			if !recreate && buildMode == client.BuildForce {
+				downServices = builtServices(p, args)
+				downNoDeps = true
+				recreate = len(downServices) > 0
+				c.LogDebug("Recreating built services", "services", downServices)
+			}
+
+			if recreate {
 				err = down(ctx, p, rc, downArgs{
 					Project:    cmd.Bool("project"),
 					Volumes:    false,
 					Images:     false,
 					Timeout:    cmd.Duration("timeout"),
-					NoDeps:     cmd.Bool("no-deps"),
-					NoNetworks: len(cmd.Args().Slice()) != 0,
-					Services:   cmd.Args().Slice(),
+					NoDeps:     downNoDeps,
+					NoNetworks: len(downServices) != 0,
+					Services:   downServices,
 					Workers:    cmd.Root().Int("workers"),
 					Debug:      cmd.Root().Bool("debug"),
-					Scale:      parseScale(cmd.StringSlice("scale")),
+					Scale:      scale,
 					Writer:     cmd.Root().Writer,
 					Reverse:    true,
 					NoHealthd:  !usesHealthd,
@@ -254,7 +271,6 @@ func newUpCommand() *cli.Command {
 				defer progress.Stop(c)
 			}
 
-			scale := parseScale(cmd.StringSlice("scale"))
 			resources, err := p.Resources(c, project.ResourcesScale(scale))
 			if err != nil {
 				c.LogError("Getting project resources in reCreate", "error", err)
@@ -267,10 +283,6 @@ func newUpCommand() *cli.Command {
 				return errLogged.Wrap(err)
 			}
 
-			args := filterResourcesArgs{
-				OnlyServices:     cmd.Args().Slice(),
-				WithDependencies: !cmd.Bool("no-deps"),
-			}
 			myResources := filterResources(p, resources, args)
 
 			stack := client.NewStack(c, client.StackWorkers(cmd.Root().Int("workers")), client.StackFailFast())
@@ -312,7 +324,8 @@ func newUpCommand() *cli.Command {
 				}
 			}
 
-			if cmd.Bool("detach") {
+			// Nothing was started, so there is nothing to stream logs from.
+			if cmd.Bool("detach") || cmd.Bool("no-start") {
 				_ = c.Done()
 				return nil
 			}
@@ -347,6 +360,34 @@ func newUpCommand() *cli.Command {
 			})
 		},
 	}
+}
+
+// builtServices returns the in-scope services whose image comes from a build
+// config, sorted. A service that only consumes such an image is in there too.
+func builtServices(p *project.Project, args filterResourcesArgs) []string {
+	// filterResources selects by service name; the resources are just payload.
+	scope := map[string][]client.Resource{}
+	for name := range p.Services {
+		scope[name] = nil
+	}
+
+	images := map[string]bool{}
+	for _, s := range p.Services {
+		if s.Build != nil && s.Image != "" {
+			images[s.Image] = true
+		}
+	}
+
+	services := []string{}
+	for name := range filterResources(p, scope, args) {
+		s := p.Services[name]
+		if s.Build != nil || images[s.Image] {
+			services = append(services, name)
+		}
+	}
+	slices.Sort(services)
+
+	return services
 }
 
 // parseScale parses --scale flags of the form "service=num".
