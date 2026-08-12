@@ -141,14 +141,20 @@ func (d *InstanceDevice) toNicDevice() (map[string]string, error) {
 		networkName = d.Config.Network.IncusName()
 	} else if d.Config.NetworkName != "" {
 		networkName = d.Config.NetworkName
-	} else {
+	} else if _, hasNicType := d.Config.Extensions["nictype"]; !hasNicType {
+		// A managed `network:` isn't the only valid way to declare a NIC -- Incus itself accepts
+		// a device carrying `nictype` (e.g. "bridged" + "parent") with no `network` key at all,
+		// which is the only way to attach to an unmanaged host bridge (MANAGED=NO in `incus
+		// network list`). Only reject when neither a managed network nor nictype is present.
 		return map[string]string{}, ErrBadDeviceConfig.WithText("network not given")
 	}
 
 	device := map[string]string{
-		"type":    "nic",
-		"name":    d.Name,
-		"network": networkName,
+		"type": "nic",
+		"name": d.Name,
+	}
+	if networkName != "" {
+		device["network"] = networkName
 	}
 
 	maps.Copy(device, d.Config.Extensions)

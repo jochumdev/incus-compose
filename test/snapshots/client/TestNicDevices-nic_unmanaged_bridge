@@ -1,0 +1,9 @@
+{
+  "config": {
+    "name": "eth1",
+    "nictype": "bridged",
+    "parent": "br0",
+    "type": "nic"
+  },
+  "name": "eth1"
+}
