@@ -30,7 +30,7 @@ func newUpCommand() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:    "no-start",
-				Usage:   "Don't start containers after creating",
+				Usage:   "Don't start containers after creating (implies --detach)",
 				Sources: cli.EnvVars("INCUS_COMPOSE_UP_NO_START"),
 			},
 			&cli.DurationFlag{
@@ -324,7 +324,8 @@ func newUpCommand() *cli.Command {
 				}
 			}
 
-			if cmd.Bool("detach") {
+			// Nothing was started, so there is nothing to stream logs from.
+			if cmd.Bool("detach") || cmd.Bool("no-start") {
 				_ = c.Done()
 				return nil
 			}

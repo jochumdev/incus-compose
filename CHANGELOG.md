@@ -13,6 +13,10 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Changed
 
+- `up --no-start` now returns once the containers are created, as `--detach`
+  does. It used to go on to follow logs from instances it never started, and the
+  interrupt that ended that stream tore them down again. (by @jochumdev)
+
 - `up --build` now recreates the instances of the services whose image it
   rebuilt, so the new image is what they run. Previously the image was rebuilt
   but the existing instances kept the old one until `--recreate` was passed as
