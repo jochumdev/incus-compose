@@ -1,0 +1,45 @@
+{
+  storage file_system /data/caddy
+}
+
+www.example.com {
+	redir https://example.com
+}
+
+docker-registry.example.com {
+  redir https://example.com
+}
+
+ghcr-registry.example.com {
+  redir https://example.com
+}
+
+gitlab-registry.example.com {
+  redir https://example.com
+}
+
+clock.example.com {
+  redir https://example.com
+}
+
+git.example.com {
+	log {
+		output file /var/log/caddy/git.example.com-access.log
+	}
+
+	reverse_proxy 10.136.32.17:3000
+}
+
+example.com {
+	log {
+		output file /var/log/caddy/example.com-access.log
+	}
+
+	root * /var/www/example.com
+	encode
+	handle_errors {
+		rewrite * /
+		file_server
+	}
+	file_server
+}

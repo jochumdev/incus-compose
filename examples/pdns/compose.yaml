@@ -52,59 +52,6 @@ services:
       pdns:
         condition: service_healthy
 
-  dnsweaver:
-    build:
-      context: ./work/dnsweaver/
-    image: maxamill/dnsweaver:latest-custom
-    container_name: dnsweaver
-    environment:
-      DNSWEAVER_INSTANCES: pdns
-      DNSWEAVER_PDNS_TYPE: powerdns
-      DNSWEAVER_PDNS_URL: http://$PDNS_IPV4_ADDRESS:8081
-      DNSWEAVER_PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
-      DNSWEAVER_PDNS_ZONE: "$DNSWEAVER_PDNS_ZONE"
-      DNSWEAVER_PDNS_DOMAINS: "$DNSWEAVER_PDNS_DOMAINS"
-      DNSWEAVER_PDNS_TTL: "5"
-      DNSWEAVER_PDNS_TARGET: "$PDNS_IPV4_ADDRESS"
-
-      DNSWEAVER_PLATFORM: none
-      DNSWEAVER_SOURCES: incus
-      DNSWEAVER_INCUS_ALL_PROJECTS: "true"
-      DNSWEAVER_INCUS_URL: "$DNSWEAVER_INCUS_URL"
-      DNSWEAVER_INCUS_DOMAIN_SUFFIX: "$DNSWEAVER_INCUS_DOMAIN_SUFFIX"
-      DNSWEAVER_INCUS_TLS_CERT_FILE: /run/secrets/incus_client_cert
-      DNSWEAVER_INCUS_TLS_KEY_FILE: /run/secrets/incus_client_key
-      DNSWEAVER_INCUS_CERT_STORE: /var/lib/dnsweaver/incus
-    secrets:
-      - source: pdns_api_key
-        uid: "1000"
-        gid: "1000"
-        mode: 0o400
-      - source: incus_client_cert
-        uid: "1000"
-        gid: "1000"
-        mode: 0o400
-      - source: incus_client_key
-        uid: "1000"
-        gid: "1000"
-        mode: 0o400
-    depends_on:
-      pdns:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "/bin/sh",
-          "-c",
-          "echo -e 'GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n' | nc localhost 8080 | grep -q '200 OK' || exit 1",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
   pdns-admin:
     image: powerdnsadmin/pda-legacy:latest
     container_name: pdns-admin
@@ -118,8 +65,6 @@ services:
       GUNICORN_WORKERS: "2"
       GUNICORN_LOGLEVEL: "INFO"
       OFFLINE_MODE: "False"
-    ports:
-      - "9191:80"
     volumes:
       - pdnsadmin:/app/upload
     healthcheck:
@@ -140,9 +85,3 @@ secrets:
     environment: DB_PASSWORD
   db-root-password:
     environment: DB_ROOT_PASSWORD
-  pdns_api_key:
-    environment: API_KEY
-  incus_client_cert:
-    file: client.crt
-  incus_client_key:
-    file: client.key

@@ -1,11 +1,37 @@
 services:
-  caddy:
+  external:
+    # https://hub.docker.com/_/caddy/
     image: docker.io/library/caddy:2.11.4-alpine
-    command: /bin/sh -c "/bin/sleep 5; caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    container_name: external_caddy
+    entrypoint: /bin/sh -c "sleep 3; caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
     volumes:
-      - ./caddy:/etc/caddy:ro
+      - ./external:/etc/caddy:ro
       - ./sites:/var/www:ro
       - data:/data/caddy
+    networks:
+      default:
+    restart: unless-stopped
+    ports:
+      - published: 80
+        target: 80
+      #        x-incus-compose:
+      #          nat: true
+      - published: 443
+        target: 443
+  #        x-incus-compose:
+  #          nat: true
+
+  internal:
+    image: docker.io/library/caddy:2.11.4-alpine
+    container_name: internal_caddy
+    entrypoint: /bin/sh -c "sleep 3; caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    volumes:
+      - ./internal:/etc/caddy:ro
+      - ./sites:/var/www:ro
+      - data:/data/caddy
+    networks:
+      default:
+    restart: unless-stopped
 
 volumes:
   data:

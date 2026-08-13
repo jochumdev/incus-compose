@@ -1,5 +1,0 @@
-10.in-addr.arpa.     	60	SOA	ns1.example.com. hostmaster.example.com. 2026071201 21600 60 604800 86400
-10.in-addr.arpa.     	60	NS	ns1.example.com.
-2.215.179.10.in-addr.arpa. 60  PTR dns1.example.com.
-3.215.179.10.in-addr.arpa. 60  PTR ns1.example.com.
-4.215.179.10.in-addr.arpa. 60  PTR proxy.example.com.

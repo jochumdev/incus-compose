@@ -1,0 +1,66 @@
+{
+        storage file_system /data/caddy
+        auto_https disable_certs
+}
+
+www.example.com {
+	redir https://example.com
+}
+
+docker-registry.example.com {
+  tls /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/docker-registry.example.com/docker-registry.example.com.crt /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/docker-registry.example.com/docker-registry.example.com.key
+  log {
+    output file /var/log/caddy/docker-registry.example.com-access.log
+  }
+
+  reverse_proxy 10.132.32.17:5000
+}
+
+ghcr-registry.example.com {
+  tls /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/ghcr-registry.example.com/ghcr-registry.example.com.crt /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/ghcr-registry.example.com/ghcr-registry.example.com.key
+  log {
+    output file /var/log/caddy/ghcr-registry.example.com-access.log
+  }
+
+  reverse_proxy 10.132.32.18:5000
+}
+
+gitlab-registry.example.com {
+  tls /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/gitlab-registry.example.com/gitlab-registry.example.com.crt /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/gitlab-registry.example.com/gitlab-registry.example.com.key
+  log {
+    output file /var/log/caddy/gitlab-registry.example.com-access.log
+  }
+
+  reverse_proxy 10.132.32.19:5000
+}
+
+clock.example.com {
+  tls /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/clock.example.com/clock.example.com.crt /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/clock.example.com/clock.example.com.key
+	log {
+		output file /var/log/caddy/time.example.com-access.log
+	}
+
+	reverse_proxy 10.137.32.17:8001
+}
+
+git.example.com {
+	log {
+		output file /var/log/caddy/git.example.com-access.log
+	}
+
+	reverse_proxy 10.136.32.17:3000
+}
+
+example.com {
+	log {
+		output file /var/log/caddy/example.com-access.log
+	}
+
+	root * /var/www/example.com
+	encode
+	handle_errors {
+		rewrite * /
+		file_server
+	}
+	file_server
+}
