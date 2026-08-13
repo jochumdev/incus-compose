@@ -1,5 +1,6 @@
 # Examples
 
+- [apt-cacher-ng](apt-cacher-ng/) — A caching proxy for Debian/Ubuntu package downloads, so `apt-get` pulls each package once. Feeds `scripts/setup-nested-incus.sh -a`.
 - [caddy](https://docs.incus-compose.org/examples/caddy) — Caddy as a reverse-proxy front door, split in two — a host-facing instance and an internal one, sharing one certificate store.
 - [gitea](https://docs.incus-compose.org/examples/gitea/) — Gitea, a lightweight self-hosted Git service, backed by Postgres.
 - [hugo](https://docs.incus-compose.org/examples/hugo/) — Hugo is one of the most popular open-source static site generators — fast builds, no runtime dependencies.

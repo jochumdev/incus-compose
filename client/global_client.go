@@ -17,6 +17,7 @@ import (
 	incusApi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // SwapWriter is an io.Writer whose destination can be swapped at runtime.
@@ -385,6 +386,12 @@ func (c *GlobalClient) Connect() error {
 	c.apiExtensions = server.APIExtensions
 	c.httpsAddress = server.Config["core.https_address"]
 	c.mu.Unlock()
+
+	// Static addresses, gateways and oci.dns.* on OCI instances, which every
+	// compose network attachment relies on.
+	if !c.HasExtension(shared.Incus72Extension) {
+		return ErrServerTooOld.WithText("(this one reports " + server.Environment.ServerVersion + ")")
+	}
 
 	if c.config.DefaultStoragePool == "detect" {
 		if err := c.detectStoragePool(); err != nil {

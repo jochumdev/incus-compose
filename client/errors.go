@@ -156,6 +156,10 @@ var (
 	// which needs the server reachable over the network.
 	ErrServerNotListening = NewError("the incus server is not listening on the network (core.https_address is not set); incus-compose needs it for image caching, set it with `incus config set core.https_address=:8443`, see https://github.com/lxc/incus-compose/blob/main/docs/getting-started.md")
 
+	// ErrServerTooOld indicates the Incus server has no oci_network_config API,
+	// which every compose network attachment needs.
+	ErrServerTooOld = NewError("the incus server has no oci_network_config API, incus-compose needs Incus 7.0.1 (LTS) or 7.2 and newer")
+
 	// ErrAborted indicates an operation was aborted (e.g., by BeforeAny hook).
 	ErrAborted = NewError("operation aborted")
 

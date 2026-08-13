@@ -20,6 +20,10 @@ HOST_STORAGE_POOL=""
 BRIDGE="incusbr0"
 LISTEN=""
 OVN="false"
+APT_CACHER="${APT_CACHER_NG:-}"
+APT_CACHER_PORT="3142"
+APT_PROXY=""
+DB_ON_POOL="${INCUS_DB_ON_POOL:-}"
 
 # Track whether we created the container so we can cleanup on failure if desired
 CONTAINER_CREATED="false"
@@ -54,9 +58,23 @@ OPTIONS:
 -s POOL         Storage pool on the host to put the container itself on
                 (default: whatever the host's default profile uses)
 -b BRIDGE       Bridge to create (default: ${BRIDGE})
+-a ADDRESS      apt-cacher-ng to pull packages through, as HOST, HOST:PORT or
+                a full URL (default: ${APT_CACHER:-<none>}, env: APT_CACHER_NG,
+                assumed port: ${APT_CACHER_PORT})
+                The Incus repository is routed through it via apt-cacher-ng's
+                HTTPS/// remap, so incus-base is cached too.
 -o              Install OVN and configure it (default: false)
 -f              Force delete any existing container (default: false)
 -h              Show this help message
+
+ENVIRONMENT:
+APT_CACHER_NG   Same as -a, which wins over it
+INCUS_DB_ON_POOL
+                Non-empty puts the nested daemon's dqlite database on a volume
+                of its own on the -s pool, leaving the rootfs where it is.
+                Needs -s: point it at a ramdisk pool and the database - the
+                daemon's fsync bottleneck - runs in RAM
+                (default: ${DB_ON_POOL:-<unset>})
 
 EXAMPLES:
 # Create with defaults (stable version)
@@ -68,12 +86,16 @@ $(basename "$0") -c test/certs/incus-compose-test.crt -r lts
 # Create with custom name
 $(basename "$0") -c test/certs/my-test.crt -n my-test -r lts
 
+# Pull packages through an apt-cacher-ng
+$(basename "$0") -c test/certs/my-test.crt -a 10.167.160.32
+APT_CACHER_NG=10.167.160.32 $(basename "$0") -c test/certs/my-test.crt
+
 EOF
     exit 0
 }
 
 # Parse arguments
-while getopts "c:n:i:r:l:p:s:b:ofh" opt; do
+while getopts "c:n:i:r:l:p:s:b:a:ofh" opt; do
     case ${opt} in
     c)
         CLIENT_CERT="${OPTARG}"
@@ -98,6 +120,9 @@ while getopts "c:n:i:r:l:p:s:b:ofh" opt; do
         ;;
     b)
         BRIDGE="${OPTARG}"
+        ;;
+    a)
+        APT_CACHER="${OPTARG}"
         ;;
     o)
         OVN="true"
@@ -167,6 +192,19 @@ daily)
     ;;
 esac
 
+if [[ -n "${APT_CACHER}" ]]; then
+    APT_PROXY="${APT_CACHER%/}"
+    if [[ "${APT_PROXY}" != http://* && "${APT_PROXY}" != https://* ]]; then
+        APT_PROXY="http://${APT_PROXY}"
+    fi
+    if [[ ! "${APT_PROXY}" =~ :[0-9]+$ ]]; then
+        APT_PROXY="${APT_PROXY}:${APT_CACHER_PORT}"
+    fi
+
+    # apt-cacher-ng's remap: it fetches (and caches) the https repo on our behalf
+    REPO_URL="${APT_PROXY}/HTTPS///${REPO_URL#https://}"
+fi
+
 # Ensure incus CLI is available
 if ! command -v incus >/dev/null 2>&1; then
     echo "Error: 'incus' CLI not found in PATH. Please install/incus or adjust PATH." >&2
@@ -182,6 +220,16 @@ echo "    Repository URL: ${REPO_URL}"
 echo "    Client certificate: ${CLIENT_CERT}"
 echo "    Storage pool: ${STORAGE_POOL}"
 echo "    Host storage pool: ${HOST_STORAGE_POOL:-<host default>}"
+echo "    apt-cacher-ng: ${APT_PROXY:-<none>}"
+DB_POOL_LABEL="<none>"
+if [[ -n "${DB_ON_POOL}" ]]; then
+    if [[ -n "${HOST_STORAGE_POOL}" ]]; then
+        DB_POOL_LABEL="${HOST_STORAGE_POOL}"
+    else
+        DB_POOL_LABEL="<none>, INCUS_DB_ON_POOL needs -s"
+    fi
+fi
+echo "    Database pool: ${DB_POOL_LABEL}"
 echo "    OVN: ${OVN}"
 echo ""
 
@@ -211,12 +259,42 @@ incus launch "${IMAGE}" "${CONTAINER_NAME}" \
 
 CONTAINER_CREATED="true"
 
+# Before incus-base is installed: the package starts the daemon, and a daemon
+# that has already written its database would have it hidden by this mount.
+if [[ -n "${DB_ON_POOL}" ]] && [[ -n "${HOST_STORAGE_POOL}" ]]; then
+    DB_VOLUME="${CONTAINER_NAME}-db"
+
+    echo "==> Putting the nested database on pool ${HOST_STORAGE_POOL}, volume ${DB_VOLUME}"
+
+    # A leftover volume carries a stale database the new daemon would adopt.
+    incus storage volume delete "${HOST_STORAGE_POOL}" "${DB_VOLUME}" >/dev/null 2>&1 || true
+    incus storage volume create "${HOST_STORAGE_POOL}" "${DB_VOLUME}"
+
+    incus config device add "${CONTAINER_NAME}" incusdb disk \
+        pool="${HOST_STORAGE_POOL}" source="${DB_VOLUME}" path=/var/lib/incus/database
+fi
+
 INSTALL_SCRIPT=$(
     cat <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+
+APT_PROXY="APT_PROXY_PLACEHOLDER"
+if [[ -n "${APT_PROXY}" ]]; then
+    echo "Using apt proxy ${APT_PROXY}..."
+
+    proxy_host="${APT_PROXY#*://}"
+    proxy_host="${proxy_host%%:*}"
+
+    # The Zabbly URI points at the cacher itself. Without the exception apt asks
+    # the cacher to proxy to itself, and that answers "503 Host not found".
+    cat >/etc/apt/apt.conf.d/00proxy <<PROXY_EOF
+Acquire::http::Proxy "${APT_PROXY}";
+Acquire::http::Proxy::${proxy_host} "DIRECT";
+PROXY_EOF
+fi
 
 echo "Installing prerequisites..."
 apt-get update -q
@@ -238,6 +316,18 @@ SOURCES_EOF
 
 echo "Installing Incus..."
 apt-get update -q
+
+# apt-get update only warns when a repository fails, and Debian ships an Incus of
+# its own - without this an unreachable Zabbly silently installs the wrong one.
+# Captured rather than piped: grep -q would SIGPIPE apt-cache, and pipefail
+# reports that as the pipeline's status.
+policy="$(apt-cache policy incus-base)"
+if ! grep -q zabbly <<<"${policy}"; then
+    echo "Error: the Zabbly repository is not usable, incus-base would come from Debian instead" >&2
+    echo "${policy}" >&2
+    exit 1
+fi
+
 apt-get install -y -q incus-base pigz
 
 # Disable AppArmor in nested environment to prevent conflicts with container security profiles.
@@ -253,7 +343,9 @@ EOF
 
 echo "==> Executing installation script"
 # Keep your variable-based pipe approach; replace placeholder and stream into container
-echo "${INSTALL_SCRIPT}" | sed "s|REPO_URL_PLACEHOLDER|${REPO_URL}|g" | incus exec "${CONTAINER_NAME}" -- bash -s
+echo "${INSTALL_SCRIPT}" |
+    sed -e "s|REPO_URL_PLACEHOLDER|${REPO_URL}|g" -e "s|APT_PROXY_PLACEHOLDER|${APT_PROXY}|g" |
+    incus exec "${CONTAINER_NAME}" -- bash -s
 
 if [[ $OVN == "true" ]]; then
   echo "==> Installing OVN"

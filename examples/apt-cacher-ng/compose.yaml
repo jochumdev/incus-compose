@@ -1,0 +1,22 @@
+services:
+  apt-cacher-ng:
+    # https://hub.docker.com/r/sameersbn/apt-cacher-ng
+    image: docker.io/sameersbn/apt-cacher-ng:${VERSION}
+    container_name: apt-cacher-ng
+    volumes:
+      - cache:/var/cache/apt-cacher-ng
+    configs:
+      - source: acng-conf
+        target: /etc/apt-cacher-ng/acng.conf
+    networks:
+      default:
+    restart: unless-stopped
+
+volumes:
+  cache:
+
+configs:
+  # PassThroughPattern is widened to .*, so https repositories reach the cache
+  # through apt-cacher-ng's HTTPS/// remap.
+  acng-conf:
+    file: ./acng.conf
