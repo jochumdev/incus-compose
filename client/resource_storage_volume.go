@@ -419,9 +419,107 @@ func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
 	return err
 }
 
+func (r *StorageVolume) backupName() string {
+	return BackupVolumePrefix + SanitizeIncusName(r.Name(), MaxIncusNameLen-len(BackupVolumePrefix))
+}
+
+func (r *StorageVolume) BackupEntry(cfg BackupConfig, backupProject string) BackupVolume {
+	return BackupVolume{
+		Source: VolumeInfos{
+			Project: r.client.Project(),
+			Pool:    r.Config.Pool,
+			Name:    r.IncusName(),
+		},
+		Backup: VolumeInfos{
+			Project: backupProject,
+			Pool:    cfg.Pool,
+			Name:    r.backupName(),
+		},
+	}
+}
+
+func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
+	if !r.IsEnsured() {
+		return ErrNotEnsured
+	}
+
+	options := NewOptions(opts...)
+	if options.BackupClient == nil {
+		return ErrUnsupportedAction.WithText("backup without OptionBackup doesn't work")
+	}
+
+	err := r.client.hookBefore(ctx, ActionBackup, r, options, nil)
+	if err != nil {
+		return err
+	}
+
+	bc := options.BackupClient
+	if options.BackupConfig.Pool == "" {
+		options.BackupConfig.Pool = bc.Config().DefaultStoragePool
+	}
+
+	lockName := SanitizeIncusName(r.IncusName(), MaxIncusNameLen-5) + ".lock"
+	lock, err := BackupLock(ctx, bc, options.BackupConfig, 0, lockName)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionBackup, r, options, err)
+	}
+	defer r.client.WarnError(lock.Unlock, "Failed to release a backup lock")
+
+	conn, err := options.BackupClient.Connection()
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionBackup, r, options, ErrUnknown.Wrap(err))
+	}
+
+	backupName := r.backupName()
+	volumeExists := true
+	_, _, err = conn.GetStoragePoolVolume(ctx, options.BackupConfig.Pool, "custom", backupName, nil)
+	if err != nil {
+		volumeExists = false
+	}
+
+	source := r.State().IncusVolume
+	req := incusApi.StorageVolumesPost{
+		Name:        backupName,
+		Type:        source.Type,
+		ContentType: source.ContentType,
+		Source: incusApi.StorageVolumeSource{
+			Name:       source.Name,
+			Type:       "copy",
+			Pool:       r.Config.Pool,
+			VolumeOnly: true,
+			Refresh:    volumeExists,
+		},
+	}
+	req.Config = source.Config
+	req.Description = source.Description
+
+	if r.client.Project() != bc.Project() {
+		req.Source.Project = r.client.Project()
+	}
+
+	copyOp, err := conn.CopyStoragePoolVolume(ctx, options.BackupConfig.Pool, req)
+	err = r.client.hookOperation(ctx, ActionBackup, r, options, copyOp, err)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionBackup, r, options, ErrBackupFailed.WithText("copy").Wrap(err))
+	}
+
+	snap := incusApi.StorageVolumeSnapshotsPost{
+		Name: options.BackupConfig.Timestamp,
+	}
+
+	snapOp, err := conn.CreateStoragePoolVolumeSnapshot(ctx, options.BackupConfig.Pool, source.Type, backupName, snap)
+	err = r.client.hookOperation(ctx, ActionBackup, r, options, snapOp, err)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionBackup, r, options, ErrBackupFailed.WithText("snapshot").Wrap(err))
+	}
+
+	return r.client.hookAfter(ctx, ActionBackup, r, options, nil)
+}
+
 var (
 	_ Resource   = (*StorageVolume)(nil)
 	_ EnsureAble = (*StorageVolume)(nil)
 	_ StartAble  = (*StorageVolume)(nil)
 	_ DeleteAble = (*StorageVolume)(nil)
+	_ BackupAble = (*StorageVolume)(nil)
 )
