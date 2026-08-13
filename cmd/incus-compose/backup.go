@@ -119,6 +119,7 @@ func newBackupCreateCommand() *cli.Command {
 			lock, err := client.BackupLock(ctx, bc, backupConfig, 1*time.Minute, "metadata.lock")
 			if err != nil {
 				globalClient.LogError("Failed to lock metadata", "error", err)
+				return errLogged.Wrap(err)
 			}
 			defer c.WarnError(lock.Unlock, "Failed to release the metadata lock")
 
@@ -156,6 +157,7 @@ func newBackupCreateCommand() *cli.Command {
 			if !cmd.Root().Bool("debug") {
 				progress = newProgressRenderer(cmd.Root().Writer, noColor(ctx), isatty.IsTerminal(os.Stdout.Fd()))
 				progress.Start(c)
+				defer progress.Stop(c)
 			}
 
 			order, err := p.ServiceOrder(false)
@@ -181,10 +183,6 @@ func newBackupCreateCommand() *cli.Command {
 			if err != nil {
 				c.LogError("Backing up resources", "error", err)
 				return errLogged.Wrap(err)
-			}
-
-			if progress != nil {
-				progress.Stop(c)
 			}
 
 			m := backupManifest{
@@ -216,6 +214,11 @@ func newBackupCreateCommand() *cli.Command {
 			err = client.BackupWriteManifest(ctx, bc, backupConfig, data)
 			if err != nil {
 				c.LogError("Failed to write the backup manifest", "error", err)
+				return errLogged.Wrap(err)
+			}
+
+			if progress != nil {
+				progress.Stop(c)
 			}
 
 			if !cmd.Bool("live") {
