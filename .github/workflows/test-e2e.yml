@@ -110,21 +110,26 @@ jobs:
         include:
           - name: Hugo
             args: "-run TestExample/hugo"
+            remote: ict-stable
           - name: Leafwiki
             args: "-run TestExample/leafwiki"
+            remote: ict-custom
           - name: Immich
             args: "-run TestExample/immich -timeout 20m"
+            remote: ict-lts
           # - name: ManyDependencies
           #   args: "-run TestExample/many-dependencies"
+          #   remote: ict-daily
           - name: WikiJS
             args: "-run TestExample/wikijs"
+            remote: ict-daily
     runs-on: [self-hosted, incus-compose]
     timeout-minutes: 60
     permissions:
       contents: read
       checks: write # publish JUnit results as a check run
     env:
-      INCUS_REMOTE: ict-daily
+      INCUS_REMOTE: ${{ matrix.remote }}
       INCUS_COMPOSE_IMAGE_CACHE: incus-compose-tests-cache
       NO_COLOR: 1
       INCUS_COMPOSE_TEST_EXAMPLES: 1
