@@ -11,6 +11,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // runFlags parses args through the real run command and hands back the config
@@ -268,7 +269,7 @@ func TestProjectSchedulerSurvivesADeadServer(t *testing.T) {
 // the only thing that finds instances that were already up.
 func TestDiscoverProjectSelectsWatchableInstances(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	c := testProject(t, "healthd-discover-")
 

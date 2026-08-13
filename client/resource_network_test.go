@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -313,7 +315,7 @@ func TestNetworkExternal_InitialIncusNameIsRaw(t *testing.T) {
 
 func TestNetworkEnsure(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -392,7 +394,7 @@ func TestNetworkEnsure(t *testing.T) {
 
 func TestNetworkEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "network-idempotent-")
 
@@ -408,7 +410,7 @@ func TestNetworkEnsure_Idempotent(t *testing.T) {
 
 func TestNetworkEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "network-retry-")
 
@@ -426,7 +428,7 @@ func TestNetworkEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 
 func TestNetworkEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "network-persist-")
 
@@ -446,7 +448,7 @@ func TestNetworkEnsure_ExistsOnNewClient(t *testing.T) {
 
 func TestNetworkProjectDeletesNetwork(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "network-projdel-")
 
@@ -474,7 +476,7 @@ func TestNetworkProjectDeletesNetwork(t *testing.T) {
 
 func TestNetworkDelete(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -522,7 +524,7 @@ func TestNetworkDelete(t *testing.T) {
 
 func TestNetworkHooks(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -647,7 +649,7 @@ func TestNetworkHooks(t *testing.T) {
 
 func TestNetworkExternal_EnsureFailsIfNotExists(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "network-ext-")
 
@@ -662,7 +664,7 @@ func TestNetworkExternal_EnsureFailsIfNotExists(t *testing.T) {
 
 func TestNetworkExternal_DeleteIsNoOp(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "network-extdel-")
 
@@ -804,7 +806,7 @@ func TestCalcIPv6DHCPRange(t *testing.T) {
 }
 
 func TestNetworkEnsure_ConcurrentCreate(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	// OverrideName skips the per-project prefix, so every worker resolves to

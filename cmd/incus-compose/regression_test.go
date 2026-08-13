@@ -7,13 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // TestNoDanglingNetworksAfterDown is a regression test for the project default
 // network not being removed after `down --project`.
 func TestNoDanglingNetworksAfterDown(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -45,8 +46,8 @@ func TestNoDanglingNetworksAfterDown(t *testing.T) {
 // TestE2EStartStopIdempotent checks that running start/stop twice (idempotent) works without errors.
 func TestE2EStartStopIdempotent(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/simple/compose.yaml"
 
@@ -88,8 +89,8 @@ func TestE2EStartStopIdempotent(t *testing.T) {
 
 func TestE2ENoImageCache(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/simple/compose.yaml"
 

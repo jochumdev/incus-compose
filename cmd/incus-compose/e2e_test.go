@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func cleanLines(t *testing.T, in string) []string {
@@ -25,8 +26,8 @@ func cleanLines(t *testing.T, in string) []string {
 // and does not wait on its (unstarted) service_healthy dependencies.
 func TestE2EUpNoDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/proxy/compose.yaml"
 
@@ -62,8 +63,8 @@ func TestE2EUpNoDeps(t *testing.T) {
 // marker content can only come from the pushed config.
 func TestE2EConfigOverwritesImageFile(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/with-configs/compose.yaml"
 
@@ -90,8 +91,8 @@ func TestE2EConfigOverwritesImageFile(t *testing.T) {
 // replace from the append that `command:` alone still does.
 func TestE2EEntrypointReplacesImageEntrypoint(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/proxy/compose.yaml"
 
@@ -124,8 +125,8 @@ func TestE2EEntrypointReplacesImageEntrypoint(t *testing.T) {
 // linked services too.
 func TestE2EUpDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/proxy/compose.yaml"
 
@@ -157,8 +158,8 @@ func TestE2EUpDeps(t *testing.T) {
 // service and leaves its dependants running.
 func TestE2EDownNoDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/proxy/compose.yaml"
 
@@ -193,8 +194,8 @@ func TestE2EDownNoDeps(t *testing.T) {
 // and also removes the services that depend on the named one.
 func TestE2EDownDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/proxy/compose.yaml"
 
@@ -230,8 +231,8 @@ func TestE2EDownDeps(t *testing.T) {
 // (other running instances show up only as <orphan>).
 func TestE2EPsDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/proxy/compose.yaml"
 
@@ -268,8 +269,8 @@ func TestE2EPsDeps(t *testing.T) {
 // dependency conditions); --with-deps follows depends_on like up/down.
 func TestE2EStartStopRestartWithDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	compose := "../../test/fixtures/three-services/compose.yaml"
 
@@ -318,8 +319,8 @@ func TestE2EStartStopRestartWithDeps(t *testing.T) {
 
 func TestE2EUpUp(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -345,8 +346,8 @@ func TestE2EUpUp(t *testing.T) {
 
 func TestE2EDownDown(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -376,8 +377,8 @@ func TestE2EDownDown(t *testing.T) {
 
 func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -419,8 +420,8 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 
 func TestE2EUpRecreate(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -446,8 +447,8 @@ func TestE2EUpRecreate(t *testing.T) {
 
 func TestE2EUpUpRecreate(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -481,8 +482,8 @@ func TestE2EUpUpRecreate(t *testing.T) {
 
 func TestE2EUpRecreateDown(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -516,8 +517,8 @@ func TestE2EUpRecreateDown(t *testing.T) {
 
 func TestE2ELifecycleSimple(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -580,8 +581,8 @@ func TestE2ELifecycleSimple(t *testing.T) {
 
 func TestE2EUpDownScale(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -607,8 +608,8 @@ func TestE2EUpDownScale(t *testing.T) {
 
 func TestE2EUpDownDownscale(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -634,8 +635,8 @@ func TestE2EUpDownDownscale(t *testing.T) {
 
 func TestE2EUpDownWithScale(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -661,8 +662,8 @@ func TestE2EUpDownWithScale(t *testing.T) {
 
 func TestE2EListSnapshots(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -691,8 +692,8 @@ func TestE2EListSnapshots(t *testing.T) {
 
 func TestE2EExternalNetwork(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -729,8 +730,8 @@ func TestE2EExternalNetwork(t *testing.T) {
 
 func TestE2EUpDownWithIncusOptions(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -756,8 +757,8 @@ func TestE2EUpDownWithIncusOptions(t *testing.T) {
 
 func TestE2EUpDownWithProjectOptions(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -783,8 +784,8 @@ func TestE2EUpDownWithProjectOptions(t *testing.T) {
 
 func TestE2EUpDownWithSecrets(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -810,8 +811,8 @@ func TestE2EUpDownWithSecrets(t *testing.T) {
 
 func TestE2EUpDownWithSecretsVerifyFiles(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -851,8 +852,8 @@ func TestE2EUpDownWithSecretsVerifyFiles(t *testing.T) {
 
 func TestE2EUpDownWithConfigs(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -878,8 +879,8 @@ func TestE2EUpDownWithConfigs(t *testing.T) {
 
 func TestE2EUpDownWithConfigsVerifyFiles(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -919,8 +920,8 @@ func TestE2EUpDownWithConfigsVerifyFiles(t *testing.T) {
 
 func TestE2EDownImages(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -954,8 +955,8 @@ func TestE2EDownImages(t *testing.T) {
 
 func TestE2EUpDownWithVolume(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -984,8 +985,8 @@ func TestE2EUpDownWithVolume(t *testing.T) {
 // applies only to that invocation; the next plain `up` restores replicas.
 func TestE2EUpReconcilesToReplicas(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()

@@ -3,4 +3,3 @@ address=/service-db/-stripped-
 address=/service-db2/-stripped-
 cname=db.mydomain.lan,my-db
 cname=db2.mydomain.lan,my-db2
-

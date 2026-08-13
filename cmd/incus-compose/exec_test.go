@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // TestExecSelectsCorrectInstance is a regression test for the exec command
@@ -15,8 +17,8 @@ import (
 // the output matches the expected Incus instance name.
 func TestExecSelectsCorrectInstance(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -54,8 +56,8 @@ func TestExecSelectsCorrectInstance(t *testing.T) {
 // to the id-shifted named volume succeeds and the file lands owned by 1000:1000.
 func TestE2EExecRunsAsInstanceUser(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()

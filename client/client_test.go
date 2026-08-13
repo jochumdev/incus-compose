@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestMain(m *testing.M) {
@@ -22,13 +24,6 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 	os.Exit(code)
-}
-
-func skipLocal(t *testing.T) {
-	t.Helper()
-	if os.Getenv("INCUS_COMPOSE_TEST_LOCAL") != "" {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_LOCAL is set, run `just test` for this test")
-	}
 }
 
 // newRandomTestClient creates a GlobalClient, a fresh project-scoped Client,
@@ -145,7 +140,7 @@ func TestSanitizeProjectName(t *testing.T) {
 
 func TestClientConnection_IsConnected(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -154,7 +149,7 @@ func TestClientConnection_IsConnected(t *testing.T) {
 
 func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -180,7 +175,7 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 
 func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -196,7 +191,7 @@ func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 
 func TestClientProject_EnsureWithCreate(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -210,7 +205,7 @@ func TestClientProject_EnsureWithCreate(t *testing.T) {
 
 func TestClientProject_EnsureWithoutCreate_Fails(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -222,7 +217,7 @@ func TestClientProject_EnsureWithoutCreate_Fails(t *testing.T) {
 
 func TestClientProject_NameIsPreserved(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -236,7 +231,7 @@ func TestClientProject_NameIsPreserved(t *testing.T) {
 
 func TestClientProject_NameIsSanitized(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -252,7 +247,7 @@ func TestClientProject_NameIsSanitized(t *testing.T) {
 
 func TestClientProject_EnsureIdempotent(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -268,7 +263,7 @@ func TestClientProject_EnsureIdempotent(t *testing.T) {
 
 func TestClientProject_DeleteSucceeds(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -282,7 +277,7 @@ func TestClientProject_DeleteSucceeds(t *testing.T) {
 
 func TestClientProject_DeleteNonExistent_NoError(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)

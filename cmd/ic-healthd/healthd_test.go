@@ -20,13 +20,6 @@ import (
 // checks use: true, false, wget and httpd.
 const testImage = "docker.io/library/busybox:glibc"
 
-func skipLocal(t *testing.T) {
-	_, ok := os.LookupEnv("INCUS_COMPOSE_TEST_LOCAL")
-	if ok {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_LOCAL is set, run `just test` for this test")
-	}
-}
-
 // testProject creates a throwaway Incus project, deleted on teardown. Each test
 // gets its own, which is also how the daemon is used.
 func testProject(t *testing.T, prefix string) *client.Client {

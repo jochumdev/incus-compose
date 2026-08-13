@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -181,7 +182,7 @@ func TestImageConfig_RemoteAndImageParsed(t *testing.T) {
 
 func TestImageEnsure(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -252,7 +253,7 @@ func TestImageEnsure(t *testing.T) {
 
 func TestImageEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-idempotent-")
 
@@ -268,7 +269,7 @@ func TestImageEnsure_Idempotent(t *testing.T) {
 
 func TestImageEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-retry-")
 
@@ -286,7 +287,7 @@ func TestImageEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 
 func TestImageEnsure_ExistingImage_NewResource(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-existing-")
 
@@ -308,7 +309,7 @@ func TestImageEnsure_ExistingImage_NewResource(t *testing.T) {
 
 func TestImageEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-persist-")
 
@@ -332,7 +333,7 @@ func TestImageEnsure_ExistsOnNewClient(t *testing.T) {
 
 func TestImageDelete(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -373,7 +374,7 @@ func TestImageDelete(t *testing.T) {
 
 func TestImageDelete_NotEnsured_NoError(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-delne-")
 
@@ -389,7 +390,7 @@ func TestImageDelete_NotEnsured_NoError(t *testing.T) {
 
 func TestImageProperties(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-props-")
 
@@ -408,7 +409,7 @@ func TestImageProperties(t *testing.T) {
 
 func TestImageFromCache(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-from-cache-")
 
@@ -431,7 +432,7 @@ func TestImageFromCache(t *testing.T) {
 
 func TestImagePullNever_StoreHit(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-pull-never-hit-")
 
@@ -452,7 +453,7 @@ func TestImagePullNever_StoreHit(t *testing.T) {
 
 func TestImagePullNever_StoreMiss(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-pull-never-miss-")
 
@@ -468,7 +469,7 @@ func TestImagePullNever_StoreMiss(t *testing.T) {
 
 func TestImageBuild_StoreHitSkipsBuilder(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	// Seed the cache under the alias the build would produce.
@@ -504,7 +505,7 @@ func lockableImage(t *testing.T, c *Client, name string) *Image {
 }
 
 func TestImageLockStore_SameAliasSerializes(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	name := "docker.io/library/ic-lock-" + strings.ToLower(RandString(8)) + ":latest"
@@ -540,7 +541,7 @@ func TestImageLockStore_SameAliasSerializes(t *testing.T) {
 }
 
 func TestImageLockStore_DifferentAliasesDoNotBlock(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	suffix := strings.ToLower(RandString(8))
@@ -569,7 +570,7 @@ func TestImageLockStore_DifferentAliasesDoNotBlock(t *testing.T) {
 }
 
 func TestImageEnsure_ConcurrentSameImage(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	const workers = 4
@@ -605,7 +606,7 @@ func TestImageEnsure_ConcurrentSameImage(t *testing.T) {
 }
 
 func TestImageEnsure_ConcurrentDifferentImages(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	names := []string{
@@ -649,7 +650,7 @@ func TestImageEnsure_ConcurrentDifferentImages(t *testing.T) {
 }
 
 func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-cache-pruned-")
 
@@ -684,7 +685,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 }
 
 func TestImagePullNever_NoCacheStoreMiss(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-never-nocache-")
 	c.imageCache = nil
@@ -698,7 +699,7 @@ func TestImagePullNever_NoCacheStoreMiss(t *testing.T) {
 }
 
 func TestImageCreateDirect_NoSource(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-nosource-")
 	c.imageCache = nil
@@ -711,7 +712,7 @@ func TestImageCreateDirect_NoSource(t *testing.T) {
 }
 
 func TestImageLockStore_NoCacheIsNoop(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-lock-nocache-")
 	c.imageCache = nil
@@ -726,7 +727,7 @@ func TestImageLockStore_NoCacheIsNoop(t *testing.T) {
 }
 
 func TestImageLockStore_CustomVolumeIsSeparate(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	name := "docker.io/library/ic-lockvol-" + strings.ToLower(RandString(8)) + ":latest"
@@ -765,7 +766,7 @@ func TestImageLockStore_CustomVolumeIsSeparate(t *testing.T) {
 }
 
 func TestImageLockStore_ConcurrentVolumeCreate(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	// A volume name nothing has created yet, so every worker races to make it.
@@ -817,7 +818,7 @@ func TestImageLockStore_ConcurrentVolumeCreate(t *testing.T) {
 }
 
 func TestImageBuild_NeverErrors(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-build-never-")
 
@@ -832,7 +833,7 @@ func TestImageBuild_NeverErrors(t *testing.T) {
 }
 
 func TestImageBuild_WithoutCreateDoesNotBuild(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-build-nocreate-")
 
@@ -848,7 +849,7 @@ func TestImageBuild_WithoutCreateDoesNotBuild(t *testing.T) {
 }
 
 func TestImageBuild_ForceIgnoresStoreHit(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	// Seed the cache under the alias a build would produce.
@@ -872,7 +873,7 @@ func TestImageBuild_ForceIgnoresStoreHit(t *testing.T) {
 
 func TestImageNoCache(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "image-no-cache-")
 	c.imageCache = nil
@@ -885,7 +886,7 @@ func TestImageNoCache(t *testing.T) {
 
 func TestImagePullDeletes(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	c := newRandomTestClient(t.Context(), t, "image-pull-delete-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/alpine:3.22", &ImageConfig{})
@@ -912,7 +913,7 @@ func TestImagePullDeletes(t *testing.T) {
 
 func TestImageHooks(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {

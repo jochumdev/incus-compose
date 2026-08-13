@@ -6,16 +6,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestWellKnownRegistryQuayIO(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	ctx := t.Context()
 	pn := t.Name()
 
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   hello:
     image: quay.io/podman/hello
@@ -33,12 +35,12 @@ func TestWellKnownRegistryQuayIO(t *testing.T) {
 
 func TestWellKnownRegistryMCR(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	ctx := t.Context()
 	pn := t.Name()
 
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   hello:
     image: mcr.microsoft.com/azurelinux/busybox:1.36

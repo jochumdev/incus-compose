@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // pulledImageAliases runs the wrapped `incus image list --format=json` inside the
@@ -47,8 +49,8 @@ func hasImage(aliases []string, sub string) bool {
 // verified through the wrapped `incus image list --format=json`.
 func TestE2EPull(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -92,8 +94,8 @@ func TestE2EPull(t *testing.T) {
 // service's image while `pull --with-deps <service>` also follows depends_on.
 func TestE2EPullWithDeps(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -126,12 +128,12 @@ func TestE2EPullWithDeps(t *testing.T) {
 // image that cannot be resolved from any registry.
 func TestE2EPullInvalidImage(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   bogus:
     image: docker.io/library/incus-compose-does-not-exist:latest
@@ -151,8 +153,8 @@ func TestE2EPullInvalidImage(t *testing.T) {
 // build config; plain pull tries (and fails) to pull them from a registry.
 func TestE2EPullIgnoreBuildable(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()

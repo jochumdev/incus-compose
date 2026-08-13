@@ -16,6 +16,8 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // waitOperation drains an operation channel and returns its outcome, which is
@@ -61,7 +63,7 @@ func testProject(t *testing.T, conn *Connection, prefix string) string {
 // OCI image from a registry into one project, then copy it into another.
 // Neither hop touches a registry from here; incusd does the fetching.
 func TestIncusImagePullAndCopy(t *testing.T) {
-	skipE2E(t)
+	testlib.SkipE2E(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -272,7 +274,7 @@ func TestIncusCreateImageRefusesWithoutMetadata(t *testing.T) {
 // TestIncusCreateImageUploadAgainstRealIncus imports a split image the way the
 // compose `build:` path does, from tarballs rather than from a remote.
 func TestIncusCreateImageUploadAgainstRealIncus(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()

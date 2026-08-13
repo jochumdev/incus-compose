@@ -17,14 +17,8 @@ import (
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/shared"
+	"github.com/lxc/incus-compose/testlib"
 )
-
-func skipE2E(t *testing.T) {
-	_, ok := os.LookupEnv("INCUS_COMPOSE_TEST_E2E")
-	if !ok {
-		t.Skip("Skipping: env INCUS_COMPOSE_TEST_E2E is not set, run `just test-e2e` for this test")
-	}
-}
 
 // newToken mints the trust token incus-compose hands the sidecar. Incus takes
 // the name and the scope from here, so projects is what bounds the daemon;
@@ -240,8 +234,8 @@ func setState(t *testing.T, conn *iclient.Connection, name string, req incusApi.
 // the one-time token, persist the pair, and come back without a token.
 func TestE2EConnectRegistersThenReuses(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-connect-")
 
@@ -272,8 +266,8 @@ func TestE2EConnectRegistersThenReuses(t *testing.T) {
 // token: a file in secrets-dir, not the environment.
 func TestE2EConnectRegistersFromATokenFile(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-connect-file-")
 
@@ -296,8 +290,8 @@ func TestE2EConnectRegistersFromATokenFile(t *testing.T) {
 // sidecar from looking healthy while it can do nothing.
 func TestE2EConnectWithoutTokenOrCert(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-connect-bare-")
 
@@ -312,8 +306,8 @@ func TestE2EConnectWithoutTokenOrCert(t *testing.T) {
 // depends_on: { condition: service_healthy }.
 func TestE2ESchedulerReportsHealthy(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-healthy-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{
@@ -332,8 +326,8 @@ func TestE2ESchedulerReportsHealthy(t *testing.T) {
 // a verdict: the status only turns after the configured run of failures.
 func TestE2ESchedulerReportsUnhealthyAfterRetries(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-unhealthy-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{
@@ -353,8 +347,8 @@ func TestE2ESchedulerReportsUnhealthyAfterRetries(t *testing.T) {
 // raw API stop leaves no intent marker, so the restart policy applies.
 func TestE2ESchedulerRestartsACrashedInstance(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-crash-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{
@@ -382,8 +376,8 @@ func TestE2ESchedulerRestartsACrashedInstance(t *testing.T) {
 // lifecycle listener, and a verdict in each project.
 func TestE2EMultipleProjects(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	one := testProject(t, "healthd-multi-a-")
 	two := testProject(t, "healthd-multi-b-")
@@ -409,8 +403,8 @@ func TestE2EMultipleProjects(t *testing.T) {
 // the reload is only repaired if that scheduler is alive and still fed.
 func TestE2EReloadKeepsWatching(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-reload-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{
@@ -441,8 +435,8 @@ func TestE2EReloadKeepsWatching(t *testing.T) {
 // what carries the marker and leaves everything else alone.
 func TestE2EDynamicScope(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	marked := testProject(t, "healthd-scope-on-")
 	plain := testProject(t, "healthd-scope-off-")
@@ -488,8 +482,8 @@ func TestE2EDynamicScope(t *testing.T) {
 // certificate cache, so a restricted daemon stays filtered on the old name.
 func TestE2EProjectRenamed(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-rename-")
 
@@ -544,8 +538,8 @@ func TestE2EProjectRenamed(t *testing.T) {
 // not write must still end up corrected.
 func TestE2EStatusIsRepairedAfterAnotherWriter(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-restatus-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{
@@ -574,8 +568,8 @@ func TestE2EStatusIsRepairedAfterAnotherWriter(t *testing.T) {
 // elapses, so the restart it queued must not fire.
 func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-bounce-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{
@@ -611,8 +605,8 @@ func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 // stop` marks the instance, and unless-stopped must leave it alone.
 func TestE2ESchedulerHonoursAnIntentionalStop(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	c := testProject(t, "healthd-marked-")
 	name := testContainer(t, c, "web", healthKeys(map[string]string{

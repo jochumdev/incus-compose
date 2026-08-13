@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -82,7 +84,7 @@ func TestStorageVolumeConfig_CustomPool(t *testing.T) {
 
 func TestStorageVolumeEnsure(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -163,7 +165,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 
 func TestStorageVolumeEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "volume-idempotent-")
 
@@ -179,7 +181,7 @@ func TestStorageVolumeEnsure_Idempotent(t *testing.T) {
 
 func TestStorageVolumeEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "volume-retry-")
 
@@ -197,7 +199,7 @@ func TestStorageVolumeEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 
 func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "volume-shifted-")
 
@@ -214,7 +216,7 @@ func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 
 func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "volume-healthd-")
 
@@ -240,7 +242,7 @@ func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 
 func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(ctx, t, "volume-persist-")
 
@@ -264,7 +266,7 @@ func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 
 func TestStorageVolumeDelete(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -305,7 +307,7 @@ func TestStorageVolumeDelete(t *testing.T) {
 
 func TestStorageVolumeHooks(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -425,7 +427,7 @@ func TestStorageVolumeHooks(t *testing.T) {
 }
 
 func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	ctx := t.Context()
 
 	// One project, one volume name, so every worker races to create it.

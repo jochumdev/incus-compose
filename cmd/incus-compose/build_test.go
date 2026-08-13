@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func skipIfNoBuilder(t *testing.T) {
@@ -29,20 +30,9 @@ func skipIfNoBuilder(t *testing.T) {
 	t.Skip("Skipping: podman or docker not found")
 }
 
-func writeTempFiles(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-	}
-	return dir
-}
-
 func TestBuildCommandWithBuildFixture(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	skipIfNoBuilder(t)
 	t.Parallel()
 
@@ -69,14 +59,14 @@ func TestBuildCommandWithBuildFixture(t *testing.T) {
 }
 
 func TestBuildCommandWithServiceFilter(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	skipIfNoBuilder(t)
 	t.Parallel()
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"Dockerfile": `FROM docker.io/alpine:latest AS runtime
 RUN echo "built by incus-compose"
 `,
@@ -116,14 +106,14 @@ RUN echo "built by incus-compose"
 // TestE2EBuildImageEnvironment pins the built image to the environment.* keys
 // Incus derives itself when it unpacks a pulled OCI image.
 func TestE2EBuildImageEnvironment(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	skipIfNoBuilder(t)
 	t.Parallel()
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"Dockerfile": `FROM docker.io/alpine:latest
 ENV GREETING=hello
 ENV PATH=/opt/bin:/usr/bin
@@ -159,14 +149,14 @@ ENV PATH=/opt/bin:/usr/bin
 // TestE2EUpBuildRecreates pins that --build recreates the instances whose image
 // it rebuilt, and leaves every other service running as it was.
 func TestE2EUpBuildRecreates(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	skipIfNoBuilder(t)
 	t.Parallel()
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"Dockerfile": `FROM docker.io/alpine:latest
 RUN echo "built by incus-compose"
 `,
@@ -210,7 +200,7 @@ RUN echo "built by incus-compose"
 }
 
 func TestBuildCommandWithNoBuildServices(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -226,7 +216,7 @@ func TestBuildCommandWithNoBuildServices(t *testing.T) {
 }
 
 func TestBuildCommandWithNoMatchingBuildServices(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -242,12 +232,12 @@ func TestBuildCommandWithNoMatchingBuildServices(t *testing.T) {
 }
 
 func TestBuildCommandWithNonBuildServiceFilter(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   app:
     build:
@@ -269,12 +259,12 @@ func TestBuildCommandWithNonBuildServiceFilter(t *testing.T) {
 }
 
 func TestBuildCommandRejectsMultiplePlatforms(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   app:
     build:
@@ -298,12 +288,12 @@ func TestBuildCommandRejectsMultiplePlatforms(t *testing.T) {
 }
 
 func TestBuildCommandRejectsUnsupportedPlatform(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   app:
     build:
@@ -326,11 +316,11 @@ func TestBuildCommandRejectsUnsupportedPlatform(t *testing.T) {
 }
 
 func TestBuildCommandReportsMissingBuilder(t *testing.T) {
-	skipLocal(t)
+	testlib.SkipLocal(t)
 
 	ctx := t.Context()
 	pn := t.Name()
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   app:
     build:

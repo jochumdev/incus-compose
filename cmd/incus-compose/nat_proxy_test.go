@@ -9,14 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 // TestE2ENatProxy verifies that published ports create NAT proxy devices
 // with the correct configuration (nat=true, wildcard connect address).
 func TestE2ENATProxy(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -53,13 +54,13 @@ func TestE2ENATProxy(t *testing.T) {
 
 func TestE2ENATProxyWithPort(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
 
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   web:
     image: docker.io/nginx:alpine
@@ -94,8 +95,8 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 
 func TestE2ENATProxyWithPortAndStaticIP(t *testing.T) {
 	t.Parallel()
-	skipLocal(t)
-	skipE2E(t)
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -106,7 +107,7 @@ func TestE2ENATProxyWithPortAndStaticIP(t *testing.T) {
 
 	skipNo73(t, c)
 
-	dir := writeTempFiles(t, map[string]string{
+	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
   web:
     image: docker.io/nginx:alpine
