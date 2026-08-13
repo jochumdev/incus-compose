@@ -502,6 +502,11 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 		req.Source.Project = r.client.Project()
 	}
 
+	// Cluster-internal copies must name the member the source volume is on.
+	if source.Location != "" && source.Location != "none" {
+		req.Source.Location = source.Location
+	}
+
 	copyOp, err := conn.CopyStoragePoolVolume(ctx, options.BackupConfig.Pool, req)
 	err = r.client.hookOperation(ctx, ActionBackup, r, options, copyOp, err)
 	if err != nil {
