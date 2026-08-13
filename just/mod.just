@@ -12,11 +12,13 @@ modules:
 lint folder="./...":
     shellcheck **/*.sh
     npx --yes prettier --check .
+    cd docs; npx --yes prettier --check .
     golangci-lint run {{ folder }}
 
 # Lint and fix all files. Imports are gopls' job, not this one - see AGENTS.md.
 fix folder="./...":
     npx --yes prettier --write .
+    cd docs; npx --yes prettier --write .
     golangci-lint run --fix {{ folder }}
 
 # Run `go mod tidy` in every module, reporting every failure rather than the first.
