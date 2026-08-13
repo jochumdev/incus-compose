@@ -747,3 +747,16 @@ func TestHealthdConfigEmptyWithoutExtension(t *testing.T) {
 	assert.Zero(t, config.RestartWorkers)
 	assert.Empty(t, config.XIncus)
 }
+
+func TestBackupConfigExtractsXIncusCompose(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	compose := "x-incus-compose:\n  backup:\n    pool: mypool\nservices:\n  web:\n    image: docker.io/alpine:edge\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(compose), 0o600))
+
+	proj, err := New().Load(t.Context(), LoadWorkingDir(dir))
+	require.NoError(t, err)
+
+	assert.Equal(t, "mypool", proj.ClientConfig.Backup.Pool)
+}

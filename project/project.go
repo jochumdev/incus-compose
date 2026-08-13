@@ -163,6 +163,7 @@ type Project struct {
 
 // XICProject is the typed view of the top-level x-incus-compose extension.
 type XICProject struct {
+	Backup  client.BackupConfig `mapstructure:"backup"`
 	Healthd XICHealthd
 	XIncus  map[string]string
 }
@@ -214,6 +215,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 
 	if p.Extensions != nil {
 		var ext struct {
+			Backup  client.BackupConfig `mapstructure:"backup"`
 			Healthd struct {
 				Incus          string         `mapstructure:"incus"`
 				Network        string         `mapstructure:"network"`
@@ -243,6 +245,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.Healthd.Scope = ext.Healthd.Scope
 			p.ClientConfig.Healthd.Workers = ext.Healthd.Workers
 			p.ClientConfig.Healthd.RestartWorkers = ext.Healthd.RestartWorkers
+			p.ClientConfig.Backup = ext.Backup
 
 			for k, v := range ext.Healthd.XIncus {
 				p.ClientConfig.Healthd.XIncus[k] = fmt.Sprint(v)
@@ -252,6 +255,10 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 		var raw map[string]any
 		ok, err = p.Extensions.Get("x-incus", &raw)
 		if ok || err == nil {
+			if p.ClientConfig.XIncus == nil {
+				p.ClientConfig.XIncus = map[string]string{}
+			}
+
 			for k, v := range raw {
 				p.ClientConfig.XIncus[k] = fmt.Sprint(v)
 			}
