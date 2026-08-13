@@ -13,6 +13,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Changed
 
+- Incus 7.0.1 (LTS) or 7.2 is now the minimum, checked when a command connects
+  rather than failing somewhere further in. Older daemons have no
+  `oci_network_config`, which every compose network attachment relies on for
+  static addresses, gateways and `oci.dns.*`. (by @jochumdev)
+
 - The bridge the shared ic-healthd daemon attaches to is now called `icompose0`
   rather than `ic-healthd`. A daemon that is already running keeps its current
   bridge until it is recreated, and the old network is not removed for you.
@@ -64,6 +69,12 @@ for correct semver ordering. Headings below preserve each release's announced fo
   one goroutine; each has its own connection now. The races that sat on top of
   it are gone with it: two workers setting up the image lock volume at the same
   time, simultaneous starts resolving which ic-healthd watches the project, and
+- A failed image build says what failed. The lock the build takes first reported
+  the daemon's error unwrapped, so anything wrong with it read as a bare
+  `not found` against the image being built; it now names the lock volume and the
+  project it lives in, and `--debug` reports which stage the build reached.
+  (by @jochumdev)
+
   a wait for an instance's addresses that trusted a lifecycle event and stalled
   DNS registration until the timeout when one arrived late. (by @jochumdev)
 - ic-healthd gives up on an Incus call that stops answering instead of leaking
