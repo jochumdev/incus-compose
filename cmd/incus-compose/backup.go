@@ -31,6 +31,7 @@ func newBackupCommand() *cli.Command {
 		Category: "extensions",
 		Commands: []*cli.Command{
 			newBackupCreateCommand(),
+			newBackupListCommand(),
 		},
 	}
 }
