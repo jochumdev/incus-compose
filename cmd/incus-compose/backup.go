@@ -116,9 +116,22 @@ func newBackupCreateCommand() *cli.Command {
 			}
 			defer func() { _ = bc.Done() }()
 
-			lock, sc, err := client.BackupLock(ctx, bc, backupConfig, 1*time.Minute, "metadata.lock")
+			bMVol, err := client.BackupManifestVolume(ctx, bc, backupConfig)
+			if err != nil {
+				c.LogError("Opening the backup manifest volume", "error", err)
+				return errLogged.Wrap(err)
+			}
+
+			sc, err := bMVol.SFTP(ctx)
+			if err != nil {
+				c.LogError("Opening an SFTP client", "error", err)
+				return errLogged.Wrap(err)
+			}
+
+			lock, err := client.BackupLock(ctx, bc, sc, backupConfig, 1*time.Minute, "metadata.lock")
 			if err != nil {
 				globalClient.LogError("Failed to lock metadata", "error", err)
+				c.WarnError(sc.Close, "Failed to close the metadata lock sFTP connection")
 				return errLogged.Wrap(err)
 			}
 			defer func() {

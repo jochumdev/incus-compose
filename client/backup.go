@@ -50,26 +50,16 @@ func BackupManifestVolume(ctx context.Context, bc *Client, cfg BackupConfig) (*S
 }
 
 // BackupLock creates backupLock which you MUST release with Unlock().
-// Close the returned SFTP connection after Unlock; it keeps the volume mounted.
-func BackupLock(ctx context.Context, bc *Client, cfg BackupConfig, stale time.Duration, lockName string) (*VolumeLock, *sftp.Client, error) {
+// sc is owned by the caller; close it after Unlock.
+func BackupLock(ctx context.Context, bc *Client, sc *sftp.Client, cfg BackupConfig, stale time.Duration, lockName string) (*VolumeLock, error) {
 	bc.LogDebug("Locking", "cfg", cfg, "lock_name", lockName)
 
 	bMVol, err := BackupManifestVolume(ctx, bc, cfg)
 	if err != nil {
-		return nil, nil, err
-	}
-	sc, err := bMVol.SFTP(ctx)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	lock, err := bMVol.Lock(ctx, sc, lockName, stale)
-	if err != nil {
-		bc.WarnError(sc.Close, "Failed to close a backup lock sFTP connection")
-		return nil, nil, err
-	}
-
-	return lock, sc, err
+	return bMVol.Lock(ctx, sc, lockName, stale)
 }
 
 // BackupWriteManifest writes one run's manifest into the manifest volume.
