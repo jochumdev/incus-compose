@@ -515,6 +515,10 @@ func TestImageLockStore_SameAliasSerializes(t *testing.T) {
 	release, err := a.lockStore(ctx)
 	require.NoError(t, err)
 
+	// The t.Fatal below returns without reaching the release further down.
+	release = sync.OnceFunc(release)
+	defer release()
+
 	acquired := make(chan error, 1)
 	go func() {
 		releaseB, err := b.lockStore(ctx)
