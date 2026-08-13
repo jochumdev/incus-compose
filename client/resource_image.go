@@ -625,9 +625,13 @@ func (r *Image) lockStore(ctx context.Context) (func(), error) {
 		name = DefaultLockVolume
 	}
 
+	// The lock volume lives in the cache project, not the one being built into,
+	// so every failure here names it.
+	where := fmt.Sprintf("lock volume %q in project %q", name, r.cache.project)
+
 	res, err := r.cache.Resource(KindStorageVolume, name, &StorageVolumeConfig{})
 	if err != nil {
-		return nil, err
+		return nil, ErrCreate.WithText("getting the image " + where).Wrap(err)
 	}
 
 	vol, ok := res.(*StorageVolume)
@@ -637,18 +641,18 @@ func (r *Image) lockStore(ctx context.Context) (func(), error) {
 
 	err = RunAction(ctx, vol, ActionEnsure, OptionCreate())
 	if err != nil {
-		return nil, err
+		return nil, ErrCreate.WithText("ensuring the image " + where).Wrap(err)
 	}
 
 	sc, err := vol.SFTP(ctx)
 	if err != nil {
-		return nil, err
+		return nil, ErrCreate.WithText("connecting to the image " + where).Wrap(err)
 	}
 
 	lock, err := vol.Lock(ctx, sc, fmt.Sprintf("%x", sha256.Sum256([]byte(r.incusName))), imageLockStale)
 	if err != nil {
 		r.client.WarnError(sc.Close, "Failed to close the image lock connection")
-		return nil, err
+		return nil, ErrCreate.WithText("taking the image lock in the " + where).Wrap(err)
 	}
 
 	return func() {
@@ -899,8 +903,11 @@ func (r *Image) ensureBuild(ctx context.Context, args Options) error {
 	}
 
 	if err != nil && !args.Create {
-		return r.client.hookAfter(ctx, ActionEnsure, r, args, err)
+		return r.client.hookAfter(ctx, ActionEnsure, r, args,
+			ErrCreate.WithText("the built image is missing and creating it was not requested").Wrap(err))
 	}
+
+	r.client.LogDebug("Taking the image build lock", "resource", r)
 
 	release, err := r.lockStore(ctx)
 	if err != nil {
@@ -912,11 +919,16 @@ func (r *Image) ensureBuild(ctx context.Context, args Options) error {
 	if r.cache != nil && args.Build.Mode != BuildForce {
 		cacheAlias, _, storeErr := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
 		if storeErr == nil {
+			r.client.LogDebug("Copying the built image from the cache", "resource", r)
+
 			return r.client.hookAfter(ctx, ActionEnsure, r, args, r.copyToProject(ctx, args, cacheAlias))
 		}
 	}
 
 	r.clearState()
+
+	r.client.LogDebug("Building image", "resource", r, "context", r.Config.Build.Context)
+
 	err = r.buildImage(ctx, r.client, args)
 
 	return r.client.hookAfter(ctx, ActionEnsure, r, args, err)
