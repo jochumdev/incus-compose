@@ -1,9 +1,0 @@
-example.com.         	60	SOA	ns1.example.com. hostmaster.example.com. 2026070302 21600 60 604800 86400
-example.com.         	60	A	10.179.215.4
-example.com.         	60	NS	ns1.example.com.
-example.com.         	60	MX	10 mail.protonmail.ch.
-example.com.         	60	MX	20 mailsec.protonmail.ch.
-*.example.com.       	60	CNAME	proxy.example.com.
-dns1.example.com.    	60	A	10.179.215.2
-ns1.example.com.     	60	A	10.179.215.3
-proxy.example.com     60  A 10.179.215.4

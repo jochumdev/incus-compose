@@ -1,13 +1,19 @@
 services:
-  caddy:
+  external:
     networks:
       default:
+        ipv4_address: "${IPV4_CADDY_EXTERNAL}/${IPV4_NETMASK}"
         x-incus:
-          ipv4.address: ${IPV4_CADDY}
-          ipv4.gateway: ${IPV4_GATEWAY}
+          ipv4.gateway: "${IPV4_GATEWAY}"
+
+  internal:
+    networks:
+      default:
+        ipv4_address: "${IPV4_CADDY_INTERNAL}/${IPV4_NETMASK}"
+        x-incus:
+          ipv4.gateway: "${IPV4_GATEWAY}"
 
 networks:
   default:
-    external: true
-    x-incus-compose:
-      network: ${EXTERNAL_NETWORK}
+    external: ${NET_EXTERNAL}
+    name: "${NET_NAME}"

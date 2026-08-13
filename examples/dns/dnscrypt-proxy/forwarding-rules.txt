@@ -1,2 +1,0 @@
-example.com 10.179.215.3
-10.in-addr.arpa 10.179.215.3

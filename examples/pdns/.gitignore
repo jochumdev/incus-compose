@@ -1,6 +1,4 @@
 .env
-client.crt
-client.key
 pdns/pdns.conf
 work/
 dnscrypt-proxy/forwarding-rules.txt
