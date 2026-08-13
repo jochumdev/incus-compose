@@ -86,12 +86,14 @@ func (c *Client) RegisterDNSWatcher() error {
 			return err
 		}
 
+		mu.Lock()
+
 		// No need if there was no dnsmasq update.
 		if lastRestart.IsZero() {
+			mu.Unlock()
 			return err
 		}
 
-		mu.Lock()
 		elapsed := time.Since(lastRestart)
 		mu.Unlock()
 
