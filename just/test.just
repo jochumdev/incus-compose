@@ -10,7 +10,7 @@ v_test_timeout := env("TEST_TIMEOUT", "20m")
 
 # Run tests against nested Incus, includes direct incus tests.
 [env("INCUS_COMPOSE_IMAGE_CACHE", "incus-compose-tests-cache")]
-test folder="./..." *args: lint
+test folder="./..." *args:
     mkdir -p work/logs
     export DATE=`date +%Y%m%d-%H%M%S`; \
       gotestsum --hide-summary=skipped --format testname --jsonfile=work/logs/${DATE}.json --packages={{ folder }} \
