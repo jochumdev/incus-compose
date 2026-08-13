@@ -1,0 +1,19 @@
+services:
+  apt-cacher-ng:
+    dns:
+      - "${IPV4_DNS}"
+    networks:
+      default:
+        ipv4_address: "${IPV4_ACNG}/${IPV4_NETMASK}"
+        x-incus:
+          ipv4.gateway: "${IPV4_GATEWAY}"
+
+networks:
+  default:
+    external: ${NET_EXTERNAL}
+    name: "${NET_NAME}"
+
+volumes:
+  cache:
+    x-incus-compose:
+      pool: ${STORAGE_POOL}
