@@ -116,12 +116,15 @@ func newBackupCreateCommand() *cli.Command {
 			}
 			defer func() { _ = bc.Done() }()
 
-			lock, err := client.BackupLock(ctx, bc, backupConfig, 1*time.Minute, "metadata.lock")
+			lock, sc, err := client.BackupLock(ctx, bc, backupConfig, 1*time.Minute, "metadata.lock")
 			if err != nil {
 				globalClient.LogError("Failed to lock metadata", "error", err)
 				return errLogged.Wrap(err)
 			}
-			defer c.WarnError(lock.Unlock, "Failed to release the metadata lock")
+			defer func() {
+				c.WarnError(lock.Unlock, "Failed to release the metadata lock")
+				c.WarnError(sc.Close, "Failed to close the metadata lock sFTP connection")
+			}()
 
 			resources, err := p.Resources(c)
 			if err != nil {
