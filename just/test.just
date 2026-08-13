@@ -11,7 +11,7 @@ v_test_timeout := env("TEST_TIMEOUT", "20m")
 # Run tests against nested Incus, includes direct incus tests.
 [env("INCUS_COMPOSE_IMAGE_CACHE", "incus-compose-tests-cache")]
 test folder="./..." *args: lint
-    mkdir -p test/logs
+    mkdir -p work/logs
     export DATE=`date +%Y%m%d-%H%M%S`; \
       gotestsum --hide-summary=skipped --format testname --jsonfile=work/logs/${DATE}.json --packages={{ folder }} \
         --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num 10 --jsonfile work/logs/${DATE}.json'" \
@@ -42,7 +42,7 @@ test-all folder="./..." *args:
 
 # Run the tests with a race detector.
 test-race folder="./..." *args:
-    mkdir -p test/logs
+    mkdir -p work/logs
     gotestsum --hide-summary=skipped --jsonfile=work/logs/`date +%Y%m%d-%H%M%S`.json --packages={{ folder }} -- -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -race -v "${@:2}"
 
 # Update snapshots for long running tests.

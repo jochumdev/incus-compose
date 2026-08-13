@@ -4,7 +4,6 @@
 .mcp.json
 
 work/
-!work/logs/.gitkeep
 
 # Its generated with random host only data, still no need to commit.
 /.env
