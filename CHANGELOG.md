@@ -87,6 +87,7 @@ for correct semver ordering. Headings below preserve each release's announced fo
   time, simultaneous starts resolving which ic-healthd watches the project, and
   a wait for an instance's addresses that trusted a lifecycle event and stalled
   DNS registration until the timeout when one arrived late. (by @jochumdev)
+
 - ic-healthd gives up on an Incus call that stops answering instead of leaking
   the goroutine waiting on it, so a health check or a restart that times out no
   longer costs the daemon anything. A probe abandoned mid-command also has its

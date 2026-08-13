@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/testlib"
 )
 
 func assertBackupVolumeExists(t *testing.T, c *client.Client, pool, name string) {
@@ -170,8 +171,8 @@ func assertNoLockFile(t *testing.T, c *client.Client) {
 }
 
 func TestE2EBackupCreate(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
@@ -213,8 +214,8 @@ func TestE2EBackupCreate(t *testing.T) {
 }
 
 func TestE2EBackupCreateLive(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
@@ -254,8 +255,8 @@ func TestE2EBackupCreateLive(t *testing.T) {
 }
 
 func TestE2EBackupCreateNamed(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
@@ -285,8 +286,8 @@ func TestE2EBackupCreateNamed(t *testing.T) {
 }
 
 func TestE2EBackupCreateIncremental(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
@@ -329,11 +330,11 @@ func TestE2EBackupCreateIncremental(t *testing.T) {
 }
 
 func TestE2EBackupCreateFiltered(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
-	projectDir := writeTempFiles(t, map[string]string{
+	projectDir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `
 services:
   db:
@@ -387,8 +388,8 @@ volumes:
 }
 
 func TestE2EBackupCreateNoVolumes(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
@@ -418,11 +419,11 @@ func TestE2EBackupCreateNoVolumes(t *testing.T) {
 }
 
 func TestE2EBackupCreateDefaultPool(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
-	projectDir := writeTempFiles(t, map[string]string{
+	projectDir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `
 services:
   app:
@@ -465,8 +466,8 @@ volumes:
 }
 
 func TestE2EBackupCreateParallel(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
@@ -514,8 +515,8 @@ func TestE2EBackupCreateParallel(t *testing.T) {
 }
 
 func TestE2EBackupCreateDataIntegrity(t *testing.T) {
-	skipE2E(t)
-	skipLocal(t)
+	testlib.SkipE2E(t)
+	testlib.SkipLocal(t)
 	t.Parallel()
 
 	compose := "../../test/fixtures/with-backup/compose.yaml"
