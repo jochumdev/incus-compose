@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/lxc/incus/v7/shared/util"
@@ -459,7 +461,7 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 	}
 
 	lockName := SanitizeIncusName(r.IncusName(), MaxIncusNameLen-5) + ".lock"
-	lock, err := BackupLock(ctx, bc, options.BackupConfig, 0, lockName)
+	lock, err := BackupLock(ctx, bc, options.BackupConfig, 5*time.Minute, lockName)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionBackup, r, options, err)
 	}
@@ -471,10 +473,10 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 	}
 
 	backupName := r.backupName()
-	volumeExists := true
+	volumeExists := false
 	_, _, err = conn.GetStoragePoolVolume(ctx, options.BackupConfig.Pool, "custom", backupName, nil)
-	if err != nil {
-		volumeExists = false
+	if !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
+		volumeExists = true
 	}
 
 	source := r.State().IncusVolume

@@ -21,7 +21,7 @@ type BackupVolume struct {
 
 // BackupConfig holds backup configuration from x-incus-compose.backup.
 type BackupConfig struct {
-	MetaVolume string `json:"meta_volume"`
+	MetaVolume string `json:"meta_volume" mapstructure:"meta_volume"`
 	Timestamp  string `json:"timestamp"`
 	Name       string `json:"name"`
 	Pool       string `json:"pool"`
@@ -62,6 +62,7 @@ func BackupLock(ctx context.Context, bc *Client, cfg BackupConfig, stale time.Du
 
 	lock, err := bMVol.Lock(ctx, sc, lockName, stale)
 	if err != nil {
+		bc.WarnError(sc.Close, "Failed to close a backup lock sFTP connection")
 		return nil, err
 	}
 
