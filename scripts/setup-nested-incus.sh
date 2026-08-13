@@ -16,6 +16,7 @@ IMAGE="images:debian/trixie"
 INCUS_REPO="stable" # stable, lts-6.0, lts-7.0, daily
 FORCE="false"
 STORAGE_POOL="default"
+HOST_STORAGE_POOL=""
 BRIDGE="incusbr0"
 LISTEN=""
 OVN="false"
@@ -50,6 +51,8 @@ OPTIONS:
 -r REPO         Incus repository: stable, lts-6.0, lts-7.0, daily (default: ${INCUS_REPO})
 -l ADDRESS      Add port proxy (example: 127.0.0.1:2443) (default: "")
 -p POOL         Storage pool to create (default: ${STORAGE_POOL})
+-s POOL         Storage pool on the host to put the container itself on
+                (default: whatever the host's default profile uses)
 -b BRIDGE       Bridge to create (default: ${BRIDGE})
 -o              Install OVN and configure it (default: false)
 -f              Force delete any existing container (default: false)
@@ -70,7 +73,7 @@ EOF
 }
 
 # Parse arguments
-while getopts "c:n:i:r:l:p:b:ofh" opt; do
+while getopts "c:n:i:r:l:p:s:b:ofh" opt; do
     case ${opt} in
     c)
         CLIENT_CERT="${OPTARG}"
@@ -89,6 +92,9 @@ while getopts "c:n:i:r:l:p:b:ofh" opt; do
         ;;
     p)
         STORAGE_POOL="${OPTARG}"
+        ;;
+    s)
+        HOST_STORAGE_POOL="${OPTARG}"
         ;;
     b)
         BRIDGE="${OPTARG}"
@@ -175,6 +181,7 @@ echo "    Incus repository: ${INCUS_REPO}"
 echo "    Repository URL: ${REPO_URL}"
 echo "    Client certificate: ${CLIENT_CERT}"
 echo "    Storage pool: ${STORAGE_POOL}"
+echo "    Host storage pool: ${HOST_STORAGE_POOL:-<host default>}"
 echo "    OVN: ${OVN}"
 echo ""
 
@@ -192,9 +199,15 @@ fi
 echo "==> Creating nested Incus container: ${CONTAINER_NAME}"
 
 # Create container with nesting enabled
+launch_opts=()
+if [[ -n "${HOST_STORAGE_POOL}" ]]; then
+    launch_opts=(--storage "${HOST_STORAGE_POOL}")
+fi
+
 incus launch "${IMAGE}" "${CONTAINER_NAME}" \
     -c security.nesting=true \
-    -c security.privileged=true
+    -c security.privileged=true \
+    "${launch_opts[@]}"
 
 CONTAINER_CREATED="true"
 
