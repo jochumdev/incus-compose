@@ -13,6 +13,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Changed
 
+- The bridge the shared ic-healthd daemon attaches to is now called `icompose0`
+  rather than `ic-healthd`. A daemon that is already running keeps its current
+  bridge until it is recreated, and the old network is not removed for you.
+  (by @jochumdev)
+
 - `up --no-start` now returns once the containers are created, as `--detach`
   does. It used to go on to follow logs from instances it never started, and the
   interrupt that ended that stream tore them down again. (by @jochumdev)

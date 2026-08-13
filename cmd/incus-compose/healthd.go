@@ -38,7 +38,7 @@ const (
 
 	// globalHealthdNetwork is the shared daemon's own bridge, so it depends on
 	// nothing about how the default project is set up.
-	globalHealthdNetwork = "ic-healthd"
+	globalHealthdNetwork = "icompose0"
 
 	// healthdVolume holds the daemon's generated cert and key.
 	healthdVolume = "ic-healthd"
@@ -365,7 +365,7 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 		return nil, nil, client.ErrUnknown.WithResource(instRes)
 	}
 
-	// The kind matters: the sidecar's network is called ic-healthd too, and
+	// The kind matters: the daemon's volume is called ic-healthd too, and
 	// ensuring it from in here would re-enter this hook forever.
 	c.AddHookBefore(func(ctx context.Context, action client.Action, r client.Resource, _ client.Options, err error) error {
 		if err != nil || action != client.ActionEnsure || r.Kind() != client.KindInstance || r.IncusName() != inst.IncusName() {
