@@ -69,6 +69,30 @@ func (c *Connection) CreateStoragePoolVolume(ctx context.Context, pool string, v
 	return err
 }
 
+// CopyStoragePoolVolume copies a volume into the pool and follows the operation.
+// The volume's Source names the pool, type and project the copy comes from.
+func (c *Connection) CopyStoragePoolVolume(ctx context.Context, pool string, volume api.StorageVolumesPost) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, http.MethodPost, incusVolumesPath(pool, volume.Type), volume, "")
+}
+
+// GetStoragePoolVolumeSnapshotNames returns a volume's snapshot names.
+func (c *Connection) GetStoragePoolVolumeSnapshotNames(ctx context.Context, pool string, volType string, name string) ([]string, error) {
+	uris := []string{}
+
+	collection := incusVolumesPath(pool, volType, name) + "/snapshots"
+	_, err := c.getStruct(ctx, collection, nil, &uris)
+	if err != nil {
+		return nil, err
+	}
+
+	return resourceNames(collection, uris)
+}
+
+// CreateStoragePoolVolumeSnapshot snapshots a volume and follows the operation.
+func (c *Connection) CreateStoragePoolVolumeSnapshot(ctx context.Context, pool string, volType string, name string, snap api.StorageVolumeSnapshotsPost) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, http.MethodPost, incusVolumesPath(pool, volType, name)+"/snapshots", snap, "")
+}
+
 // DeleteStoragePoolVolume removes a volume from a pool.
 func (c *Connection) DeleteStoragePoolVolume(ctx context.Context, pool string, volType string, name string) error {
 	_, _, err := c.do(ctx, http.MethodDelete, incusVolumesPath(pool, volType, name), nil, nil, "")

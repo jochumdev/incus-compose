@@ -703,7 +703,18 @@ func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (
 		return nil, ErrNotFound.WithKindName(KindProject, name).Wrap(err)
 	}
 
-	return c.createProject(name, options.config)
+	p, createErr := c.createProject(name, options.config)
+	if createErr != nil {
+		// Another process may have created the project in the meantime.
+		fallback, getErr := c.getProject(name)
+		if getErr != nil {
+			return nil, createErr
+		}
+
+		p = fallback
+	}
+
+	return p, nil
 }
 
 // DeleteProject deletes a project and removes it from the cache.

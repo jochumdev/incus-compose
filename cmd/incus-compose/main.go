@@ -234,6 +234,7 @@ func newRootCommand() *cli.Command {
 		newStartCommand(),
 		newStopCommand(),
 		newRestartCommand(),
+		newBackupCommand(),
 		newListCommand(),
 		newPsCommand(),
 		newPullCommand(),

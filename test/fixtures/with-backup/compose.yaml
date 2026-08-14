@@ -1,0 +1,14 @@
+x-incus-compose:
+  backup:
+
+services:
+  app:
+    image: docker.io/library/busybox:glibc
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /www && httpd -f -v -p 8080 -h /www"]
+    volumes:
+      - type: volume
+        source: data
+        target: /data
+
+volumes:
+  data:

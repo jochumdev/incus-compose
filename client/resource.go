@@ -54,6 +54,9 @@ type Options struct {
 
 	// ExternalHealthd indicates that we have an unmanaged healthd.
 	ExternalHealthd bool
+
+	BackupClient *Client
+	BackupConfig BackupConfig
 }
 
 // incusTimeout converts Timeout to the seconds value expected by the Incus
@@ -139,6 +142,14 @@ func OptionExternalHealthd() Option {
 	}
 }
 
+// OptionBackup sets options required for ActionBackup.
+func OptionBackup(c *Client, cfg BackupConfig) Option {
+	return func(o *Options) {
+		o.BackupClient = c
+		o.BackupConfig = cfg
+	}
+}
+
 // NewOptions makes a ActionArgs struct from ActionO* options.
 func NewOptions(opts ...Option) Options {
 	args := Options{
@@ -189,6 +200,9 @@ func SupportsAction(r Resource, action Action) bool {
 	case ActionLog:
 		_, ok := r.(LogAble)
 		return ok
+	case ActionBackup:
+		_, ok := r.(BackupAble)
+		return ok
 	default:
 		return false
 	}
@@ -222,6 +236,12 @@ func RunAction(ctx context.Context, r Resource, action Action, opts ...Option) e
 			return e.Log(ctx, opts...)
 		}
 		return ErrUnsupportedAction.WithAction(ActionLog).WithResource(r)
+	case ActionBackup:
+		e, ok := r.(BackupAble)
+		if ok {
+			return e.Backup(ctx, opts...)
+		}
+		return ErrUnsupportedAction.WithAction(ActionBackup).WithResource(r)
 	default:
 		return ErrUnsupportedAction.WithAction(action).WithResource(r)
 	}

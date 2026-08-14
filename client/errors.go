@@ -192,4 +192,7 @@ var (
 
 	// ErrDelete indicates a resource deletion error.
 	ErrDelete = NewError("delete failed")
+
+	// ErrBackupFailed indicates a backup failed.
+	ErrBackupFailed = NewError("backup failed")
 )

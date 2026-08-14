@@ -45,6 +45,9 @@ const (
 	KindInstance      Kind = "instance"
 )
 
+// BackupVolumePrefix is the prefix for backup volumes: %prefix-%project
+const BackupVolumePrefix = "ic-backup-"
+
 // Action identifies a resource action.
 type Action string
 
@@ -55,6 +58,7 @@ const (
 	ActionStart  Action = "start"
 	ActionStop   Action = "stop"
 	ActionLog    Action = "log"
+	ActionBackup Action = "backup"
 )
 
 // Resource defines the common interface for all Incus resources.
@@ -114,4 +118,10 @@ type DeleteAble interface {
 // LogAble is implemented by resources that can stream logs.
 type LogAble interface {
 	Log(ctx context.Context, opts ...Option) error
+}
+
+// BackupAble is implemented by resources that can be backed up.
+type BackupAble interface {
+	BackupEntry(cfg BackupConfig, backupProject string) BackupVolume
+	Backup(ctx context.Context, opts ...Option) error
 }
