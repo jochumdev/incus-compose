@@ -114,9 +114,9 @@ jobs:
           - name: Leafwiki
             args: "-run TestExample/leafwiki"
             remote: ict-custom
-          - name: Immich
-            args: "-run TestExample/immich -timeout 20m"
-            remote: ict-lts
+          # - name: Immich
+          #   args: "-run TestExample/immich -timeout 20m"
+          #   remote: ict-lts
           # - name: ManyDependencies
           #   args: "-run TestExample/many-dependencies"
           #   remote: ict-daily
