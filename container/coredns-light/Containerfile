@@ -1,0 +1,44 @@
+ARG GO_VERSION=1.26
+# Root, not :nonroot - CoreDNS binds port 53 here, and resolv.conf has no port
+# field, so a client can only ever name the privileged one.
+ARG BASE=library/busybox:glibc
+
+FROM golang:${GO_VERSION}-trixie AS build
+
+# The build context is the repository root, and the whole tree is one module -
+# no go.work, no nested modules but the benchmarks, which nothing here builds.
+# This is not a CoreDNS distribution: main composes the chain itself, so there
+# is no CoreDNS checkout to clone, no `go generate`, and no plugin.cfg.
+WORKDIR /src
+COPY . .
+
+ARG VERSION=dev
+
+# Verified in the builder rather than trusted. The version subcommand is the
+# cheapest thing that proves the binary links and its command tree parses -
+# which is what a chain composed at compile time can silently get wrong.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags "-X main.version=${VERSION}" -o /out/coredns ./cmd/coredns-light && \
+    /out/coredns version && \
+    /out/coredns run --help > /dev/null
+
+FROM ${BASE}
+COPY --from=build /out/coredns /usr/local/sbin/coredns
+
+# Sets GOMEMLIMIT from the cgroup limit before handing over. Nothing else bounds
+# the Go heap, so a limits.memory that fits today's fleet OOM-kills on a larger
+# one without it.
+COPY --chmod=0755 container/coredns/entrypoint.sh /usr/local/sbin/entrypoint.sh
+
+WORKDIR /
+
+# 53 is the answer, 8080 is /metrics, /health and /ready.
+EXPOSE 53 53/udp 8080
+
+ENTRYPOINT ["entrypoint.sh"]
+
+# Everything else comes from the environment: COREDNS_INCUS, COREDNS_TOKEN,
+# COREDNS_FORWARD and the rest, which is what a compose file sets. There is no
+# configuration file to mount.
+CMD ["run"]

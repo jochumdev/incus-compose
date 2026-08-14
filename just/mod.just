@@ -1,42 +1,122 @@
 # The module and the gates built on it.
 #
-# One module today. The loops below exist because the coredns merge brings
-# nested modules with it (its benchmarks stay out of the module ecs_view ships
-# from), and `go list -m` does not see those from here.
+# One module, github.com/lxc/incus-compose, which is what incus-compose itself
+# is - so arriving there is a git mv and a module path rewrite rather than a
+# re-layout. benchmarks/ stays nested and out of it: the kubernetes yardstick
+# drags in client-go, and that has no business in the module ecs_view ships
+# from. It reaches back with a replace, being test-only and never published.
 
-# List every module directory, one per line.
+# Run this before you commit/push.
+pre-commit:
+    just tidy
+    just boundary
+    just lint
+    # just test-all
+
+push: pre-commit
+    git push
+
+# List every module directory, one per line. The root, plus the nested
+# benchmarks, which `go list -m` does not see from here.
 modules:
     @echo "{{ justfile_directory() }}"
+    @echo "{{ justfile_directory() }}/benchmarks/coredns/ecs_view"
+    @echo "{{ justfile_directory() }}/benchmarks/coredns/kubernetes"
 
-# Lint all files.
-lint folder="./...":
-    shellcheck **/*.sh
-    npx --yes prettier --check .
-    cd docs; npx --yes prettier --check .
-    golangci-lint run {{ folder }}
+# Dependency direction, which module edges used to make visible and no longer
+# do. One module means an upward import is just an import, so it is checked
+# rather than trusted - AGENTS.md: enforce by code, not by comment.
+#
+#   ievent/dns/ecs_view  the engine. It answers queries and derives nothing, so
+#                        it must not reach Incus, iclient, or the rest of
+#                        ievent. Living under its only consumer does not make it
+#                        part of it: what keeps the query path free of
+#                        derivation is that it cannot see where records came
+#                        from.
+#   client/, iclient/,   the library packages, at the root because that is where
+#   shared/, incustrust/ incus-compose has them and their import path is what a
+#   testlib/             library user wrote down. Imported downward only: never
+#                        reaches coredns/, cmd/, ievent/ or benchmarks/.
+#
+# A package that does not exist is a failure, not a pass. The rule above used to
+# name coredns/plugin/ecs_view, and when that moved the check went quietly
+# vacuous - which is exactly the thing a check is for.
+boundary:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    failed=()
 
-# Lint and fix all files. Imports are gopls' job, not this one - see AGENTS.md.
-fix folder="./...":
-    npx --yes prettier --write .
-    cd docs; npx --yes prettier --write .
-    golangci-lint run --fix {{ folder }}
+    check() {
+        local pkg="$1" pattern="$2" why="$3"
+        local deps
+        deps=$(go list -deps "$pkg" 2>/dev/null || true)
+        if [ -z "$deps" ]; then
+            echo "==> $pkg does not resolve, so its rule checks nothing"
+            failed+=("$pkg")
+            return
+        fi
+        local hits
+        # The package itself is in its own dep list, and a rule naming the tree
+        # it lives in would match it.
+        hits=$(echo "$deps" | grep -vFx "${pkg#./github.com/lxc/incus-compose/}" | grep -vFx "github.com/lxc/incus-compose/${pkg#./}" | grep -E "$pattern" || true)
+        if [ -n "$hits" ]; then
+            echo "==> $pkg must not import $why"
+            echo "$hits" | sed 's/^/    /'
+            failed+=("$pkg")
+        fi
+    }
 
-# Run `go mod tidy` in every module, reporting every failure rather than the first.
-tidy:
+    check ./ievent/dns/ecs_view \
+        '^github.com/lxc/incus(-compose/(client|iclient|shared|incustrust|testlib|ievent))?(/|$)' \
+        'Incus, iclient or the rest of ievent'
+
+    for dir in ./client/... ./iclient/... ./shared/... ./incustrust/... ./testlib/...; do
+        check "$dir" \
+            '^github.com/lxc/incus-compose/(coredns|cmd|ievent|benchmarks)(/|$)' \
+            'anything that consumes it'
+    done
+
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo
+        echo "boundary violated in: ${failed[*]}" >&2
+        exit 1
+    fi
+
+    echo "boundaries hold"
+
+lint:
+    golangci-lint run ./...
+
+fix:
+    golangci-lint run --fix ./...
+
+# Run golangci-lint over the module and the nested benchmarks. Carries on past a
+# failure so a sweep shows all of it, but still exits non-zero for pre-commit.
+lint-all:
     #!/usr/bin/env bash
     set -uo pipefail
     failed=()
     for dir in $(just modules); do
         echo "==> ${dir#"${PWD}"/}"
-        go -C "$dir" mod tidy || failed+=("${dir#"${PWD}"/}")
+        (cd "$dir" && golangci-lint run) || failed+=("${dir#"${PWD}"/}")
     done
     if [ ${#failed[@]} -gt 0 ]; then
         echo
-        echo "tidy failed in: ${failed[*]}" >&2
+        echo "lint failed in: ${failed[*]}" >&2
         exit 1
     fi
 
-# Build every module. Carries on past a failure so a sweep shows all of it.
+# Run golangci-lint --fix.
+fix-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for dir in $(just modules); do
+        echo "==> ${dir#"${PWD}"/}"
+        (cd "$dir" && golangci-lint run --fix ./...) || true
+    done
+
+# Build everything. One `./...` now covers the tree; the benchmarks are their
+# own modules and are built in place.
 build-all:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -57,18 +137,25 @@ build-all:
         exit 1
     fi
 
-# Run this before you commit/push.
-pre-commit:
-    just tidy
-    rg -q "// TODO" **/*.go || exit 0
-    just lint
-    just test
+# Run `go mod tidy`.
+#
+# Plain tidy, in every module, with nothing injected. The replace-and-strip
+# dance is gone with go.work: the root module needs no help resolving itself,
+# and benchmarks/coredns/ecs_view carries a permanent replace back to it.
+tidy:
+    #!/usr/bin/env bash
+    set -uo pipefail
 
-push: pre-commit
-    git push
+    # Reported rather than fatal: benchmarks/coredns/kubernetes cannot be tidied
+    # at all, since the CoreDNS kubernetes plugin needs k8s.io/api packages
+    # @latest has dropped.
+    failed=()
+    for dir in $(just modules); do
+        echo "==> ${dir#"${PWD}"/}"
+        go -C "$dir" mod tidy || failed+=("${dir#"${PWD}"/}")
+    done
 
-[private]
-log-run logfile="" cmd="":
-    @(time {{ cmd }}) 2>&1 | tee -a {{ logfile }} || EXIT_CODE=$?; \
-    echo -e "\n\nCMD: {{ cmd }}\nLog: {{ logfile }}" | tee -a {{ logfile }}; \
-    exit ${EXIT_CODE:-0}
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo
+        echo "tidy failed in: ${failed[*]}" >&2
+    fi

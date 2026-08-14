@@ -26,6 +26,9 @@ import 'just/build.just'
 import 'just/fleet.just'
 import 'just/incus.just'
 
+import 'just/coredns-build.just'
+import 'just/coredns-compose.just'
+
 [private]
 default:
     @just --list

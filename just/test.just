@@ -37,8 +37,13 @@ test-examples *args:
 [env("INCUS_COMPOSE_TEST_E2E", "1")]
 [env("INCUS_COMPOSE_TEST_EXAMPLES", "1")]
 [env("TEST_TIMEOUT", "60m")]
-test-all folder="./..." *args:
-    @just test "$@"
+test-all *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in $(just modules); do
+        echo "==> ${dir#"${PWD}"/}"
+        go -C "$dir" test ./... -race -cover "$@"
+    done
 
 # Run the tests with a race detector.
 test-race folder="./..." *args:

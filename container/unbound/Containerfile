@@ -1,0 +1,24 @@
+# An ECS-aware caching resolver to put in front of CoreDNS.
+#
+# It is the consumer the RFC 7871 scope exists for. Without one, nothing on the
+# wire reads the field and ecs_view's `echo_subnet` is unobservable; with one,
+# the two settings are the difference between a cache that keys per client and a
+# cache that hands one querier's view to another.
+#
+# The base image already listens on 0.0.0.0:53, allows 10.0.0.0/8, runs in the
+# foreground as unbound:unbound, and ends its config with
+#
+#   include-toplevel: /etc/unbound/custom.conf.d/*.conf
+#
+# which is why everything below is a drop-in rather than a whole unbound.conf.
+# include-toplevel, so a file may open clauses of its own - the forward zones
+# compose renders do exactly that.
+FROM docker.io/klutchell/unbound:1.26.0 AS base
+
+ENV home=/root
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV TERM=xterm
+
+COPY ./custom.conf.d/* /etc/unbound/custom.conf.d/
+
+ENTRYPOINT [ "unbound" ]
