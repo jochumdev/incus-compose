@@ -24,7 +24,6 @@ import 'just/mod.just'
 import 'just/test.just'
 import 'just/build.just'
 import 'just/fleet.just'
-import 'just/ghr.just'
 import 'just/incus.just'
 
 [private]
