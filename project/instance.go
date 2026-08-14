@@ -350,7 +350,18 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		if defOk {
 			netConfig.External = bool(networkDef.External)
 			netConfig.Extensions = networkExtensions(networkDef)
+			// compose-go always fills Name in, with the key for an external network
+			// and {project}_{key} otherwise; anything else is a `name:` the user
+			// wrote, and it beats the extension.
+			defaultName := name
+			if !netConfig.External {
+				defaultName = p.Name + "_" + name
+			}
+
 			netConfig.OverrideName = xICInstanceNetwork(networkDef)
+			if networkDef.Name != "" && networkDef.Name != defaultName {
+				netConfig.OverrideName = networkDef.Name
+			}
 
 			// Incus documents "auto" for ipv4.address/ipv6.address, but it is
 			// broken upstream (fix pending), so leave the key unset instead.
@@ -395,17 +406,21 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 
 		extensions := map[string]string{}
 		userExtensions := map[string]string{}
+		noGateway := false
 		if sNet != nil && sNet.Extensions != nil {
 			userExtensions = xIncusExtensions(sNet.Extensions)
 
 			var ext struct {
-				Internal bool `mapstructure:"internal"`
+				Internal bool  `mapstructure:"internal"`
+				Gateway  *bool `mapstructure:"gateway"`
 			}
 			ok, err := sNet.Extensions.Get("x-incus-compose", &ext)
 			if ok || err == nil && ext.Internal {
 				gateway4 = "none"
 				gateway6 = "none"
 			}
+
+			noGateway = ext.Gateway != nil && !*ext.Gateway
 		}
 
 		ipv4Address, ipv6Address := "", ""
@@ -414,9 +429,11 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 			ipv6Address = sNet.Ipv6Address
 		}
 
-		// A gateway set on the NIC supplies what the missing network address would have.
-		if (ipv4Address != "" && netConfig.Extensions["ipv4.address"] == "" && userExtensions["ipv4.gateway"] == "") ||
-			(ipv6Address != "" && netConfig.Extensions["ipv6.address"] == "" && userExtensions["ipv6.gateway"] == "") {
+		// A gateway set on the NIC supplies what the missing network address would
+		// have; `x-incus-compose.gateway: false` says the instance needs none.
+		if !noGateway &&
+			((ipv4Address != "" && netConfig.Extensions["ipv4.address"] == "" && userExtensions["ipv4.gateway"] == "") ||
+				(ipv6Address != "" && netConfig.Extensions["ipv6.address"] == "" && userExtensions["ipv6.gateway"] == "")) {
 			errs = errors.Join(
 				errs,
 				fmt.Errorf(
