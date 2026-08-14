@@ -1,0 +1,12 @@
+services:
+  caddy:
+    networks:
+      default:
+        ipv4_address: "${IPV4_CADDY}/${IPV4_NETMASK}"
+        x-incus:
+          ipv4.gateway: "${IPV4_GATEWAY}"
+
+networks:
+  default:
+    external: ${NET_EXTERNAL}
+    name: "${NET_NAME}"

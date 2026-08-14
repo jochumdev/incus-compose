@@ -1,0 +1,37 @@
+{
+	# Set the ACME DNS challenge provider to use Cloudflare for all sites
+	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	email {env.ACME_EMAIL}
+}
+
+docker-registry.example.com {
+	log {
+		output file /var/log/caddy/docker-registry.example.com-access.log
+	}
+	tls {
+		resolvers 1.1.1.1 1.0.0.1
+	}
+	reverse_proxy 10.167.160.21:5000
+}
+
+ghcr-registry.example.com {
+	log {
+		output file /var/log/caddy/ghcr-registry.example.com-access.log
+	}
+
+	tls {
+		resolvers 1.1.1.1 1.0.0.1
+	}
+	reverse_proxy 10.167.160.22:5000
+}
+
+gitlab-registry.example.com {
+	log {
+		output file /var/log/caddy/gitlab-registry.example.com-access.log
+	}
+
+	tls {
+		resolvers 1.1.1.1 1.0.0.1
+	}
+	reverse_proxy 10.167.160.23:5000
+}
