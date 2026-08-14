@@ -58,6 +58,9 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `sysctls:` on a service is mapped to `linux.sysctl.*` on the instance, applied
+  immediately and kept across a restart. (by @alien43)
+
 - `x-incus-compose.gateway: false` on a service's network attachment allows a
   static `ipv4_address`/`ipv6_address` on a network that declares no CIDR. That
   combination is otherwise rejected, because the gateway is not known until the
@@ -68,6 +71,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
   `ImageConfig.Services` by hand raced. (by @jochumdev)
 
 ### Fixed
+
+- A NIC device carrying `nictype` (`bridged` with a `parent`, say) and no
+  managed `network:` is accepted instead of rejected. Incus takes such a device
+  on its own, and it is the only way to attach an instance to an unmanaged host
+  bridge. (by @alien43)
 
 - A failed image build says what failed. The lock the build takes first reported
   the daemon's error unwrapped, so anything wrong with it read as a bare

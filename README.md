@@ -6,6 +6,37 @@
 
 Bring the familiar Docker Compose workflow to Incus. `incus-compose` implements the Compose specification for the Incus ecosystem, allowing you to define and run multi-container applications using the `compose.yaml` files you already know.
 
+```yaml
+services:
+  db:
+    image: docker.io/postgres:18-alpine
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  web:
+    image: docker.io/nginx:alpine
+    depends_on:
+      db: { condition: service_healthy }
+    ports:
+      - "8080:80"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+```
+
+```bash
+incus-compose up
+```
+
+A plain compose file, running unchanged.
+
 ## Demos
 
 Recorded during the beta - the workflow is unchanged in current releases:
