@@ -1,15 +1,22 @@
 version: "2"
 run:
-  # No network during a lint run; a missing dep is an error, not a download.
   modules-download-mode: readonly
+  issues-exit-code: 1
+  tests: true
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
 linters:
+  default: standard
   enable:
     - bodyclose
     - dogsled
     - dupl
     - errorlint
     - exhaustive
-    - gochecknoinits
     - gocritic
     - gosec
     - misspell
@@ -26,17 +33,22 @@ linters:
       threshold: 150
     errcheck:
       check-type-assertions: true
+      check-blank: false
       exclude-functions:
         - io.Copy
         - io.ReadAll
         - (io.ReadCloser).Close
         - (*encoding/json.Encoder).Encode
+        - (*io.SectionReader).Seek
     errorlint:
       errorf: true
       asserts: true
       comparison: true
     exhaustive:
       default-signifies-exhaustive: true
+    goconst:
+      min-len: 3
+      min-occurrences: 3
     gocritic:
       disabled-checks:
         - hugeParam
@@ -62,6 +74,9 @@ linters:
       locale: US
     nakedret:
       max-func-lines: 30
+    prealloc:
+      simple: true
+      for-loops: true
     revive:
       rules:
         - name: blank-imports
@@ -86,38 +101,43 @@ linters:
     unparam:
       check-exported: false
   exclusions:
+    warn-unused: false
     generated: lax
     rules:
       - linters:
           - dupl
           - errcheck
+          - goconst
           - gosec
           - govet
           - unparam
         path: _test\.go
+      - linters:
+          - dupl
+          - goconst
+          - gocritic
+        path: .*\.gen\.go$
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - ^work/
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+severity:
+  default: warning
+  rules:
+    - linters:
+        - errcheck
+        - gosec
+      severity: error
 formatters:
-  # No goimports: gofmt covers the formatting and gci the grouping, while its
-  # own import resolution matches on package name and picks wrong major
-  # versions. gopls adds imports - see AGENTS.md.
   enable:
     - gofmt
-    - gci
+    - goimports
   settings:
-    gci:
-      sections:
-        - standard
-        - default
-        - prefix(github.com/lxc/incus-compose)
+    goimports:
+      local-prefixes:
+        - github.com/lxc/incus-compose
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - ^work/

@@ -26,6 +26,7 @@ fi
 # --- Save the runner --------------------------------------------------------
 
 export INCUS_PROJECT="ic-runner"
+export INCUS_REMOTE="local-https"
 
 step "Stopping ${RUNNER} (project ${INCUS_PROJECT})"
 incus stop "${RUNNER}" --timeout "${STOP_TIMEOUT}" ||
