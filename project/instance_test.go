@@ -935,6 +935,118 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		assert.Contains(t, err.Error(), "with no address")
 	})
 
+	t.Run("gateway false allows a static ip on an address-less network", func(t *testing.T) {
+		t.Parallel()
+		skipNo73(t, c)
+
+		p := &types.Project{Networks: types.Networks{
+			"frontend": {},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {
+				Ipv4Address: "10.0.0.5",
+				Extensions:  types.Extensions{"x-incus-compose": map[string]any{"gateway": false}},
+			},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "10.0.0.5", devices[0].Config.Extensions["ipv4.address"])
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
+	})
+
+	t.Run("gateway true still requires an address", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{
+			"frontend": {},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {
+				Ipv4Address: "10.0.0.5",
+				Extensions:  types.Extensions{"x-incus-compose": map[string]any{"gateway": true}},
+			},
+		}}
+
+		_, _, err := instanceNetworkDevices(c, p, service, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "with no address")
+	})
+
+	t.Run("an external network is named by its compose name", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{
+			"ext-named": {External: true, Name: "incusbr0"},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"ext-named": {},
+		}}
+
+		_, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, resources, 1)
+		assert.Equal(t, "incusbr0", resources[0].IncusName())
+	})
+
+	t.Run("a managed network is named by its compose name", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Name: "proj", Networks: types.Networks{
+			"man-named": {Name: "custom-net"},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"man-named": {},
+		}}
+
+		_, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, resources, 1)
+		assert.Equal(t, "custom-net", resources[0].IncusName())
+	})
+
+	t.Run("a managed network without a name keeps its x-incus-compose.network", func(t *testing.T) {
+		t.Parallel()
+
+		// compose-go fills Name in with {project}_{key} when no `name:` is given.
+		p := &types.Project{Name: "proj", Networks: types.Networks{
+			"man-plain": {
+				Name:       "proj_man-plain",
+				Extensions: types.Extensions{"x-incus-compose": map[string]any{"network": "man-bridge"}},
+			},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"man-plain": {},
+		}}
+
+		_, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, resources, 1)
+		assert.Equal(t, "man-bridge", resources[0].IncusName())
+	})
+
+	t.Run("an external network without a name keeps its x-incus-compose.network", func(t *testing.T) {
+		t.Parallel()
+
+		// compose-go fills Name in with the key when no `name:` is given.
+		p := &types.Project{Networks: types.Networks{
+			"ext-plain": {
+				External:   true,
+				Name:       "ext-plain",
+				Extensions: types.Extensions{"x-incus-compose": map[string]any{"network": "ext-bridge"}},
+			},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"ext-plain": {},
+		}}
+
+		_, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, resources, 1)
+		assert.Equal(t, "ext-bridge", resources[0].IncusName())
+	})
+
 	t.Run("static ip on an address-less network is allowed with an explicit nic gateway", func(t *testing.T) {
 		t.Parallel()
 		skipNo73(t, c)

@@ -1,0 +1,28 @@
+services:
+  caddy:
+    image: ghcr.io/caddybuilds/caddy-cloudflare:latest
+    container_name: caddy
+    restart: unless-stopped
+    entrypoint: /bin/sh -c "sleep 3; caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    networks:
+      default:
+    volumes:
+      - data:/data
+      - config:/config
+    environment:
+      ACME_EMAIL: "${ACME_EMAIL}"
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN}"
+    configs:
+      - source: Caddyfile
+        target: /etc/caddy/Caddyfile
+
+configs:
+  Caddyfile:
+    file: caddy/Caddyfile
+
+volumes:
+  data:
+  config:
+
+networks:
+  default:

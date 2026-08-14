@@ -58,23 +58,33 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `x-incus-compose.gateway: false` on a service's network attachment allows a
+  static `ipv4_address`/`ipv6_address` on a network that declares no CIDR. That
+  combination is otherwise rejected, because the gateway is not known until the
+  network exists. (by @jochumdev)
+
 - **library**: `Image.AddService` records a compose service against an image.
   Several services usually share one image object, so appending to
   `ImageConfig.Services` by hand raced. (by @jochumdev)
 
 ### Fixed
 
-- Working on several services at once no longer races. Every worker drove one
-  shared Incus client, whose event-listener state cannot be used from more than
-  one goroutine; each has its own connection now. The races that sat on top of
-  it are gone with it: two workers setting up the image lock volume at the same
-  time, simultaneous starts resolving which ic-healthd watches the project, and
 - A failed image build says what failed. The lock the build takes first reported
   the daemon's error unwrapped, so anything wrong with it read as a bare
   `not found` against the image being built; it now names the lock volume and the
   project it lives in, and `--debug` reports which stage the build reached.
   (by @jochumdev)
 
+- `name:` on a network now selects the Incus network it names, external or
+  managed. It was documented but never read, so only `x-incus-compose.network`
+  had any effect; an explicit `name:` now wins over that extension.
+  (by @jochumdev)
+
+- Working on several services at once no longer races. Every worker drove one
+  shared Incus client, whose event-listener state cannot be used from more than
+  one goroutine; each has its own connection now. The races that sat on top of
+  it are gone with it: two workers setting up the image lock volume at the same
+  time, simultaneous starts resolving which ic-healthd watches the project, and
   a wait for an instance's addresses that trusted a lifecycle event and stalled
   DNS registration until the timeout when one arrived late. (by @jochumdev)
 - ic-healthd gives up on an Incus call that stops answering instead of leaking

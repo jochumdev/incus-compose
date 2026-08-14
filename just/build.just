@@ -12,7 +12,7 @@ build: update-healthd
         version="`git describe --tags --always --long --dirty="-dirty"`"
     fi
 
-    go build -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${version#v}" -o bin/incus-compose ./cmd/incus-compose
+    go install -C ./cmd/incus-compose -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${version#v}"
 
 # Usage: just run -f test/fixtures/simple/compose.yaml config
 run *args:
