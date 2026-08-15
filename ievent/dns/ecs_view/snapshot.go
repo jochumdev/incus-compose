@@ -78,7 +78,7 @@ type Snapshot struct {
 	Nets   []NetEntry
 
 	// TTL is what the records above were rendered with. A query wanting a
-	// different one has to copy rather than retune a shared header.
+	// different one has to copy rather than retune a iutil header.
 	TTL uint32
 }
 

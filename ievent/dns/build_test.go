@@ -8,17 +8,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // on builds an instance sitting on the given networks, with one address each.
 func on(zone string, meta map[string]string, nets map[string]string) *instance {
-	out := &instance{zone: zone, meta: meta, nets: map[string]*shared.Network{}}
+	out := &instance{zone: zone, meta: meta, nets: map[string]*iutil.Network{}}
 
 	for key, addr := range nets {
 		prefix := netip.MustParsePrefix(netip.MustParseAddr(addr).String() + "/24").Masked()
 
-		out.nets[key] = shared.NewNetwork("net", "shop", true,
+		out.nets[key] = iutil.NewNetwork("net", "shop", true,
 			[]netip.Prefix{prefix}, []netip.Addr{netip.MustParseAddr(addr)}, nil)
 	}
 
@@ -31,24 +31,28 @@ func seenFrom(snap *ecs_view.Snapshot, keys ...string) map[string]ecs_view.RRSet
 }
 
 // TestBuildViewsSpanProjects pins why the build is fleet-wide: two instances on
-// one shared bridge sit in different zones and must still see each other.
+// one iutil bridge sit in different zones and must still see each other.
 func TestBuildViewsSpanProjects(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
-		"shop/web": on("shop.incus.", nil, map[string]string{"default/shared": "10.0.0.2"}),
-		"blog/api": on("blog.incus.", nil, map[string]string{"default/shared": "10.0.0.3"}),
+		"shop/web": on("shop.incus.", nil, map[string]string{"default/iutil": "10.0.0.2"}),
+		"blog/api": on("blog.incus.", nil, map[string]string{"default/iutil": "10.0.0.3"}),
 	}
 
 	snap := build(held, nil, 5)
 
-	visible := seenFrom(snap, "default/shared")
+	visible := seenFrom(snap, "default/iutil")
 
 	assert.Contains(t, visible, "web.shop.incus.")
 	assert.Contains(t, visible, "api.blog.incus.", "a name across the project boundary went missing")
 }
 
-// TestBuildIsolatesUnsharedNetworks pins the other half: instances sharing no
+// TestBuildIsolatesUniutilNetworks pins the other half: instances sharing no
 // wire are absent from each other's view, which the query path reads as NXDOMAIN.
-func TestBuildIsolatesUnsharedNetworks(t *testing.T) {
+func TestBuildIsolatesUniutilNetworks(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": on("shop.incus.", nil, map[string]string{"shop/net0": "10.0.0.2"}),
 		"blog/api": on("blog.incus.", nil, map[string]string{"blog/net0": "10.1.0.2"}),
@@ -61,9 +65,11 @@ func TestBuildIsolatesUnsharedNetworks(t *testing.T) {
 		"an instance was shown a host it shares no network with")
 }
 
-// TestBuildAnswersOnTheSharedWireOnly pins that a multi-homed host is answered
+// TestBuildAnswersOnTheiutilWireOnly pins that a multi-homed host is answered
 // with the addresses the querier can reach and not its others.
-func TestBuildAnswersOnTheSharedWireOnly(t *testing.T) {
+func TestBuildAnswersOnTheiutilWireOnly(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": on("shop.incus.", nil, map[string]string{
 			"shop/front": "10.0.0.2",
@@ -91,6 +97,8 @@ func TestBuildAnswersOnTheSharedWireOnly(t *testing.T) {
 // TestBuildServiceNameGathersReplicas pins the round-robin: replicas labeled
 // with one service answer under one name.
 func TestBuildServiceNameGathersReplicas(t *testing.T) {
+	t.Parallel()
+
 	svc := map[string]string{metaService: "api"}
 
 	held := map[string]*instance{
@@ -110,6 +118,8 @@ func TestBuildServiceNameGathersReplicas(t *testing.T) {
 // TestBuildSerialsStepOnlyOnChange pins what a secondary depends on: a serial
 // that moves for nothing re-transfers, one that stands still misses an update.
 func TestBuildSerialsStepOnlyOnChange(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": on("shop.incus.", nil, map[string]string{"shop/net0": "10.0.0.2"}),
 	}
@@ -140,6 +150,8 @@ func TestBuildSerialsStepOnlyOnChange(t *testing.T) {
 // TestBuildAmbiguousAddress pins the fail-closed rule for an address two
 // instances claim, which overlapping subnets in two projects really produce.
 func TestBuildAmbiguousAddress(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": on("shop.incus.", nil, map[string]string{"shop/net0": "10.0.0.2"}),
 		"blog/api": on("blog.incus.", nil, map[string]string{"blog/net0": "10.0.0.2"}),
@@ -153,6 +165,8 @@ func TestBuildAmbiguousAddress(t *testing.T) {
 
 // TestZoneFor pins the naming, including the override a project sets on itself.
 func TestZoneFor(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, "shop.incus.", zoneFor("shop", nil, "incus"))
 	assert.Equal(t, "example.test.", zoneFor("shop", map[string]string{metaZone: "example.test"}, "incus"))
 

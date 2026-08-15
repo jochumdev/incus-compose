@@ -1,6 +1,8 @@
 package enricher
 
 import (
+	"iter"
+	"slices"
 	"testing"
 	"time"
 
@@ -8,20 +10,21 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // No skip helper on any test here: the queue talks to nothing, so all of it
 // runs in every stage.
 
 // event builds one bare event, named so a test can tell them apart in order.
-func event(name string) *shared.Event {
-	return shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", name, "")
+func event(name string) *iutil.Event {
+	return iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", name, "")
 }
 
 // names is what came out, in the order it came out. Nil in, nil out, so a table
 // can say "nothing was released" and mean it.
-func names(evs []*shared.Event) []string {
+func names(seq iter.Seq[*iutil.Event]) []string {
+	evs := slices.Collect(seq)
 	if len(evs) == 0 {
 		return nil
 	}
@@ -38,6 +41,8 @@ func names(evs []*shared.Event) []string {
 // TestQueueRelease is the ordering contract: what leaves is the order that
 // arrived, whatever order the reads landed in.
 func TestQueueRelease(t *testing.T) {
+	t.Parallel()
+
 	// settleOrder is the order reads land in, by arrival index. An index left
 	// out never lands at all, which is a read still in flight.
 	tests := []struct {
@@ -95,6 +100,8 @@ func TestQueueRelease(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			q := &queue{}
 			items := make([]*item, len(tc.arrive))
 
@@ -123,6 +130,8 @@ func TestQueueRelease(t *testing.T) {
 // past the end of the array repeatedly, which is the case a ring exists to have
 // and the one an index-based queue gets wrong.
 func TestQueueWrapsAndKeepsOrder(t *testing.T) {
+	t.Parallel()
+
 	q := &queue{}
 
 	var want, got []string
@@ -149,6 +158,8 @@ func TestQueueWrapsAndKeepsOrder(t *testing.T) {
 // way out, so a burst does not leave the line permanently the size of the worst
 // moment it ever had.
 func TestQueueGrowsAndShrinks(t *testing.T) {
+	t.Parallel()
+
 	q := &queue{}
 
 	items := make([]*item, 0, 64)
@@ -163,7 +174,7 @@ func TestQueueGrowsAndShrinks(t *testing.T) {
 		q.settle(it, it.ev)
 	}
 
-	require.Len(t, q.release(), 64)
+	require.Len(t, slices.Collect(q.release()), 64)
 
 	assert.Zero(t, q.len())
 	assert.Less(t, len(q.items), grown, "and gives the room back")
@@ -173,6 +184,8 @@ func TestQueueGrowsAndShrinks(t *testing.T) {
 // TestQueueResizeWhileWrapped grows the ring at the moment its contents wrap,
 // which is the branch of resize that is easy to write backwards.
 func TestQueueResizeWhileWrapped(t *testing.T) {
+	t.Parallel()
+
 	q := &queue{}
 
 	// Fill, take half out, then push enough to wrap past the end and force a
@@ -193,6 +206,8 @@ func TestQueueResizeWhileWrapped(t *testing.T) {
 
 // TestQueueDrain is the shutdown path: everything left goes, settled or not.
 func TestQueueDrain(t *testing.T) {
+	t.Parallel()
+
 	q := &queue{}
 
 	q.push(event("a"), true)
@@ -202,38 +217,42 @@ func TestQueueDrain(t *testing.T) {
 	assert.Equal(t, []string{"a"}, names(q.release()), "only the settled front leaves normally")
 	assert.Equal(t, []string{"b", "c"}, names(q.drain()), "the rest go on the way out, in order")
 	assert.Zero(t, q.len())
-	assert.Nil(t, q.drain(), "and an empty line drains to nothing")
+	assert.Nil(t, names(q.drain()), "and an empty line drains to nothing")
 }
 
 // TestQueueSettleReplacesTheEvent is what enrichment does: the event that
 // leaves is the derived one, not the one that arrived.
 func TestQueueSettleReplacesTheEvent(t *testing.T) {
+	t.Parallel()
+
 	q := &queue{}
 
 	it := q.push(event("a"), false)
 	q.settle(it, it.ev.WithFailed("source/read"))
 
-	out := q.release()
+	out := slices.Collect(q.release())
 	require.Len(t, out, 1)
 
-	assert.Equal(t, shared.StateFailed, out[0].State(), "what settle was handed is what leaves")
+	assert.Equal(t, iutil.StateFailed, out[0].State(), "what settle was handed is what leaves")
 	assert.Equal(t, "source/read", out[0].Reason())
 }
 
 // TestQueueReleaseIsRepeatable checks the second call does not hand back what
 // the first already did.
 func TestQueueReleaseIsRepeatable(t *testing.T) {
+	t.Parallel()
+
 	q := &queue{}
 
 	q.push(event("a"), true)
 	it := q.push(event("b"), false)
 
 	assert.Equal(t, []string{"a"}, names(q.release()))
-	assert.Nil(t, q.release(), "nothing new while the front is waiting")
+	assert.Nil(t, names(q.release()), "nothing new while the front is waiting")
 
 	q.settle(it, it.ev)
 
 	assert.Equal(t, []string{"b"}, names(q.release()))
 	assert.Zero(t, q.len())
-	assert.Nil(t, q.release(), "an empty line releases nothing")
+	assert.Nil(t, names(q.release()), "an empty line releases nothing")
 }

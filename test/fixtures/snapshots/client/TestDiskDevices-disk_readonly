@@ -1,0 +1,9 @@
+{
+  "config": {
+    "path": "/app/static",
+    "readonly": "true",
+    "source": "/host/static",
+    "type": "disk"
+  },
+  "name": "bind-static"
+}

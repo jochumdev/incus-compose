@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lxc/incus-compose/ievent/iutil"
 	"github.com/lxc/incus-compose/ievent/log"
-	"github.com/lxc/incus-compose/ievent/shared"
 )
 
 // sawBuffer is how many events a recorder holds. Generous, because a test that
@@ -26,38 +26,38 @@ const sawBuffer = 128
 // follow, and it is what lets this hold no lock.
 type recorder struct {
 	name     string
-	wants    []shared.Want
+	wants    []iutil.Want
 	setupErr error
 
-	next shared.Next
+	next iutil.Next
 
 	// args is what Setup was handed, kept so a test can assert on the table
 	// every plugin was given and raise commands the way a plugin does.
-	args shared.SetupArgs
+	args iutil.SetupArgs
 
-	// walked is shared between the recorders of one test, so the order between
+	// walked is iutil between the recorders of one test, so the order between
 	// them is what the slice says.
 	walked *[]string
 
 	// saw is every event that walked past, in order. A test takes one off it to
 	// wait for the source to have got that far.
-	saw chan *shared.Event
+	saw chan *iutil.Event
 }
 
-func newRecorder(name string, walked *[]string, wants ...shared.Want) *recorder {
+func newRecorder(name string, walked *[]string, wants ...iutil.Want) *recorder {
 	return &recorder{
 		name:   name,
 		wants:  wants,
 		walked: walked,
-		saw:    make(chan *shared.Event, sawBuffer),
+		saw:    make(chan *iutil.Event, sawBuffer),
 	}
 }
 
 func (r *recorder) Name() string { return r.name }
 
-func (r *recorder) Wants() []shared.Want { return r.wants }
+func (r *recorder) Wants() []iutil.Want { return r.wants }
 
-func (r *recorder) Setup(args shared.SetupArgs) error {
+func (r *recorder) Setup(args iutil.SetupArgs) error {
 	if r.setupErr != nil {
 		return r.setupErr
 	}
@@ -67,7 +67,7 @@ func (r *recorder) Setup(args shared.SetupArgs) error {
 	return nil
 }
 
-func (r *recorder) Handle(ev *shared.Event) {
+func (r *recorder) Handle(ev *iutil.Event) {
 	if r.walked != nil {
 		*r.walked = append(*r.walked, r.name)
 	}
@@ -97,8 +97,8 @@ func (r *recorder) actions() []string {
 type drainer struct {
 	*recorder
 
-	in  <-chan shared.Command
-	out chan<- shared.Command
+	in  <-chan iutil.Command
+	out chan<- iutil.Command
 
 	asked *[]string
 }
@@ -107,7 +107,7 @@ func newDrainer(name string, asked *[]string) *drainer {
 	return &drainer{recorder: newRecorder(name, nil), asked: asked}
 }
 
-func (d *drainer) Setup(args shared.SetupArgs) error {
+func (d *drainer) Setup(args iutil.SetupArgs) error {
 	d.in, d.out = args.CommandIn, args.CommandOut
 
 	return d.recorder.Setup(args)
@@ -154,7 +154,7 @@ func (l *listener) open(_ context.Context) (<-chan incusapi.Event, error) {
 
 // mustSource builds a source over the plugins, with no connection: every test
 // below hands the stream over itself.
-func mustSource(t *testing.T, plugins ...shared.Plugin) *Source {
+func mustSource(t *testing.T, plugins ...iutil.Plugin) *Source {
 	t.Helper()
 
 	s, err := New(t.Context(), nil, plugins)
@@ -183,9 +183,11 @@ func instanceEvent(t *testing.T, action, project, name string) incusapi.Event {
 // silent: Setup called twice on one value has the second successor overwrite
 // the first, so the chain would skip whatever sat between the two positions.
 func TestNewRefusesAPluginListedTwice(t *testing.T) {
+	t.Parallel()
+
 	twice := newRecorder("trace", nil)
 
-	_, err := New(t.Context(), nil, []shared.Plugin{twice, newRecorder("dns", nil), twice})
+	_, err := New(t.Context(), nil, []iutil.Plugin{twice, newRecorder("dns", nil), twice})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "trace")
 }
@@ -193,36 +195,40 @@ func TestNewRefusesAPluginListedTwice(t *testing.T) {
 // TestNewStopsOnASetupError pins that configuration which cannot work is
 // refused before anything is running, rather than degrading once events flow.
 func TestNewStopsOnASetupError(t *testing.T) {
+	t.Parallel()
+
 	bad := newRecorder("dns", nil)
 	bad.setupErr = errors.New("no data_dir")
 
-	_, err := New(t.Context(), nil, []shared.Plugin{newRecorder("log", nil), bad})
+	_, err := New(t.Context(), nil, []iutil.Plugin{newRecorder("log", nil), bad})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dns")
 }
 
 func TestNewUnionsWants(t *testing.T) {
+	t.Parallel()
+
 	const action = incusapi.EventLifecycleInstanceUpdated
 
 	cases := []struct {
 		name string
-		a, b []shared.Want
-		want shared.Want
+		a, b []iutil.Want
+		want iutil.Want
 	}{
 		{
 			name: "a lone want stands as it was declared",
-			a:    []shared.Want{{Action: action, Enrich: shared.EnrichedInstance, Debounce: true}},
-			want: shared.Want{Action: action, Enrich: shared.EnrichedInstance, Debounce: true},
+			a:    []iutil.Want{{Action: action, Enrich: iutil.EnrichedInstance, Debounce: true}},
+			want: iutil.Want{Action: action, Enrich: iutil.EnrichedInstance, Debounce: true},
 		},
 		{
 			// Two plugins wanting different depths of one action cost the union
 			// of what they asked for, and one read serves both.
 			name: "enrichment is the union of what everybody asked for",
-			a:    []shared.Want{{Action: action, Enrich: shared.EnrichedInstance, Debounce: true}},
-			b:    []shared.Want{{Action: action, Enrich: shared.EnrichedNetworks, Debounce: true}},
-			want: shared.Want{
+			a:    []iutil.Want{{Action: action, Enrich: iutil.EnrichedInstance, Debounce: true}},
+			b:    []iutil.Want{{Action: action, Enrich: iutil.EnrichedNetworks, Debounce: true}},
+			want: iutil.Want{
 				Action:   action,
-				Enrich:   shared.EnrichedInstance | shared.EnrichedNetworks,
+				Enrich:   iutil.EnrichedInstance | iutil.EnrichedNetworks,
 				Debounce: true,
 			},
 		},
@@ -230,26 +236,28 @@ func TestNewUnionsWants(t *testing.T) {
 			// The zero value vetoes, so a plugin that forgot to ask for the
 			// saving sees every event rather than losing one.
 			name: "one plugin needing every event stops the collapsing",
-			a:    []shared.Want{{Action: action, Enrich: shared.EnrichedInstance, Debounce: true}},
-			b:    []shared.Want{{Action: action}},
-			want: shared.Want{Action: action, Enrich: shared.EnrichedInstance},
+			a:    []iutil.Want{{Action: action, Enrich: iutil.EnrichedInstance, Debounce: true}},
+			b:    []iutil.Want{{Action: action}},
+			want: iutil.Want{Action: action, Enrich: iutil.EnrichedInstance},
 		},
 		{
 			name: "and it vetoes from either position",
-			a:    []shared.Want{{Action: action}},
-			b:    []shared.Want{{Action: action, Enrich: shared.EnrichedInstance, Debounce: true}},
-			want: shared.Want{Action: action, Enrich: shared.EnrichedInstance},
+			a:    []iutil.Want{{Action: action}},
+			b:    []iutil.Want{{Action: action, Enrich: iutil.EnrichedInstance, Debounce: true}},
+			want: iutil.Want{Action: action, Enrich: iutil.EnrichedInstance},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			a := newRecorder("a", nil, tc.a...)
 			b := newRecorder("b", nil, tc.b...)
 
 			s := mustSource(t, a, b)
 
-			assert.Equal(t, map[string]shared.Want{action: tc.want}, s.wants)
+			assert.Equal(t, map[string]iutil.Want{action: tc.want}, s.wants)
 
 			// The same finished table for everybody, whichever side of the
 			// enricher they sit. A plugin in front is handed what the plugins
@@ -265,6 +273,8 @@ func TestNewUnionsWants(t *testing.T) {
 // runs, even though the source wires it backwards to give each plugin the one
 // after it.
 func TestNewWiresTheChainForwards(t *testing.T) {
+	t.Parallel()
+
 	var walked []string
 
 	s := mustSource(t,
@@ -274,7 +284,7 @@ func TestNewWiresTheChainForwards(t *testing.T) {
 	)
 
 	// The last plugin's successor does nothing, so the walk simply unwinds.
-	s.hand(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceStarted, "shop", "web", ""))
+	s.hand(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceStarted, "shop", "web", ""))
 
 	assert.Equal(t, []string{"log", "debounce", "dns"}, walked)
 }
@@ -282,6 +292,8 @@ func TestNewWiresTheChainForwards(t *testing.T) {
 // TestRunWithoutAConnection covers a source that has no stream to open and no
 // listener handed to it.
 func TestRunWithoutAConnection(t *testing.T) {
+	t.Parallel()
+
 	s := mustSource(t, newRecorder("dns", nil))
 
 	require.ErrorIs(t, s.Run(t.Context()), errNoConnection)
@@ -291,6 +303,8 @@ func TestRunWithoutAConnection(t *testing.T) {
 // plugin is asked only once the plugin feeding it has answered, so nothing is
 // still pushing into an inbox whose reader has stopped.
 func TestDrainAsksInChainOrder(t *testing.T) {
+	t.Parallel()
+
 	var asked []string
 
 	a := newDrainer("a", &asked)
@@ -314,6 +328,8 @@ func TestDrainAsksInChainOrder(t *testing.T) {
 // answer: it never had a goroutine, or its Run has already returned. Either way
 // the shutdown carries on rather than waiting out its budget.
 func TestDrainSkipsAPluginThatIsNotRunning(t *testing.T) {
+	t.Parallel()
+
 	var asked []string
 
 	// log has no Run at all, so the source never asks it.
@@ -345,6 +361,8 @@ func TestDrainSkipsAPluginThatIsNotRunning(t *testing.T) {
 // back of connected, so a session that opened without saying so would leave
 // everything held from before the outage standing.
 func TestRunBracketsASessionWithConnectedAndDisconnected(t *testing.T) {
+	t.Parallel()
+
 	stream := make(chan incusapi.Event, 4)
 	rec := newRecorder("dns", nil)
 
@@ -356,11 +374,11 @@ func TestRunBracketsASessionWithConnectedAndDisconnected(t *testing.T) {
 
 	done := runSource(ctx, s)
 
-	assert.Equal(t, shared.ActionConnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionConnected, (<-rec.saw).Action())
 
 	close(stream)
 
-	assert.Equal(t, shared.ActionDisconnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionDisconnected, (<-rec.saw).Action())
 
 	cancel()
 	require.NoError(t, <-done)
@@ -370,10 +388,12 @@ func TestRunBracketsASessionWithConnectedAndDisconnected(t *testing.T) {
 // chain at all. Most of a lifecycle stream is actions no plugin here asked for,
 // and walking those would cost every plugin behind a call per event.
 func TestRunWalksOnlyWhatSomebodyWanted(t *testing.T) {
+	t.Parallel()
+
 	stream := make(chan incusapi.Event, 4)
 
 	rec := newRecorder("dns", nil,
-		shared.Want{Action: incusapi.EventLifecycleInstanceStarted, Enrich: shared.EnrichedInstance})
+		iutil.Want{Action: incusapi.EventLifecycleInstanceStarted, Enrich: iutil.EnrichedInstance})
 
 	s := mustSource(t, rec)
 	s.listen = (&listener{streams: []chan incusapi.Event{stream}}).open
@@ -383,7 +403,7 @@ func TestRunWalksOnlyWhatSomebodyWanted(t *testing.T) {
 
 	done := runSource(ctx, s)
 
-	assert.Equal(t, shared.ActionConnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionConnected, (<-rec.saw).Action())
 
 	stream <- instanceEvent(t, incusapi.EventLifecycleInstanceStarted, "shop", "web")
 	// Wanted by nobody, so it goes nowhere.
@@ -396,7 +416,7 @@ func TestRunWalksOnlyWhatSomebodyWanted(t *testing.T) {
 	close(stream)
 
 	assert.Equal(t, incusapi.EventLifecycleInstanceStarted, (<-rec.saw).Action())
-	assert.Equal(t, shared.ActionDisconnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionDisconnected, (<-rec.saw).Action())
 
 	cancel()
 	require.NoError(t, <-done)
@@ -411,10 +431,12 @@ func TestRunWalksOnlyWhatSomebodyWanted(t *testing.T) {
 // brackets is the whole reason the sweep rides the chain rather than a path of
 // its own.
 func TestRunHandsCommandsOverAtTheHead(t *testing.T) {
+	t.Parallel()
+
 	stream := make(chan incusapi.Event, 4)
 
 	rec := newRecorder("enricher", nil,
-		shared.Want{Action: incusapi.EventLifecycleInstanceStarted, Enrich: shared.EnrichedInstance})
+		iutil.Want{Action: incusapi.EventLifecycleInstanceStarted, Enrich: iutil.EnrichedInstance})
 
 	s := mustSource(t, rec)
 	s.listen = (&listener{streams: []chan incusapi.Event{stream}}).open
@@ -424,23 +446,23 @@ func TestRunHandsCommandsOverAtTheHead(t *testing.T) {
 
 	done := runSource(ctx, s)
 
-	assert.Equal(t, shared.ActionConnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionConnected, (<-rec.saw).Action())
 
 	stream <- instanceEvent(t, incusapi.EventLifecycleInstanceStarted, "shop", "web")
 	assert.Equal(t, incusapi.EventLifecycleInstanceStarted, (<-rec.saw).Action())
 
 	// Raised the way the enricher raises a bracket: on the plugin's own
 	// CommandOut, from its own goroutine, which is this one.
-	rec.args.CommandOut <- shared.Command{Action: shared.ActionSweepStart}
+	rec.args.CommandOut <- iutil.Command{Action: iutil.ActionSweepStart}
 
 	ev := <-rec.saw
-	assert.Equal(t, shared.ActionSweepStart, ev.Action())
+	assert.Equal(t, iutil.ActionSweepStart, ev.Action())
 
 	// The source's own actions name nothing, which the source/ namespace
 	// already says - and it is what puts them straight through debounce.
 	assert.Empty(t, ev.Project())
 	assert.Empty(t, ev.Name())
-	assert.Equal(t, shared.StateOk, ev.State())
+	assert.Equal(t, iutil.StateOk, ev.State())
 
 	cancel()
 	require.NoError(t, <-done)
@@ -451,6 +473,8 @@ func TestRunHandsCommandsOverAtTheHead(t *testing.T) {
 // the enricher holds a finished pass until the bracket it raised comes round,
 // and a pass that failed is exactly what a lost stream produces.
 func TestRunReopensAClosedStream(t *testing.T) {
+	t.Parallel()
+
 	first := make(chan incusapi.Event, 1)
 	second := make(chan incusapi.Event, 1)
 
@@ -465,17 +489,17 @@ func TestRunReopensAClosedStream(t *testing.T) {
 
 	done := runSource(ctx, s)
 
-	assert.Equal(t, shared.ActionConnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionConnected, (<-rec.saw).Action())
 
 	close(first)
 
-	assert.Equal(t, shared.ActionDisconnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionDisconnected, (<-rec.saw).Action())
 
 	// The source is now in the backoff between sessions, with no stream at all.
-	rec.args.CommandOut <- shared.Command{Action: shared.ActionSweepStart}
-	assert.Equal(t, shared.ActionSweepStart, (<-rec.saw).Action())
+	rec.args.CommandOut <- iutil.Command{Action: iutil.ActionSweepStart}
+	assert.Equal(t, iutil.ActionSweepStart, (<-rec.saw).Action())
 
-	assert.Equal(t, shared.ActionConnected, (<-rec.saw).Action())
+	assert.Equal(t, iutil.ActionConnected, (<-rec.saw).Action())
 
 	cancel()
 	require.NoError(t, <-done)

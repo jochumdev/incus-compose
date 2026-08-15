@@ -24,6 +24,8 @@ func answerFor(snap *ecs_view.Snapshot, name string, qtype uint16, keys ...strin
 // TestAliasNames pins the one rule an operator has to hold in their head: a
 // trailing dot is absolute, anything else relative to the instance's own zone.
 func TestAliasNames(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		list string
@@ -81,6 +83,8 @@ func TestAliasNames(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := aliasNames(map[string]string{metaAliases: tc.list}, "shop.incus.")
 
 			assert.Equal(t, tc.want, got)
@@ -91,6 +95,8 @@ func TestAliasNames(t *testing.T) {
 // TestAliasAnswersWithACName pins the shape of the answer: the canonical name
 // and what it resolves to in one reply, CNAME first as a resolver reads it.
 func TestAliasAnswersWithACName(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "alias1", map[string]string{"shop/net0": "10.0.0.2"}),
 	}
@@ -123,6 +129,8 @@ func TestAliasAnswersWithACName(t *testing.T) {
 // TestAliasFollowsItsInstanceVisibility pins that an alias is no way around the
 // visibility rule: it is reachable exactly where the instance it names is.
 func TestAliasFollowsItsInstanceVisibility(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "alias1,me.example.com.",
 			map[string]string{"shop/net0": "10.0.0.2"}),
@@ -143,6 +151,8 @@ func TestAliasFollowsItsInstanceVisibility(t *testing.T) {
 // TestAbsoluteAliasInventsAFallthroughZone pins what an alias outside every
 // zone gets: one claiming that name and leaving the domain to the forwarder.
 func TestAbsoluteAliasInventsAFallthroughZone(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "me.example.com.",
 			map[string]string{"shop/net0": "10.0.0.2"}),
@@ -163,6 +173,8 @@ func TestAbsoluteAliasInventsAFallthroughZone(t *testing.T) {
 // TestAliasLandsInTheLongestZoneServingIt pins that an absolute alias inside a
 // served zone joins it rather than inventing a second one that would shadow it.
 func TestAliasLandsInTheLongestZoneServingIt(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "www.shop.incus.",
 			map[string]string{"shop/net0": "10.0.0.2"}),
@@ -178,6 +190,8 @@ func TestAliasLandsInTheLongestZoneServingIt(t *testing.T) {
 // TestAliasCollisions pins the three ways an alias is refused, each a record set
 // that would be invalid on the wire or decided by map order.
 func TestAliasCollisions(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		held  map[string]*instance
@@ -219,6 +233,8 @@ func TestAliasCollisions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			snap := build(tc.held, nil, 5)
 
 			rrs := answerFor(snap, tc.alias, dns.TypeA, "shop/net0")
@@ -236,6 +252,8 @@ func TestAliasCollisions(t *testing.T) {
 // TestMultiHomedAliasAnswersOneCName pins the join: one record under several
 // keys, so a querier sharing two of them gets both addresses and one CNAME.
 func TestMultiHomedAliasAnswersOneCName(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "alias1", map[string]string{
 			"shop/front": "10.0.0.2",
@@ -266,6 +284,8 @@ func TestMultiHomedAliasAnswersOneCName(t *testing.T) {
 // TestAliasStepsTheSerial pins that an alias is part of what a zone says. A
 // secondary that does not re-transfer on one never learns the name exists.
 func TestAliasStepsTheSerial(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": on("shop.incus.", nil, map[string]string{"shop/net0": "10.0.0.2"}),
 	}
@@ -286,6 +306,8 @@ func TestAliasStepsTheSerial(t *testing.T) {
 // TestAliasZoneSerialFollowsItsInstance pins why an alias carries its networks
 // into the digest: an invented zone holds nothing else that notices a rewire.
 func TestAliasZoneSerialFollowsItsInstance(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "me.example.com.",
 			map[string]string{"shop/net0": "10.0.0.2"}),
@@ -311,15 +333,17 @@ func TestAliasZoneSerialFollowsItsInstance(t *testing.T) {
 // TestAliasToAnotherZone pins what an absolute alias is really for: a name under
 // one project's zone answering for an instance in another, address included.
 func TestAliasToAnotherZone(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web": aliased("shop.incus.", "shop.blog.incus.",
-			map[string]string{"default/shared": "10.0.0.2"}),
-		"blog/api": on("blog.incus.", nil, map[string]string{"default/shared": "10.0.0.3"}),
+			map[string]string{"default/iutil": "10.0.0.2"}),
+		"blog/api": on("blog.incus.", nil, map[string]string{"default/iutil": "10.0.0.3"}),
 	}
 
 	snap := build(held, nil, 5)
 
-	rrs := answerFor(snap, "shop.blog.incus.", dns.TypeA, "default/shared")
+	rrs := answerFor(snap, "shop.blog.incus.", dns.TypeA, "default/iutil")
 	require.Len(t, rrs, 2)
 
 	cname, ok := rrs[0].(*dns.CNAME)

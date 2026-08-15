@@ -21,7 +21,7 @@ const (
 	NoData
 )
 
-// Answer is the outcome of a lookup. RRs belongs to the snapshot and is shared
+// Answer is the outcome of a lookup. RRs belongs to the snapshot and is iutil
 // with every other query reading the same view, so nothing may write to it.
 type Answer struct {
 	RRs    []dns.RR
@@ -84,8 +84,8 @@ func Gather(perNet map[string]RRSets, keys []string) (RRSets, bool) {
 	)
 
 	for _, key := range keys {
-		sets, shared := perNet[key]
-		if !shared {
+		sets, iutil := perNet[key]
+		if !iutil {
 			continue
 		}
 

@@ -1,0 +1,8 @@
+{
+  "config": {
+    "connect": "udp:127.0.0.1:53",
+    "listen": "udp:0.0.0.0:5353",
+    "type": "proxy"
+  },
+  "name": "proxy-5353"
+}

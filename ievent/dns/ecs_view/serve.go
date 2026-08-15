@@ -2,12 +2,14 @@ package ecs_view
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"net/netip"
 
-	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
+
+	"github.com/lxc/incus-compose/shared"
 )
 
 // staleTTL caps the TTL of answers served while a source is unhealthy, so stale
@@ -76,9 +78,7 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 
 	zoneName, z := snap.MatchZone(qname)
 	if z == nil {
-		if clog.D.Value() {
-			log.Debugf("%s: no live zone, falling through", qname)
-		}
+		slog.Debug("unknown, falling through", "zone", qname)
 
 		return false, dns.RcodeSuccess, nil
 	}
@@ -88,9 +88,7 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 	if z.Fallthrough {
 		_, ours := z.Names[qname]
 		if !ours {
-			if clog.D.Value() {
-				log.Debugf("%s: not claimed by %s, falling through", qname, zoneName)
-			}
+			slog.Debug("not claimed, falling through", "name", qname, "zone", zoneName)
 
 			return false, dns.RcodeSuccess, nil
 		}
@@ -136,13 +134,6 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 		view, known = snap.ViewFor(client)
 	}
 
-	// One line with everything the answer turns on, none of which an NXDOMAIN
-	// says on the wire.
-	if clog.D.Value() {
-		log.Debugf("%s %s: client=%s via=%s zone=%s known=%t view=%q",
-			qname, dns.TypeToString[qtype], client, via, zoneName, known, view)
-	}
-
 	if !known {
 		if v.Metrics {
 			deniedCount.WithLabelValues(server).Inc()
@@ -151,14 +142,11 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 
 		deny(m, zoneName, z.Serial, ttl)
 
+		slog.Log(ctx, shared.LevelTrace, "Denied", "code", dns.RcodeToString[m.Rcode], "client", client, "type", dns.TypeToString[qtype], "query", qname, "via", via, "zone", zoneName, "known", known, "view", view)
 		return write(w, m)
 	}
 
 	found := snap.Resolve(qname, qtype, view)
-
-	if clog.D.Value() {
-		log.Debugf("%s: %s", qname, resultName(found.Result))
-	}
 
 	switch found.Result {
 	case NameError:
@@ -175,6 +163,7 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 		requestCount.WithLabelValues(server, resultName(found.Result)).Inc()
 	}
 
+	slog.Log(ctx, shared.LevelTrace, "Answer", "code", dns.RcodeToString[m.Rcode], "client", client, "type", dns.TypeToString[qtype], "query", qname, "via", via, "zone", zoneName, "known", known, "view", view)
 	return write(w, m)
 }
 
@@ -253,7 +242,7 @@ func sourceAddr(a net.Addr) (netip.Addr, bool) {
 	return addr.Unmap(), true
 }
 
-// withTTL hands the stored records to a reply. They are shared by every query
+// withTTL hands the stored records to a reply. They are iutil by every query
 // on the view, so the normal path reslices and only the stale clamp copies.
 func withTTL(rrs []dns.RR, built, want uint32) []dns.RR {
 	if want == built {

@@ -68,17 +68,82 @@ update-examples-snapshots folder="./..." *args:
 update-snapshots folder="./..." *args:
     @just test "$@"
 
-#   just test-log                       # everything the run printed
-#   just test-log 'FAIL|Error:'         # only matching lines (extended regex)
-#   just test-log '' TestE2EDownNoDeps  # only one test's output
+#   just test-log                          # everything the run printed
+#   just test-log -p 'FAIL|Error:'         # only matching lines (extended regex)
+#   just test-log -t TestE2EDownNoDeps     # only one test's output
+#   just test-log -f | tee run.log         # follow even though piped
 #
 # On a terminal it follows until Ctrl-C, so it can be started while a run is
-# going; piped it reads once and exits. The newest log is picked at startup, so
-# a run launched after this is not the one being followed.
+# going; piped it reads once and exits unless -f says to keep following. The
+# newest log is picked at startup, so a run launched after this is not the one
+# being followed.
 [doc("Plain text of the newest work/logs/*.json. Follows on a terminal")]
-test-log pattern="" test="":
+test-log *args:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    usage() {
+      cat <<'EOF'
+    Usage: just test-log [options]
+
+      -p, --pattern REGEX  only lines matching this extended regex
+      -t, --test NAME      only one test's output, matched by prefix
+      -f, --follow         follow even when not on a terminal, e.g. when piped
+      -h, --help           this
+    EOF
+    }
+
+    # Long options, and an unknown one an error rather than something taken for a
+    # pattern. util-linux's, which is the only getopt that does either. It signals
+    # that by exiting 4 on --test, so this has to run outside set -e.
+    set +e
+    getopt --test >/dev/null
+    getopt_rc=$?
+    set -e
+
+    if ((getopt_rc != 4)); then
+      echo "util-linux getopt is missing" >&2
+
+      exit 1
+    fi
+
+    pattern=""
+    test=""
+    follow=""
+
+    set +e
+    parsed=$(getopt -n "just test-log" \
+      -o p:t:fh \
+      -l pattern:,test:,follow,help \
+      -- "$@")
+    getopt_rc=$?
+    set -e
+
+    if ((getopt_rc != 0)); then
+      usage >&2
+
+      exit 2
+    fi
+
+    eval set -- "${parsed}"
+
+    while true; do
+      case "$1" in
+        -p | --pattern) pattern="$2"; shift ;;
+        -t | --test) test="$2"; shift ;;
+        -f | --follow) follow=1 ;;
+        -h | --help) usage; exit 0 ;;
+        --) shift; break ;;
+      esac
+
+      shift
+    done
+
+    if (($#)); then
+      echo "extra arguments: $* - --help lists the options" >&2
+
+      exit 2
+    fi
 
     log=""
     for candidate in work/logs/*.json; do
@@ -95,30 +160,31 @@ test-log pattern="" test="":
 
     # gotestsum's own lines already end in a newline, so trim jq's.
     select='select(.Action == "output")'
-    if [[ -n "{{ test }}" ]]; then
-      select="${select} | select(.Test != null and (.Test | startswith(\"{{ test }}\")))"
+    if [[ -n "${test}" ]]; then
+      select="${select} | select(.Test != null and (.Test | startswith(\"${test}\")))"
     fi
 
-    # Follow only on a terminal. Piped, `| grep FAIL` would never see EOF and
-    # hang instead of answering, which is how this gets used from a script.
-    if [[ -t 1 ]]; then
+    # Follow on a terminal, or anywhere -f says to. Piped without it,
+    # `| grep FAIL` would never see EOF and hang instead of answering, which is
+    # how this gets used from a script.
+    if [[ -n "${follow}" ]]; then
       reader=(tail -n +1 -F "${log}")
     else
       reader=(cat "${log}")
     fi
 
     set +e
-    if [[ -z "{{ pattern }}" ]]; then
+    if [[ -z "${pattern}" ]]; then
       "${reader[@]}" | jq --unbuffered -r "${select} | .Output | rtrimstr(\"\n\")"
     else
       "${reader[@]}" | jq --unbuffered -r "${select} | .Output | rtrimstr(\"\n\")" \
-        | grep --line-buffered -E "{{ pattern }}"
+        | grep --line-buffered -E "${pattern}"
     fi
     status=$?
     set -e
 
-    # 130 is Ctrl-C, which is the only way out of a follow.
-    if [[ "${status}" == 130 || "${status}" == 2 ]]; then
+    # 2 is Ctrl-C, which is the only way out of a follow.
+    if [[ "${status}" == 2 ]]; then
       exit 0
     fi
 
@@ -127,8 +193,8 @@ test-log pattern="" test="":
       exit 0
     fi
 
-    if [[ "${status}" == 1 && -n "{{ pattern }}" ]]; then
-      echo "nothing matching '{{ pattern }}'" >&2
+    if [[ "${status}" == 1 && -n "${pattern}" ]]; then
+      echo "nothing matching '${pattern}'" >&2
       exit 0
     fi
 

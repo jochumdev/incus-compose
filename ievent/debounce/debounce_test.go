@@ -8,7 +8,7 @@ import (
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // No skip helper on any test here: this plugin talks to nothing, so all of it
@@ -18,7 +18,7 @@ import (
 // rename may not, which is the real case for the veto - keeping only the last
 // of two loses the middle name. instance-started fires once, so it is not worth
 // a window either.
-var wanted = map[string]shared.Want{
+var wanted = map[string]iutil.Want{
 	incusapi.EventLifecycleInstanceUpdated: {Action: incusapi.EventLifecycleInstanceUpdated, Debounce: true},
 	incusapi.EventLifecycleNetworkUpdated:  {Action: incusapi.EventLifecycleNetworkUpdated, Debounce: true},
 	incusapi.EventLifecycleInstanceRenamed: {Action: incusapi.EventLifecycleInstanceRenamed},
@@ -34,7 +34,7 @@ const window = 150 * time.Millisecond
 type harness struct {
 	t   *testing.T
 	p   *Plugin
-	out chan *shared.Event
+	out chan *iutil.Event
 
 	// ran carries what Run returned, which is also how a test waits for the
 	// shutdown flush - there is no second signal.
@@ -48,14 +48,14 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		t:   t,
 		p:   New(Window(window)),
-		out: make(chan *shared.Event, 64),
+		out: make(chan *iutil.Event, 64),
 		ran: make(chan error, 1),
 	}
 
-	err := h.p.Setup(shared.SetupArgs{
+	err := h.p.Setup(iutil.SetupArgs{
 		Context: ctx,
 		Wanted:  wanted,
-		Next:    func(ev *shared.Event) { h.out <- ev },
+		Next:    func(ev *iutil.Event) { h.out <- ev },
 	})
 	if err != nil {
 		t.Fatalf("Setup: %s", err)
@@ -85,11 +85,11 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) send(action, project, name string) {
 	h.t.Helper()
 
-	h.p.Handle(shared.NewEvent(time.Now(), action, project, name, ""))
+	h.p.Handle(iutil.NewEvent(time.Now(), action, project, name, ""))
 }
 
 // next waits for one event to come out the far end.
-func (h *harness) next() *shared.Event {
+func (h *harness) next() *iutil.Event {
 	h.t.Helper()
 
 	select {
@@ -106,7 +106,7 @@ func (h *harness) next() *shared.Event {
 //
 // The point of a leading-edge test: next alone cannot tell "handed straight on"
 // from "held for the window and then released", because both arrive eventually.
-func (h *harness) nextWithin(d time.Duration) *shared.Event {
+func (h *harness) nextWithin(d time.Duration) *iutil.Event {
 	h.t.Helper()
 
 	select {
@@ -130,7 +130,7 @@ func (h *harness) nothingYet(d time.Duration) {
 	}
 }
 
-func assertEvent(t *testing.T, ev *shared.Event, action, name string, state shared.State) {
+func assertEvent(t *testing.T, ev *iutil.Event, action, name string, state iutil.State) {
 	t.Helper()
 
 	if ev.Action() != action || ev.Name() != name || ev.State() != state {
@@ -140,16 +140,20 @@ func assertEvent(t *testing.T, ev *shared.Event, action, name string, state shar
 }
 
 func TestLoneEventGoesAtOnce(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// The whole reason for the leading edge: one change is not a burst, and
 	// waiting out the window for it would be pure latency.
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestLoneEventIsNotReportedTwice(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
@@ -161,10 +165,12 @@ func TestLoneEventIsNotReportedTwice(t *testing.T) {
 }
 
 func TestTwoEventsGiveTheFirstAndTheLast(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
@@ -172,10 +178,12 @@ func TestTwoEventsGiveTheFirstAndTheLast(t *testing.T) {
 	// arrives once the key is quiet - and nothing was dropped, because there
 	// was nothing between the two.
 	h.nothingYet(window / 3)
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestStormGivesTheFirstAndTheLastAndDropsTheMiddle(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	for range 20 {
@@ -183,13 +191,13 @@ func TestStormGivesTheFirstAndTheLastAndDropsTheMiddle(t *testing.T) {
 	}
 
 	// First out is the leading edge, at once and un-dropped.
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 
 	// Then everything the last one superseded. Two of the twenty are acted on;
 	// the other eighteen still walk, so nothing is invisible.
 	for range 18 {
 		ev := h.next()
-		if ev.State() != shared.StateDropped {
+		if ev.State() != iutil.StateDropped {
 			t.Fatalf("state %s, want dropped", ev.State())
 		}
 
@@ -198,10 +206,12 @@ func TestStormGivesTheFirstAndTheLastAndDropsTheMiddle(t *testing.T) {
 		}
 	}
 
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestWindowReopensAfterItCloses(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
@@ -212,10 +222,12 @@ func TestWindowReopensAfterItCloses(t *testing.T) {
 	// rather than a trailing one.
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestKeysDoNotCollapseIntoEachOther(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
@@ -232,6 +244,8 @@ func TestKeysDoNotCollapseIntoEachOther(t *testing.T) {
 }
 
 func TestSameNameInTwoProjectsAreTwoKeys(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "a", "one")
@@ -244,6 +258,8 @@ func TestSameNameInTwoProjectsAreTwoKeys(t *testing.T) {
 }
 
 func TestSweepStartClosesWindowsBeforeTheBracket(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
@@ -253,67 +269,75 @@ func TestSweepStartClosesWindowsBeforeTheBracket(t *testing.T) {
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 	h.nothingYet(window / 4)
 
-	h.send(shared.ActionSweepStart, "", "")
+	h.send(iutil.ActionSweepStart, "", "")
 
 	// The trailing one goes first, so the pass contains it rather than finding
 	// it missing and pruning a live record.
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, h.next(), shared.ActionSweepStart, "", shared.StateOk)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, h.next(), iutil.ActionSweepStart, "", iutil.StateOk)
 }
 
 func TestSweepPassesEverythingThrough(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
-	h.send(shared.ActionSweepStart, "", "")
-	assertEvent(t, h.next(), shared.ActionSweepStart, "", shared.StateOk)
+	h.send(iutil.ActionSweepStart, "", "")
+	assertEvent(t, h.next(), iutil.ActionSweepStart, "", iutil.StateOk)
 
 	// Nothing is collapsed while a pass is running, so a burst arrives whole
 	// and nothing in it reads as absent.
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestCollapsingResumesAfterTheSweep(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
-	h.send(shared.ActionSweepStart, "", "")
-	assertEvent(t, h.next(), shared.ActionSweepStart, "", shared.StateOk)
+	h.send(iutil.ActionSweepStart, "", "")
+	assertEvent(t, h.next(), iutil.ActionSweepStart, "", iutil.StateOk)
 
-	h.send(shared.ActionSweepEnd, "", "")
-	assertEvent(t, h.next(), shared.ActionSweepEnd, "", shared.StateOk)
+	h.send(iutil.ActionSweepEnd, "", "")
+	assertEvent(t, h.next(), iutil.ActionSweepEnd, "", iutil.StateOk)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateDropped)
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateDropped)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestNamelessActionsAreNotHeld(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// The source's own carry no project and no name, so there is nothing to
 	// collapse and no reason to delay them.
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 
-	assertEvent(t, h.nextWithin(window/3), shared.ActionConnected, "", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), iutil.ActionConnected, "", iutil.StateOk)
 }
 
 func TestAlreadyFinishedEventsAreNotHeld(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
-	ev := shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", "")
+	ev := iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", "")
 	h.p.Handle(ev.WithDropped("somebody"))
 
 	// It is walking for the observers. Delaying it would delay a report of
 	// something that has already happened.
 	out := h.nextWithin(window / 3)
-	assertEvent(t, out, incusapi.EventLifecycleInstanceUpdated, "one", shared.StateDropped)
+	assertEvent(t, out, incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateDropped)
 
 	if out.Reason() != "somebody" {
 		t.Fatalf("reason %q, want it left alone", out.Reason())
@@ -321,6 +345,8 @@ func TestAlreadyFinishedEventsAreNotHeld(t *testing.T) {
 }
 
 func TestVetoedActionIsNeverCollapsed(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// dns asks for every rename, so all of them arrive whole and none waits.
@@ -329,36 +355,42 @@ func TestVetoedActionIsNeverCollapsed(t *testing.T) {
 	}
 
 	for range 3 {
-		assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceRenamed, "one", shared.StateOk)
+		assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceRenamed, "one", iutil.StateOk)
 	}
 }
 
 func TestVetoIsPerAction(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// instance-started fires once, so it is not worth a window either - but
 	// that says nothing about an update on the same instance.
 	h.send(incusapi.EventLifecycleInstanceStarted, "p", "one")
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceStarted, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceStarted, "one", iutil.StateOk)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestUnknownActionIsNotCollapsed(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// Nothing wanted it, so the source would never have walked it at all. If
 	// one arrives anyway, the zero Want vetoes and it passes through.
 	h.send(incusapi.EventLifecycleInstanceMigrated, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceMigrated, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceMigrated, "one", iutil.StateOk)
 }
 
 func TestPassThroughDoesNotOvertakeAWaitingEvent(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// The case this is really about: the actions worth collapsing sit next to
@@ -372,11 +404,13 @@ func TestPassThroughDoesNotOvertakeAWaitingEvent(t *testing.T) {
 	h.send(incusapi.EventLifecycleInstanceRenamed, "p", "one")
 
 	// The waiting update arrived first, so it leaves first.
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceRenamed, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceRenamed, "one", iutil.StateOk)
 }
 
 func TestPassThroughOnlyClosesItsOwnKey(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	for _, n := range []string{"one", "two"} {
@@ -390,26 +424,28 @@ func TestPassThroughOnlyClosesItsOwnKey(t *testing.T) {
 	// A vetoed event on "one" says nothing about "two", which keeps waiting.
 	h.send(incusapi.EventLifecycleInstanceRenamed, "p", "one")
 
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceRenamed, "one", shared.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, h.nextWithin(window/3), incusapi.EventLifecycleInstanceRenamed, "one", iutil.StateOk)
 
-	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "two", shared.StateOk)
+	assertEvent(t, h.next(), incusapi.EventLifecycleInstanceUpdated, "two", iutil.StateOk)
 }
 
 func TestDrainClosesOpenWindows(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	out := make(chan *shared.Event, 8)
+	t.Parallel()
 
-	in := make(chan shared.Command)
-	raised := make(chan shared.Command, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	out := make(chan *iutil.Event, 8)
+
+	in := make(chan iutil.Command)
+	raised := make(chan iutil.Command, 1)
 
 	// An hour, so the window is one only the shutdown can close.
 	p := New(Window(time.Hour))
 
-	err := p.Setup(shared.SetupArgs{
+	err := p.Setup(iutil.SetupArgs{
 		Context:    ctx,
 		Wanted:     wanted,
-		Next:       func(ev *shared.Event) { out <- ev },
+		Next:       func(ev *iutil.Event) { out <- ev },
 		CommandIn:  in,
 		CommandOut: raised,
 	})
@@ -417,8 +453,8 @@ func TestDrainClosesOpenWindows(t *testing.T) {
 		t.Fatalf("Setup: %s", err)
 	}
 
-	p.Handle(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
-	p.Handle(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
+	p.Handle(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
+	p.Handle(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
 
 	var wg sync.WaitGroup
 
@@ -431,10 +467,10 @@ func TestDrainClosesOpenWindows(t *testing.T) {
 
 	// Asked to finish rather than canceled. Canceling is an abort now, and what
 	// is held goes nowhere - which is the whole difference the drain makes.
-	in <- shared.Command{Action: shared.CommandDrain}
+	in <- iutil.Command{Action: iutil.CommandDrain}
 
 	got := <-raised
-	if got.Action != shared.CommandDrain {
+	if got.Action != iutil.CommandDrain {
 		t.Fatalf("answer was %q, want the question back", got.Action)
 	}
 
@@ -445,16 +481,18 @@ func TestDrainClosesOpenWindows(t *testing.T) {
 		t.Fatalf("got %d events, want the leading one and the trailing one", len(out))
 	}
 
-	assertEvent(t, <-out, incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
-	assertEvent(t, <-out, incusapi.EventLifecycleInstanceUpdated, "one", shared.StateOk)
+	assertEvent(t, <-out, incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
+	assertEvent(t, <-out, incusapi.EventLifecycleInstanceUpdated, "one", iutil.StateOk)
 }
 
 func TestRunReturnsAfterCancel(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(t.Context())
 
 	p := New(Window(window))
 
-	err := p.Setup(shared.SetupArgs{Context: ctx, Wanted: wanted, Next: func(_ *shared.Event) {}})
+	err := p.Setup(iutil.SetupArgs{Context: ctx, Wanted: wanted, Next: func(_ *iutil.Event) {}})
 	if err != nil {
 		t.Fatalf("Setup: %s", err)
 	}
@@ -476,20 +514,22 @@ func TestRunReturnsAfterCancel(t *testing.T) {
 }
 
 func TestFullInboxDropsRatherThanBlocks(t *testing.T) {
+	t.Parallel()
+
 	// No Setup, so nothing drains the inbox: Handle has to cope on its own.
-	seen := []*shared.Event{}
+	seen := []*iutil.Event{}
 	p := New(Window(window))
-	p.next = func(ev *shared.Event) { seen = append(seen, ev) }
+	p.next = func(ev *iutil.Event) { seen = append(seen, ev) }
 
 	for range defaultInboxSize {
-		p.Handle(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
+		p.Handle(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
 	}
 
 	if len(seen) != 0 {
 		t.Fatalf("dropped %d before the inbox was full", len(seen))
 	}
 
-	p.Handle(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "two", ""))
+	p.Handle(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "two", ""))
 
 	if len(seen) != 1 {
 		t.Fatalf("handed on %d past a full inbox, want 1", len(seen))
@@ -497,7 +537,7 @@ func TestFullInboxDropsRatherThanBlocks(t *testing.T) {
 
 	// Marked and traveling, not swallowed: a drop nobody can see is worse than
 	// a drop.
-	assertEvent(t, seen[0], incusapi.EventLifecycleInstanceUpdated, "two", shared.StateDropped)
+	assertEvent(t, seen[0], incusapi.EventLifecycleInstanceUpdated, "two", iutil.StateDropped)
 
 	if seen[0].Reason() != name {
 		t.Fatalf("reason %q, want %q", seen[0].Reason(), name)

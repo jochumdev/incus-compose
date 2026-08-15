@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // answering builds a plugin serving one instance in one project, behind the
@@ -23,10 +23,10 @@ func answering(t *testing.T, echo bool) *adapter {
 
 	// Answering is all this needs, so it never runs: a successor to hand each
 	// event to, and no chain behind it.
-	p.next = func(_ *shared.Event) {}
+	p.next = func(_ *iutil.Event) {}
 
 	p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"))
-	p.fold(event(shared.ActionSweepEnd, "", ""))
+	p.fold(event(iutil.ActionSweepEnd, "", ""))
 
 	// Nothing behind, which is what a deployment with no --forward runs.
 	wire(p.view, nil)
@@ -73,6 +73,8 @@ func replySubnet(m *dns.Msg) *dns.EDNS0_SUBNET {
 // ScrubWriter rewrites every OPT record this process writes, so what ecs_view
 // builds and what a client receives are two different claims.
 func TestEchoReachesTheWire(t *testing.T) {
+	t.Parallel()
+
 	a := answering(t, true)
 	w := &recorder{}
 
@@ -94,6 +96,8 @@ func TestEchoReachesTheWire(t *testing.T) {
 // cannot see: the reply carries an OPT record either way, because the adapter's
 // ScrubWriter puts the query's own back on. What it must not carry is a subnet.
 func TestNoEchoWithoutTheFlag(t *testing.T) {
+	t.Parallel()
+
 	a := answering(t, false)
 	w := &recorder{}
 
@@ -111,6 +115,8 @@ func TestNoEchoWithoutTheFlag(t *testing.T) {
 // outside every zone is refused identically for every querier, so the reply says
 // nothing about who asked.
 func TestRefusalCarriesNoScope(t *testing.T) {
+	t.Parallel()
+
 	a := answering(t, true)
 	w := &recorder{}
 
@@ -131,6 +137,8 @@ func TestRefusalCarriesNoScope(t *testing.T) {
 // holding the subnet. Without the echo there is no such record, and upstream's
 // ScrubWriter puts the query's own back, cookie included.
 func TestEchoDecidesTheQuerysOtherOptions(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		echo bool
@@ -140,6 +148,8 @@ func TestEchoDecidesTheQuerysOtherOptions(t *testing.T) {
 		{"an echoing reply answers about the subnet alone", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			a := answering(t, tc.echo)
 			w := &recorder{}
 

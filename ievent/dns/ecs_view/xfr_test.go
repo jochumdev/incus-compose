@@ -91,6 +91,8 @@ func xfrView(t *testing.T) *ECSView {
 // The operator names who may ask; the project says which zones may go. Neither
 // alone is enough, and a refusal writes nothing at all.
 func TestTransferRefusesUnlessBothGatesSayYes(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 
@@ -151,6 +153,8 @@ func TestTransferRefusesUnlessBothGatesSayYes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			v := xfrView(t)
 			v.AllowTransfer = tc.allow
 			v.current.Load().ByZone["shop.incus."].Transfer = tc.opted
@@ -179,6 +183,8 @@ func TestTransferRefusesUnlessBothGatesSayYes(t *testing.T) {
 // by its SOA at both ends, and holding every address of a multi-homed host
 // rather than the ones one querier can reach.
 func TestTransferCarriesTheWholeZoneUnfiltered(t *testing.T) {
+	t.Parallel()
+
 	v := xfrView(t)
 	w := xfrPeer(true)
 
@@ -218,6 +224,8 @@ func TestTransferCarriesTheWholeZoneUnfiltered(t *testing.T) {
 // the head of the target's A set so a query through it is one lookup; a zone
 // holding a CNAME beside other data at one name is rejected by a secondary.
 func TestTransferSendsAnAliasWithoutTheRecordsItWasChasedInto(t *testing.T) {
+	t.Parallel()
+
 	v := xfrView(t)
 
 	z := v.current.Load().ByZone["shop.incus."]
@@ -252,7 +260,11 @@ func TestTransferSendsAnAliasWithoutTheRecordsItWasChasedInto(t *testing.T) {
 // holding the zone is told so in one record, and an older one takes all of it
 // because there is no journal here to cut a delta from.
 func TestTransferAnswersIXFRFromTheSerial(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a current secondary gets the SOA and nothing else", func(t *testing.T) {
+		t.Parallel()
+
 		v := xfrView(t)
 		w := xfrPeer(true)
 
@@ -269,6 +281,8 @@ func TestTransferAnswersIXFRFromTheSerial(t *testing.T) {
 	})
 
 	t.Run("an older one falls back to the whole zone", func(t *testing.T) {
+		t.Parallel()
+
 		v := xfrView(t)
 		w := xfrPeer(true)
 
@@ -283,6 +297,8 @@ func TestTransferAnswersIXFRFromTheSerial(t *testing.T) {
 // TestTransferCutsEnvelopesAtTheWireLimit pins the batching. One message may
 // not exceed 64 KiB, so a zone larger than that has to arrive in several.
 func TestTransferCutsEnvelopesAtTheWireLimit(t *testing.T) {
+	t.Parallel()
+
 	v := xfrView(t)
 
 	z := v.current.Load().ByZone["shop.incus."]

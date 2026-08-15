@@ -1,0 +1,9 @@
+{
+  "config": {
+    "path": "/data",
+    "pool": "default",
+    "source": "my-volume",
+    "type": "disk"
+  },
+  "name": "vol-data"
+}

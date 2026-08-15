@@ -24,6 +24,7 @@ import (
 	ievlog "github.com/lxc/incus-compose/ievent/log"
 	"github.com/lxc/incus-compose/ievent/source"
 	"github.com/lxc/incus-compose/incustrust"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // certName is what this binary registers itself as in the Incus trust store,
@@ -230,11 +231,11 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// --trace implies --debug, or the position it adds logs at a level the
-	// handler drops.
 	level := slog.LevelInfo
-	if cfg.Debug || cfg.Trace {
+	if cfg.Debug {
 		level = slog.LevelDebug
+	} else if cfg.Trace {
+		level = shared.LevelTrace
 	}
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(cmd.ErrWriter, &slog.HandlerOptions{Level: level})))

@@ -10,8 +10,8 @@ import (
 	incusapi "github.com/lxc/incus/v7/shared/api"
 )
 
-// LabelPrefix is the namespace an instance or a project configures us from.
-const LabelPrefix = "user.label.coredns."
+// LabelPrefix is the namespace an instance or a project configures a synthetic test from.
+const LabelPrefix = "testlib."
 
 // Project is one project's worth of Incus values, as three reads would return them.
 type Project struct {

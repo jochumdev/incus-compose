@@ -7,7 +7,7 @@ import (
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // errIgnored marks an event there is nowhere to send. Not a failure: the stream
@@ -16,7 +16,7 @@ var errIgnored = errors.New("lifecycle event ignored")
 
 // decodeLifecycle turns one raw Incus event into ours. It parses and judges
 // nothing, which is why Action stays Incus's own string.
-func decodeLifecycle(raw incusapi.Event) (*shared.Event, error) {
+func decodeLifecycle(raw incusapi.Event) (*iutil.Event, error) {
 	// Through iclient, because incusd fills Name on instance events alone and
 	// leaves every other kind carrying it in Source.
 	lc, err := iclient.LifecycleEvent(raw)
@@ -41,5 +41,5 @@ func decodeLifecycle(raw incusapi.Event) (*shared.Event, error) {
 
 	// time.Now rather than raw.Timestamp, so what log measures is the time spent
 	// here rather than the clock difference to whichever member sent it.
-	return shared.NewEvent(time.Now(), lc.Action, raw.Project, lc.Name, old), nil
+	return iutil.NewEvent(time.Now(), lc.Action, raw.Project, lc.Name, old), nil
 }

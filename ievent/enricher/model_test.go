@@ -32,6 +32,8 @@ func filled(t *testing.T, p *testlib.Project) *model {
 }
 
 func TestPutInstance(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		// change mutates the baseline before it is patched in.
@@ -107,6 +109,8 @@ func TestPutInstance(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			p := testlib.NewProject("p", 1, 1)
 			if tc.change != nil {
 				tc.change(p)
@@ -145,6 +149,8 @@ func TestPutInstance(t *testing.T) {
 // configuration: which map to take. What any key in it means belongs to
 // whoever asked - coredns reads its namespace, operator reads its own.
 func TestPutInstanceConfig(t *testing.T) {
+	t.Parallel()
+
 	const ours = testlib.LabelPrefix + "service"
 
 	tests := []struct {
@@ -203,6 +209,8 @@ func TestPutInstanceConfig(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			p := testlib.NewProject("p", 1, 1)
 			if tc.change != nil {
 				tc.change(p)
@@ -213,12 +221,14 @@ func TestPutInstanceConfig(t *testing.T) {
 
 			inst := p.Instances[0]
 
-			assert.Equal(t, tc.want, m.putInstance(&inst, p.States[inst.Name]).meta)
+			assert.Equal(t, tc.want, m.putInstance(&inst, p.States[inst.Name]).config)
 		})
 	}
 }
 
 func TestNewWire(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		change func(*incusapi.Network)
@@ -262,6 +272,8 @@ func TestNewWire(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			n := testlib.NewNetwork("p", 0)
 			if tc.change != nil {
 				tc.change(&n)
@@ -274,6 +286,8 @@ func TestNewWire(t *testing.T) {
 
 // TestDropInstance is rule 3: a delete deletes, and costs no read.
 func TestDropInstance(t *testing.T) {
+	t.Parallel()
+
 	p := testlib.NewProject("p", 2, 1)
 	m := filled(t, p)
 
@@ -289,6 +303,8 @@ func TestDropInstance(t *testing.T) {
 // and a delete in one says nothing about the other. The project is half the
 // key, and this is what says so.
 func TestDropInstanceIsPerProject(t *testing.T) {
+	t.Parallel()
+
 	m := newModel()
 
 	for _, project := range []string{"one", "two"} {
@@ -313,6 +329,8 @@ func TestDropInstanceIsPerProject(t *testing.T) {
 // TestDropInstanceIsIdempotent: a delete for something already gone is not an
 // error. Two events for one deletion is the normal case, not the odd one.
 func TestDropInstanceIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	m := filled(t, testlib.NewProject("p", 1, 1))
 
 	m.dropInstance("p", testlib.InstanceName(0))
@@ -323,6 +341,8 @@ func TestDropInstanceIsIdempotent(t *testing.T) {
 }
 
 func TestDropProjectTakesItsInstances(t *testing.T) {
+	t.Parallel()
+
 	m := filled(t, testlib.NewProject("keep", 2, 1))
 
 	other := testlib.NewProject("go", 3, 1)
@@ -344,6 +364,8 @@ func TestDropProjectTakesItsInstances(t *testing.T) {
 // TestInstancesIn is what a profile change fans out over, without reading the
 // project to find out who is in it.
 func TestInstancesIn(t *testing.T) {
+	t.Parallel()
+
 	m := filled(t, testlib.NewProject("p", 3, 1))
 
 	assert.ElementsMatch(t, []subject{
@@ -356,6 +378,8 @@ func TestInstancesIn(t *testing.T) {
 }
 
 func TestWirePatches(t *testing.T) {
+	t.Parallel()
+
 	p := testlib.NewProject("p", 1, 2)
 	m := filled(t, p)
 
@@ -387,6 +411,8 @@ func TestWirePatches(t *testing.T) {
 // TestPrefixesAreClonedIntoTheEvent: the wire outlives the event and is patched
 // in place, so what an event already carries may not move under it.
 func TestPrefixesAreClonedIntoTheEvent(t *testing.T) {
+	t.Parallel()
+
 	p := testlib.NewProject("p", 1, 1)
 	m := filled(t, p)
 
@@ -403,6 +429,8 @@ func TestPrefixesAreClonedIntoTheEvent(t *testing.T) {
 // TestBridgeResolvesInTheDefaultProject: a NIC names its network bare, and a
 // project without features.networks resolves it against the default project.
 func TestBridgeResolvesInTheDefaultProject(t *testing.T) {
+	t.Parallel()
+
 	p := testlib.NewProject("p", 1, 1)
 
 	// The bridge belongs to the default project; the instance merely uses it.

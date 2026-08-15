@@ -12,23 +12,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // plugged builds a plugin wired to a collecting successor and its two command
 // doors, the way the source wires one.
-func plugged(t *testing.T, opts ...Option) (*Plugin, chan *shared.Event, chan shared.Command, chan shared.Command) {
+func plugged(t *testing.T, opts ...Option) (*Plugin, chan *iutil.Event, chan iutil.Command, chan iutil.Command) {
 	t.Helper()
 
 	p := New(opts...)
 
-	seen := make(chan *shared.Event, 64)
-	in := make(chan shared.Command)
-	raised := make(chan shared.Command, 8)
+	seen := make(chan *iutil.Event, 64)
+	in := make(chan iutil.Command)
+	raised := make(chan iutil.Command, 8)
 
-	err := p.Setup(shared.SetupArgs{
+	err := p.Setup(iutil.SetupArgs{
 		Context:    t.Context(),
-		Next:       func(ev *shared.Event) { seen <- ev },
+		Next:       func(ev *iutil.Event) { seen <- ev },
 		CommandIn:  in,
 		CommandOut: raised,
 	})
@@ -38,25 +38,39 @@ func plugged(t *testing.T, opts ...Option) (*Plugin, chan *shared.Event, chan sh
 }
 
 // event is one bare event, carrying no read.
-func event(action, project, name string) *shared.Event {
-	return shared.NewEvent(time.Now(), action, project, name, "")
+func event(action, project, name string) *iutil.Event {
+	return iutil.NewEvent(time.Now(), action, project, name, "")
 }
 
 // enriched is one instance event as the enricher hands it over: read, running,
 // and on one network with an address on it.
-func enriched(action, project, name, addr string) *shared.Event {
-	net := shared.NewNetwork("net0", project, true,
+func enriched(action, project, name, addr string) *iutil.Event {
+	net := iutil.NewNetwork("net0", project, true,
 		[]netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")},
 		[]netip.Addr{netip.MustParseAddr(addr)}, nil)
 
 	return event(action, project, name).
-		WithInstance(true, map[string]string{}, map[string]*shared.Network{project + "/net0": net})
+		WithInstance(true, map[string]string{}, map[string]*iutil.Network{project + "/net0": net})
+}
+
+// enrichedNoAddr is a read that landed before DHCP did: the instance is
+// running and on a network, same as enriched, but that network carries no
+// address yet - the state a container is briefly in between "started" and an
+// agent actually reporting a lease.
+func enrichedNoAddr(action, project, name string) *iutil.Event {
+	net := iutil.NewNetwork("net0", project, true,
+		[]netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}, nil, nil)
+
+	return event(action, project, name).
+		WithInstance(true, map[string]string{}, map[string]*iutil.Network{project + "/net0": net})
 }
 
 func TestFold(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
-		feed []*shared.Event
+		feed []*iutil.Event
 
 		held      []string
 		healthy   bool
@@ -66,7 +80,7 @@ func TestFold(t *testing.T) {
 			// The closing bracket is where everything held is known to be
 			// everything there is, so it is the only thing that publishes.
 			name:      "a pass publishes and turns healthy",
-			feed:      []*shared.Event{event(shared.ActionSweepEnd, "", "")},
+			feed:      []*iutil.Event{event(iutil.ActionSweepEnd, "", "")},
 			healthy:   true,
 			published: true,
 		},
@@ -74,10 +88,10 @@ func TestFold(t *testing.T) {
 			// A lost stream drops no record - what is held is still the best
 			// answer there is - but nothing is confirming it any more.
 			name: "a lost stream keeps the records and stops being healthy",
-			feed: []*shared.Event{
+			feed: []*iutil.Event{
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"),
-				event(shared.ActionSweepEnd, "", ""),
-				event(shared.ActionDisconnected, "", ""),
+				event(iutil.ActionSweepEnd, "", ""),
+				event(iutil.ActionDisconnected, "", ""),
 			},
 			held:      []string{"shop/web"},
 			healthy:   false,
@@ -85,7 +99,7 @@ func TestFold(t *testing.T) {
 		},
 		{
 			name: "a delete drops what it names",
-			feed: []*shared.Event{
+			feed: []*iutil.Event{
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"),
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "db", "10.0.0.3"),
 				event(incusapi.EventLifecycleInstanceDeleted, "shop", "web"),
@@ -96,7 +110,7 @@ func TestFold(t *testing.T) {
 			// Two projects may each have a web, and they are different hosts in
 			// different zones. Held by name alone, one would overwrite the other.
 			name: "one name in two projects is two instances",
-			feed: []*shared.Event{
+			feed: []*iutil.Event{
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"),
 				enriched(incusapi.EventLifecycleInstanceStarted, "blog", "web", "10.0.1.2"),
 			},
@@ -105,27 +119,37 @@ func TestFold(t *testing.T) {
 		{
 			// A record pointing at an address nothing is listening on has the
 			// client wait out a timeout instead of being told at once.
-			name: "a stopped instance is dropped",
-			feed: []*shared.Event{
+			name: "a deleted instance is dropped",
+			feed: []*iutil.Event{
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"),
-				event(incusapi.EventLifecycleInstanceStopped, "shop", "web"),
+				event(incusapi.EventLifecycleInstanceDeleted, "shop", "web"),
 			},
 		},
 		{
 			// The actions a plugin raises carry no name, and would fold into an
 			// entry called "" that reaches the cold store.
 			name: "an action with no name is not an instance",
-			feed: []*shared.Event{
-				event(shared.ActionConnected, "", ""),
-				event(shared.ActionSweepStart, "", ""),
-				event(shared.ActionReady, "", ""),
+			feed: []*iutil.Event{
+				event(iutil.ActionConnected, "", ""),
+				event(iutil.ActionSweepStart, "", ""),
+				event(iutil.ActionReady, "", ""),
 			},
+		},
+		{
+			// The recovery side of the same race: one read that does carry an
+			// address, however late, is all it takes.
+			name: "an instance is served as soon as one read carries an address",
+			feed: []*iutil.Event{
+				enrichedNoAddr(incusapi.EventLifecycleInstanceStarted, "shop", "web"),
+				enriched(incusapi.EventLifecycleInstanceUpdated, "shop", "web", "10.0.0.2"),
+			},
+			held: []string{"shop/web"},
 		},
 		{
 			// An event somebody already finished with is walking for the
 			// observers. Acting on it would fold a drop into the fleet.
 			name: "an event already dropped changes nothing",
-			feed: []*shared.Event{
+			feed: []*iutil.Event{
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2").WithDropped("debounce"),
 				enriched(incusapi.EventLifecycleInstanceStarted, "shop", "db", "10.0.0.3").WithFailed("source/read"),
 			},
@@ -134,6 +158,8 @@ func TestFold(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			p, seen, _, _ := plugged(t)
 
 			for _, ev := range tc.feed {
@@ -158,34 +184,38 @@ func TestFold(t *testing.T) {
 // TestReadinessIsEdges pins that a change is announced once. A level re-raised
 // on every event would put one command on the chain per event.
 func TestReadinessIsEdges(t *testing.T) {
+	t.Parallel()
+
 	p, _, _, raised := plugged(t)
 
 	// Nothing published, so nothing to say.
 	p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"))
 	assert.Empty(t, raised, "readiness was announced before anything was published")
 
-	p.fold(event(shared.ActionSweepEnd, "", ""))
+	p.fold(event(iutil.ActionSweepEnd, "", ""))
 	require.Len(t, raised, 1)
-	assert.Equal(t, shared.ActionReady, (<-raised).Action)
+	assert.Equal(t, iutil.ActionReady, (<-raised).Action)
 
 	// Still ready, and said once.
-	p.fold(event(shared.ActionSweepEnd, "", ""))
+	p.fold(event(iutil.ActionSweepEnd, "", ""))
 	p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "db", "10.0.0.3"))
 	assert.Empty(t, raised, "ready was announced twice")
 
 	// The other edge.
-	p.fold(event(shared.ActionDisconnected, "", ""))
+	p.fold(event(iutil.ActionDisconnected, "", ""))
 	require.Len(t, raised, 1)
-	assert.Equal(t, shared.ActionNotReady, (<-raised).Action)
+	assert.Equal(t, iutil.ActionNotReady, (<-raised).Action)
 }
 
 // TestHandleDropsRatherThanBlocks pins the inbox door: a full inbox is a drop
 // that keeps walking rather than a wait that stops the chain.
 func TestHandleDropsRatherThanBlocks(t *testing.T) {
+	t.Parallel()
+
 	p, seen, _, _ := plugged(t)
 
 	// One slot, so the second has nowhere to go and nothing is reading.
-	p.inbox = make(chan *shared.Event, 1)
+	p.inbox = make(chan *iutil.Event, 1)
 
 	p.Handle(event(incusapi.EventLifecycleInstanceStarted, "shop", "web"))
 	assert.Empty(t, seen, "the first one was handed on rather than queued")
@@ -195,13 +225,15 @@ func TestHandleDropsRatherThanBlocks(t *testing.T) {
 	require.Len(t, seen, 1)
 
 	got := <-seen
-	assert.Equal(t, shared.StateDropped, got.State())
+	assert.Equal(t, iutil.StateDropped, got.State())
 	assert.Equal(t, name, got.Reason(), "the drop does not name who did it")
 }
 
 // TestRunDrainsWhatItHolds pins the shutdown contract: everything taken is
 // handed on before the answer goes back, since the source then asks the next.
 func TestRunDrainsWhatItHolds(t *testing.T) {
+	t.Parallel()
+
 	p, seen, in, raised := plugged(t)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -216,12 +248,12 @@ func TestRunDrainsWhatItHolds(t *testing.T) {
 			fmt.Sprintf("10.0.0.%d", 2+i)))
 	}
 
-	in <- shared.Command{Action: shared.CommandDrain}
+	in <- iutil.Command{Action: iutil.CommandDrain}
 
 	// The answer, ignoring any readiness raised on the way.
 	for {
 		cmd := <-raised
-		if cmd.Action == shared.CommandDrain {
+		if cmd.Action == iutil.CommandDrain {
 			break
 		}
 	}
@@ -236,6 +268,8 @@ func TestRunDrainsWhatItHolds(t *testing.T) {
 // TestRunRestoresTheColdStore pins the whole point of the file: a restart
 // answers from what the last run served, and carries its serials.
 func TestRunRestoresTheColdStore(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 
 	// What a previous run left behind.
@@ -259,11 +293,11 @@ func TestRunRestoresTheColdStore(t *testing.T) {
 
 	go func() { done <- p.Run(ctx) }()
 
-	in <- shared.Command{Action: shared.CommandDrain}
+	in <- iutil.Command{Action: iutil.CommandDrain}
 
 	for {
 		cmd := <-raised
-		if cmd.Action == shared.CommandDrain {
+		if cmd.Action == iutil.CommandDrain {
 			break
 		}
 	}
@@ -288,6 +322,8 @@ func TestRunRestoresTheColdStore(t *testing.T) {
 // alone, so reading the labels off it anyway re-files the instance under the
 // default zone and closes the transfer gate its project opened.
 func TestFoldKeepsProjectLabelsAnEventDidNotCarry(t *testing.T) {
+	t.Parallel()
+
 	own := map[string]string{
 		labelPrefix + metaZone:     "shop.example.",
 		labelPrefix + metaTransfer: "true",
@@ -295,16 +331,18 @@ func TestFoldKeepsProjectLabelsAnEventDidNotCarry(t *testing.T) {
 
 	// A rename as the enricher hands one over: instance and networks read, the
 	// project not, and the old name alongside the new one.
-	renamed := func() *shared.Event {
-		net := shared.NewNetwork("net0", "shop", true,
+	renamed := func() *iutil.Event {
+		net := iutil.NewNetwork("net0", "shop", true,
 			[]netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")},
 			[]netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil)
 
-		return shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceRenamed, "shop", "www", "web").
-			WithInstance(true, map[string]string{}, map[string]*shared.Network{"shop/net0": net})
+		return iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceRenamed, "shop", "www", "web").
+			WithInstance(true, map[string]string{}, map[string]*iutil.Network{"shop/net0": net})
 	}
 
 	t.Run("a rename keeps what the project last said", func(t *testing.T) {
+		t.Parallel()
+
 		p, _, _, _ := plugged(t, Suffix("incus"))
 
 		p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2").
@@ -326,6 +364,8 @@ func TestFoldKeepsProjectLabelsAnEventDidNotCarry(t *testing.T) {
 	})
 
 	t.Run("a project read as setting nothing does clear it", func(t *testing.T) {
+		t.Parallel()
+
 		p, _, _, _ := plugged(t, Suffix("incus"))
 
 		p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2").
@@ -348,8 +388,10 @@ func TestFoldKeepsProjectLabelsAnEventDidNotCarry(t *testing.T) {
 // keeps to itself. A zone belongs to its project, so an instance opting one in
 // would expose every sibling sharing it.
 func TestDistillIgnoresAnInstanceClaimingTransfer(t *testing.T) {
-	inst := distill(labeled("shop", "web",
-		map[string]string{labelPrefix + metaTransfer: "true"},
+	t.Parallel()
+
+	inst := patchInstance(labeled("shop", "web",
+		map[string]string{userLabel(labelPrefix + metaTransfer): "true"},
 		nil), nil, "incus")
 	require.NotNil(t, inst)
 

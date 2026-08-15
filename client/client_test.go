@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -15,12 +14,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	logger := slog.New(slog.NewTextHandler(
-		os.Stderr,
-		&slog.HandlerOptions{Level: slog.LevelDebug - 4}),
-	)
-
-	slog.SetDefault(logger)
+	testlib.InitSlog()
 
 	code := m.Run()
 	os.Exit(code)

@@ -4,48 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/shared"
 )
 
 // The instance read: one subject, one flight, and what an event becomes when
 // it lands or does not.
-
-// fill derives the event a read amounted to.
-//
-// A failed read is StateFailed and nothing else: the plugins behind here asked
-// for something and did not get it, and saying so beats handing over an event
-// that looks complete and is not.
-//
-// Except when it 404s, which is not a failure at all - see gone. The event goes
-// on unenriched, and Enriched saying so is what keeps a plugin from publishing
-// an absence it was never told about.
-func fill(ev *shared.Event, e *instance, err error) *shared.Event {
-	if err != nil && !gone(err) {
-		return ev.WithFailed("source/read")
-	}
-
-	if e == nil {
-		return ev
-	}
-
-	return ev.WithInstance(e.running, e.meta, e.nets)
-}
-
-// gone reports whether a read failed because the subject is not there.
-//
-// An instance read after it went is the ordinary case, not an error: an event
-// and the delete that overtook it race, and the delete wins. Calling that a
-// failure marks the key for repair and pulls a whole pass in to re-read
-// something that no longer exists.
-func gone(err error) bool {
-	return incusapi.StatusErrorCheck(err, http.StatusNotFound)
-}
 
 // flight is one read, and every event waiting on it.
 type flight struct {

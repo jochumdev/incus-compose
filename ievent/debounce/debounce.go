@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // name is what this plugin is called, in the chain and in a drop's reason.
@@ -33,20 +33,20 @@ type Plugin struct {
 	// wanted is the source's finished table, read for Want.Debounce - false
 	// unless every plugin that asked for the action can live with the last of a
 	// burst.
-	wanted map[string]shared.Want
+	wanted map[string]iutil.Want
 
-	next  shared.Next
-	inbox chan *shared.Event
+	next  iutil.Next
+	inbox chan *iutil.Event
 
 	// in is the source asking this plugin to finish, on its own channel.
-	in <-chan shared.Command
+	in <-chan iutil.Command
 
 	// out is how the answer goes back.
-	out chan<- shared.Command
+	out chan<- iutil.Command
 }
 
 // options is what main decides about this plugin. Its own rather than a set
-// shared with every other plugin: naming one is already naming this package.
+// iutil with every other plugin: naming one is already naming this package.
 type options struct {
 	Window    time.Duration
 	InboxSize int
@@ -80,7 +80,7 @@ func New(opts ...Option) *Plugin {
 
 	return &Plugin{
 		window: o.Window,
-		inbox:  make(chan *shared.Event, o.InboxSize),
+		inbox:  make(chan *iutil.Event, o.InboxSize),
 	}
 }
 
@@ -88,11 +88,11 @@ func New(opts ...Option) *Plugin {
 func (p *Plugin) Name() string { return name }
 
 // Wants nothing: the action and the name it keys on are on the bare event.
-func (p *Plugin) Wants() []shared.Want { return nil }
+func (p *Plugin) Wants() []iutil.Want { return nil }
 
 // Setup keeps the successor and the table, and starts nothing: the goroutine is
 // the caller's, so main decides where this runs.
-func (p *Plugin) Setup(args shared.SetupArgs) error {
+func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.next = args.Next
 	p.wanted = args.Wanted
 	p.in, p.out = args.CommandIn, args.CommandOut
@@ -103,7 +103,7 @@ func (p *Plugin) Setup(args shared.SetupArgs) error {
 // Handle puts the event on the inbox and returns. A full inbox is a drop rather
 // than a wait, marked and handed straight on so the observers behind still see
 // it.
-func (p *Plugin) Handle(ev *shared.Event) {
+func (p *Plugin) Handle(ev *iutil.Event) {
 	select {
 	case p.inbox <- ev:
 	default:
@@ -156,7 +156,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 }
 
 // answer sends a command back, and gives up on a context that is already gone.
-func (p *Plugin) answer(ctx context.Context, cmd shared.Command) {
+func (p *Plugin) answer(ctx context.Context, cmd iutil.Command) {
 	select {
 	case p.out <- cmd:
 	case <-ctx.Done():
@@ -178,9 +178,9 @@ func (p *Plugin) drain(open map[string]*burst, sweeping bool) {
 
 // accept takes one event off the inbox, and reports whether a sweep is running
 // after it.
-func (p *Plugin) accept(open map[string]*burst, ev *shared.Event, sweeping bool) bool {
+func (p *Plugin) accept(open map[string]*burst, ev *iutil.Event, sweeping bool) bool {
 	switch ev.Action() {
-	case shared.ActionSweepStart:
+	case iutil.ActionSweepStart:
 		// Every open window closes before the bracket goes, so the pass contains
 		// what arrived before it started.
 		p.closeAll(open)
@@ -188,7 +188,7 @@ func (p *Plugin) accept(open map[string]*burst, ev *shared.Event, sweeping bool)
 
 		return true
 
-	case shared.ActionSweepEnd:
+	case iutil.ActionSweepEnd:
 		p.next(ev)
 
 		return false
@@ -205,7 +205,7 @@ func (p *Plugin) accept(open map[string]*burst, ev *shared.Event, sweeping bool)
 
 	// Only the last of the three is about collapsing: a dropped event is already
 	// a report of something that happened, and a pass may not be held back.
-	collapse := ev.State() == shared.StateOk &&
+	collapse := ev.State() == iutil.StateOk &&
 		!sweeping &&
 		p.wanted[ev.Action()].Debounce
 
@@ -280,7 +280,7 @@ func (p *Plugin) close(open map[string]*burst, key string) {
 // burst is one key's open window. ev is nil while nothing has followed the
 // leading edge, which is what tells a burst of one from a burst of many.
 type burst struct {
-	ev *shared.Event
+	ev *iutil.Event
 	at time.Time
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // netSpec is one wire written out rather than derived, because `on` draws a /24
@@ -22,7 +22,7 @@ type netSpec struct {
 
 // sitting builds one instance from those wires.
 func sitting(zone string, specs ...netSpec) *instance {
-	out := &instance{zone: zone, nets: map[string]*shared.Network{}}
+	out := &instance{zone: zone, nets: map[string]*iutil.Network{}}
 
 	for _, spec := range specs {
 		var (
@@ -43,13 +43,15 @@ func sitting(zone string, specs ...netSpec) *instance {
 			}
 		}
 
-		out.nets[spec.key] = shared.NewNetwork("net", "shop", len(prefixes) > 0, prefixes, v4, v6)
+		out.nets[spec.key] = iutil.NewNetwork("net", "shop", len(prefixes) > 0, prefixes, v4, v6)
 	}
 
 	return out
 }
 
 func TestReverseNameSplitsHostFromZone(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		addr string
 		name string
@@ -83,6 +85,8 @@ func TestReverseNameSplitsHostFromZone(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.addr, func(t *testing.T) {
+			t.Parallel()
+
 			name, zone, ok := reverseName(netip.MustParseAddr(test.addr))
 			require.True(t, ok)
 
@@ -96,6 +100,8 @@ func TestReverseNameSplitsHostFromZone(t *testing.T) {
 }
 
 func TestHashPTRIgnoresOrder(t *testing.T) {
+	t.Parallel()
+
 	one := map[string][]ptrEntry{
 		"5.12.75.10.in-addr.arpa.": {
 			{key: "default/ic-api", target: "web-1.shop.incus."},
@@ -127,6 +133,8 @@ func TestHashPTRIgnoresOrder(t *testing.T) {
 // TestBuildDerivesReverseRecords is the forward derivation read backwards: zone
 // from the address, name from the instance, keyed by the network it is on.
 func TestBuildDerivesReverseRecords(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/user-api-1": sitting("shop.incus.",
 			netSpec{
@@ -178,6 +186,8 @@ func TestBuildDerivesReverseRecords(t *testing.T) {
 // TestReverseClaimsNothingEmpty is why the zone comes from the address: a
 // subnet Incus manages but nothing sits on falls through rather than NXDOMAIN.
 func TestReverseClaimsNothingEmpty(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		// The network addresses two /24s and the instance is on one of them.
 		"shop/gateway-1": sitting("shop.incus.", netSpec{
@@ -208,6 +218,8 @@ func TestReverseClaimsNothingEmpty(t *testing.T) {
 // TestReverseSkipsSubnetsIncusDoesNotOwn is the same rule further: an instance
 // bridged onto somebody else's wire is served forward and not backward.
 func TestReverseSkipsSubnetsIncusDoesNotOwn(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/edge-1": sitting("shop.incus.", netSpec{
 			key:   "default/ic-lan",
@@ -240,6 +252,8 @@ func TestReverseSkipsSubnetsIncusDoesNotOwn(t *testing.T) {
 // TestReverseSerialOnlyMovesOnChange is the forward serial rule for a reverse
 // zone: a rebuild that changed nothing must not make a secondary re-transfer.
 func TestReverseSerialOnlyMovesOnChange(t *testing.T) {
+	t.Parallel()
+
 	wire := netSpec{
 		key:      "default/ic-api",
 		prefixes: []string{"10.0.1.0/24"},
@@ -268,9 +282,11 @@ func TestReverseSerialOnlyMovesOnChange(t *testing.T) {
 		"the name a reverse zone answers with changed and the serial did not")
 }
 
-// TestReverseOfSharedAddressNamesBoth is the reverse of an ambiguous address:
+// TestReverseOfiutilAddressNamesBoth is the reverse of an ambiguous address:
 // overlapping subnets in two projects, and the reverse names both claimants.
-func TestReverseOfSharedAddressNamesBoth(t *testing.T) {
+func TestReverseOfiutilAddressNamesBoth(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web-1": sitting("shop.incus.", netSpec{
 			key:      "shop/ic-shop",
@@ -305,6 +321,8 @@ func TestReverseOfSharedAddressNamesBoth(t *testing.T) {
 // TestReverseReachesViewsLikeAForwardName pins that a PTR goes through the same
 // gather, so it is visible exactly where the address's network is.
 func TestReverseReachesViewsLikeAForwardName(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		// Multi-homed: on the front wire and the back one.
 		"shop/api-1": sitting("shop.incus.",

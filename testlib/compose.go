@@ -1,6 +1,9 @@
 package testlib
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // ProjectName makes an Incus project name out of anything, so a test can pass
 // t.Name() and get one back.
@@ -12,4 +15,9 @@ func ProjectName(name string) string {
 // caller runs them with.
 func Args(project string, args ...string) []string {
 	return append([]string{"--debug", "--project-name", ProjectName(project)}, args...)
+}
+
+func KeepTestData() bool {
+	_, keep := os.LookupEnv("INCUS_COMPOSE_TEST_KEEP")
+	return keep
 }

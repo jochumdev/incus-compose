@@ -120,7 +120,7 @@ func reverseZones(
 				byKey[e.key] = append(byKey[e.key], e.target)
 
 				// One instance that did not opt in closes the whole reverse
-				// zone: it is shared, and nothing else says whose it is.
+				// zone: it is iutil, and nothing else says whose it is.
 				z.Transfer = z.Transfer && e.transfer
 			}
 

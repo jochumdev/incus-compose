@@ -12,7 +12,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // The whole-fleet pass: what it reads, and how what it found is announced
@@ -88,12 +88,12 @@ func (p *Plugin) announce(ctx context.Context) {
 		// One event per instance, carrying what the pass read. The action is
 		// instance-updated because that is what happened as far as anything
 		// behind here is concerned: this is what it looks like now.
-		ev := shared.NewEvent(time.Now(),
+		ev := iutil.NewEvent(time.Now(),
 			incusapi.EventLifecycleInstanceUpdated, full.instance.Project, full.instance.Name, "")
 
 		// The pass pushes straight into the queue rather than going round
 		// through accept, so the labels are attached here as well.
-		p.q.push(p.withProject(ev.WithInstance(e.running, e.meta, e.nets)), true)
+		p.q.push(p.withProject(ev.WithInstance(e.running, e.config, e.nets)), true)
 	}
 
 	// Everything the pass could not see is now absent from what it announced,
@@ -102,7 +102,7 @@ func (p *Plugin) announce(ctx context.Context) {
 	clear(p.m.dirty)
 
 	p.due(p.opts.SweepInterval)
-	p.raise(ctx, shared.ActionSweepEnd)
+	p.raise(ctx, iutil.ActionSweepEnd)
 }
 
 // errNoNetworks reports a read in which nothing could be listed at all.
@@ -164,12 +164,7 @@ func incusLister(
 			return nil, fmt.Errorf("listing projects: %w", err)
 		}
 
-		// Narrowed once, here, so nothing below reads a project this binary
-		// does not serve. A project left out is not absent, it is none of our
-		// business - and a pass that listed it would announce its instances for
-		// somebody to build records from.
 		projects := make([]incusapi.Project, 0, len(all))
-
 		for i := range all {
 			if serves == nil || serves(&all[i]) {
 				projects = append(projects, all[i])

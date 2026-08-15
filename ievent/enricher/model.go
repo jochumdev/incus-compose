@@ -7,7 +7,7 @@ import (
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // What the enricher holds of the fleet, and how one read patches it.
@@ -33,7 +33,7 @@ type model struct {
 	instances map[string]*instance
 
 	// wires is every network by owner and name. Apart from the instances
-	// because a bridge is shared: one entry answers for every instance on it,
+	// because a bridge is iutil: one entry answers for every instance on it,
 	// and a network event patches one place rather than every instance.
 	wires map[string]wire
 
@@ -66,11 +66,11 @@ func newModel() *model {
 // business of whoever asked.
 type instance struct {
 	running bool
-	meta    map[string]string
+	config  map[string]string
 
 	// nets is what this instance holds on each network it sits on, keyed the
 	// same way wires is.
-	nets map[string]*shared.Network
+	nets map[string]*iutil.Network
 }
 
 // wire is one network, without anybody's addresses on it.
@@ -134,8 +134,19 @@ func (m *model) dropProject(project string) {
 func (m *model) putInstance(inst *incusapi.Instance, state *incusapi.InstanceState) *instance {
 	e := &instance{
 		running: inst.StatusCode == incusapi.Running,
-		meta:    instanceConfig(inst),
 		nets:    m.addressesByNetwork(inst, state),
+	}
+
+	config := inst.Config
+	if len(inst.ExpandedConfig) > 0 {
+		config = inst.ExpandedConfig
+	}
+
+	e.config = map[string]string{}
+	for k, v := range config {
+		if !strings.HasPrefix(k, "volatile.") {
+			e.config[k] = v
+		}
 	}
 
 	m.instances[key(inst.Project, inst.Name)] = e
@@ -168,7 +179,7 @@ func (m *model) instance(project, name string) *instance {
 
 // instancesOn is every instance the model holds that sits on one network.
 //
-// What a network change fans out over. A wire is shared, so one subnet moving
+// What a network change fans out over. A wire is iutil, so one subnet moving
 // changes every record on it - and this answers which without a read, because
 // the addresses were already grouped by wire when each instance was distilled.
 func (m *model) instancesOn(wire string) []subject {
@@ -227,7 +238,7 @@ func newWire(n incusapi.Network) wire {
 
 	// An unmanaged network has no subnet Incus knows about, so it identifies no
 	// querier. It still keys records: two instances on one unmanaged wire can
-	// reach each other, and that is what a shared key means.
+	// reach each other, and that is what a iutil key means.
 	if !n.Managed {
 		return w
 	}
@@ -262,7 +273,7 @@ func newWire(n incusapi.Network) wire {
 func (m *model) addressesByNetwork(
 	inst *incusapi.Instance,
 	state *incusapi.InstanceState,
-) map[string]*shared.Network {
+) map[string]*iutil.Network {
 	if state == nil {
 		return nil
 	}
@@ -335,7 +346,7 @@ func (m *model) addressesByNetwork(
 		return nil
 	}
 
-	out := make(map[string]*shared.Network, len(found))
+	out := make(map[string]*iutil.Network, len(found))
 
 	for k, a := range found {
 		w := wires[k]
@@ -343,27 +354,8 @@ func (m *model) addressesByNetwork(
 		// patched in place by the next network read. Handing the same slice to
 		// every instance on it would let one read rewrite what an event already
 		// carries.
-		out[k] = shared.NewNetwork(w.name, w.project, w.managed, slices.Clone(w.prefixes), a.ipv4, a.ipv6)
+		out[k] = iutil.NewNetwork(w.name, w.project, w.managed, slices.Clone(w.prefixes), a.ipv4, a.ipv6)
 	}
 
 	return out
-}
-
-// instanceConfig is the configuration a record is built from.
-//
-// The expanded configuration, so keys set on a profile are seen - a compose
-// stack puts most of them there, and the instance's own would miss almost all
-// of them. Local only when nothing is expanded, which is how a read that was
-// not asked for expansion still answers.
-//
-// Handed on whole. Which keys mean something is the business of whoever asked:
-// coredns reads its namespace, operator reads its own, and an enricher that
-// stripped one of them to a shape it liked would be answering a question it was
-// never asked.
-func instanceConfig(inst *incusapi.Instance) map[string]string {
-	if len(inst.ExpandedConfig) > 0 {
-		return inst.ExpandedConfig
-	}
-
-	return inst.Config
 }

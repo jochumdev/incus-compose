@@ -15,7 +15,7 @@ import (
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // Timings for the reconnect loop.
@@ -43,11 +43,11 @@ type Source struct {
 	conn *iclient.Connection
 
 	// head is the first plugin; the rest hangs off it.
-	head shared.Next
+	head iutil.Next
 
 	// wants is the union of every plugin's Wants, keyed by action. An action
 	// absent from it is never walked.
-	wants map[string]shared.Want
+	wants map[string]iutil.Want
 
 	// listen opens one event stream. A field so a test can hand events over
 	// without a daemon.
@@ -59,16 +59,16 @@ type Source struct {
 
 	// raised is every plugin's CommandOut, folded into one. What arrives here
 	// goes in at the head, so it reaches every position and in order.
-	raised chan shared.Command
+	raised chan iutil.Command
 }
 
 // plugged is one plugin and the door the source asks it questions through, per
 // plugin because a question has to reach one whose event inbox is full.
 type plugged struct {
-	plugin shared.Plugin
+	plugin iutil.Plugin
 
 	// in is this plugin's CommandIn. The source writes, the plugin reads.
-	in chan shared.Command
+	in chan iutil.Command
 
 	// done closes when the plugin's Run returns, so the source stops waiting
 	// for an answer that is not coming.
@@ -81,11 +81,11 @@ type listenFunc func(ctx context.Context) (<-chan incusapi.Event, error)
 // New builds a source over a chain that main lists in order, wiring it
 // backwards so main writes it forwards. An error from any Setup stops the
 // process.
-func New(ctx context.Context, conn *iclient.Connection, plugins []shared.Plugin) (*Source, error) {
+func New(ctx context.Context, conn *iclient.Connection, plugins []iutil.Plugin) (*Source, error) {
 	s := &Source{
 		conn:   conn,
-		wants:  map[string]shared.Want{},
-		raised: make(chan shared.Command, commandBuffer),
+		wants:  map[string]iutil.Want{},
+		raised: make(chan iutil.Command, commandBuffer),
 	}
 
 	// Wants first and from every plugin, because the enricher serves the whole
@@ -93,7 +93,7 @@ func New(ctx context.Context, conn *iclient.Connection, plugins []shared.Plugin)
 	//
 	// A value listed twice would have Setup called twice and the second successor
 	// overwrite the first, so it is refused before anything is wired.
-	seen := map[shared.Plugin]bool{}
+	seen := map[iutil.Plugin]bool{}
 
 	for _, p := range plugins {
 		if seen[p] {
@@ -119,7 +119,7 @@ func New(ctx context.Context, conn *iclient.Connection, plugins []shared.Plugin)
 		}
 	}
 
-	args := shared.SetupArgs{
+	args := iutil.SetupArgs{
 		Context:    ctx,
 		Conn:       conn,
 		CommandOut: s.raised,
@@ -127,11 +127,11 @@ func New(ctx context.Context, conn *iclient.Connection, plugins []shared.Plugin)
 
 		// The end of the chain does nothing: it is a call stack, so it unwinds
 		// back to here by itself.
-		Next: func(_ *shared.Event) {},
+		Next: func(_ *iutil.Event) {},
 	}
 
 	// Backwards, because a plugin needs the one after it. The finished table is
-	// shared rather than cloned per plugin.
+	// iutil rather than cloned per plugin.
 	s.plugins = make([]plugged, len(plugins))
 
 	for i := len(plugins) - 1; i >= 0; i-- {
@@ -139,7 +139,7 @@ func New(ctx context.Context, conn *iclient.Connection, plugins []shared.Plugin)
 
 		// Unbuffered: a slot would let the source ask a plugin that is not
 		// listening and believe it had been heard.
-		in := make(chan shared.Command)
+		in := make(chan iutil.Command)
 
 		args.CommandIn = in
 
@@ -237,11 +237,11 @@ func (s *Source) session(ctx context.Context) bool {
 
 	// Connected once the listener is open, which is when Incus has accepted us.
 	// The enricher reads a whole fleet off the back of it.
-	s.hand(shared.NewEvent(time.Now(), shared.ActionConnected, "", "", ""))
+	s.hand(iutil.NewEvent(time.Now(), iutil.ActionConnected, "", "", ""))
 
 	// Paired on every way out, including a canceled context.
 	defer func() {
-		s.hand(shared.NewEvent(time.Now(), shared.ActionDisconnected, "", "", ""))
+		s.hand(iutil.NewEvent(time.Now(), iutil.ActionDisconnected, "", "", ""))
 	}()
 
 	for {
@@ -250,7 +250,7 @@ func (s *Source) session(ctx context.Context) bool {
 			return true
 
 		case cmd := <-s.raised:
-			s.hand(shared.NewEvent(time.Now(), cmd.Action, "", "", ""))
+			s.hand(iutil.NewEvent(time.Now(), cmd.Action, "", "", ""))
 
 		case raw, ok := <-events:
 			if !ok {
@@ -280,7 +280,7 @@ func (s *Source) wait(ctx context.Context, d time.Duration) {
 			return
 
 		case cmd := <-s.raised:
-			s.hand(shared.NewEvent(time.Now(), cmd.Action, "", "", ""))
+			s.hand(iutil.NewEvent(time.Now(), cmd.Action, "", "", ""))
 		}
 	}
 }
@@ -308,13 +308,13 @@ func (s *Source) route(raw incusapi.Event) {
 
 // hand gives one event to the head of the chain. The source does not walk: each
 // plugin holds its successor and calls it.
-func (s *Source) hand(ev *shared.Event) {
+func (s *Source) hand(ev *iutil.Event) {
 	s.head(ev)
 }
 
 // Finished says a plugin's Run has returned, so the source stops waiting for
 // answers it will never get. main calls it, having started the goroutine.
-func (s *Source) Finished(p shared.Plugin) {
+func (s *Source) Finished(p iutil.Plugin) {
 	for _, pl := range s.plugins {
 		if pl.plugin != p {
 			continue
@@ -334,7 +334,7 @@ func (s *Source) Finished(p shared.Plugin) {
 func (s *Source) Drain(ctx context.Context) {
 	for _, pl := range s.plugins {
 		select {
-		case pl.in <- shared.Command{Action: shared.CommandDrain}:
+		case pl.in <- iutil.Command{Action: iutil.CommandDrain}:
 		case <-pl.done:
 			continue
 		case <-ctx.Done():
@@ -349,7 +349,7 @@ func (s *Source) Drain(ctx context.Context) {
 		for !answered {
 			select {
 			case cmd := <-s.raised:
-				answered = cmd.Action == shared.CommandDrain
+				answered = cmd.Action == iutil.CommandDrain
 
 			case <-pl.done:
 				answered = true

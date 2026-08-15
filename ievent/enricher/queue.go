@@ -1,6 +1,10 @@
 package enricher
 
-import "github.com/lxc/incus-compose/ievent/shared"
+import (
+	"iter"
+
+	"github.com/lxc/incus-compose/ievent/iutil"
+)
 
 // minRing is the smallest the ring is allocated or shrunk to. Two, so growing
 // is always a doubling and shrinking always a halving.
@@ -24,7 +28,7 @@ type queue struct {
 // item is one event's place in the line. A caller holds the pointer across the
 // read, so a resize moving entries between arrays cannot invalidate it.
 type item struct {
-	ev *shared.Event
+	ev *iutil.Event
 
 	// settled says this one may go. An event that needed no read is settled on
 	// arrival, so it keeps its place instead of overtaking.
@@ -32,7 +36,7 @@ type item struct {
 }
 
 // push puts one event at the back of the line, settled when it needs no read.
-func (q *queue) push(ev *shared.Event, settled bool) *item {
+func (q *queue) push(ev *iutil.Event, settled bool) *item {
 	if q.count == len(q.items) {
 		q.resize(max(len(q.items)*2, minRing))
 	}
@@ -48,40 +52,44 @@ func (q *queue) push(ev *shared.Event, settled bool) *item {
 
 // settle marks one item finished. The event is replaced rather than merged,
 // because enrichment and failure both derive a new one.
-func (q *queue) settle(it *item, ev *shared.Event) {
+func (q *queue) settle(it *item, ev *iutil.Event) {
 	it.ev = ev
 	it.settled = true
 }
 
 // release takes every event at the front that is ready, and stops at the first
 // that is not - so a line full of finished reads may hand back nothing.
-func (q *queue) release() []*shared.Event {
-	var out []*shared.Event
+func (q *queue) release() iter.Seq[*iutil.Event] {
+	return func(yield func(*iutil.Event) bool) {
+		for q.count > 0 {
+			it := q.items[q.head]
+			if !it.settled {
+				return
+			}
 
-	for q.count > 0 {
-		it := q.items[q.head]
-		if !it.settled {
-			break
+			ev := it.ev
+			q.pop()
+
+			if !yield(ev) {
+				return
+			}
 		}
-
-		out = append(out, it.ev)
-		q.pop()
 	}
-
-	return out
 }
 
 // drain takes everything left, settled or not: what shutdown hands on. One
 // still waiting on a read goes as it stands rather than being swallowed.
-func (q *queue) drain() []*shared.Event {
-	var out []*shared.Event
+func (q *queue) drain() iter.Seq[*iutil.Event] {
+	return func(yield func(*iutil.Event) bool) {
+		for q.count > 0 {
+			ev := q.items[q.head].ev
+			q.pop()
 
-	for q.count > 0 {
-		out = append(out, q.items[q.head].ev)
-		q.pop()
+			if !yield(ev) {
+				return
+			}
+		}
 	}
-
-	return out
 }
 
 // pop removes the event at the front. The slot is cleared, so an event that has

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // rawEvent builds a lifecycle event the way incusd sends one: the project on
@@ -23,6 +23,8 @@ func rawEvent(t *testing.T, project string, lc incusapi.EventLifecycle) incusapi
 }
 
 func TestDecodeLifecycle(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name    string
 		project string
@@ -72,7 +74,7 @@ func TestDecodeLifecycle(t *testing.T) {
 			lc: incusapi.EventLifecycle{
 				Action: incusapi.EventLifecycleNetworkCreated,
 				// api.URL.Project omits the query for the default project, so a
-				// shared bridge's source carries the name and nothing else.
+				// iutil bridge's source carries the name and nothing else.
 				Source: "/1.0/networks/ic-q2mjfn37xz",
 			},
 			wantAction:  incusapi.EventLifecycleNetworkCreated,
@@ -108,6 +110,8 @@ func TestDecodeLifecycle(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			ev, err := decodeLifecycle(rawEvent(t, tc.project, tc.lc))
 			require.NoError(t, err)
 
@@ -118,7 +122,7 @@ func TestDecodeLifecycle(t *testing.T) {
 
 			// Decoded events start clean and dated. Nothing has finished with
 			// them, and At is what log and trace measure the walk from.
-			assert.Equal(t, shared.StateOk, ev.State())
+			assert.Equal(t, iutil.StateOk, ev.State())
 			assert.False(t, ev.At().IsZero())
 		})
 	}
@@ -127,6 +131,8 @@ func TestDecodeLifecycle(t *testing.T) {
 // TestDecodeLifecycleIgnores covers what there is nowhere to send. None of it
 // is malformed, so none of it is an error worth reporting as one.
 func TestDecodeLifecycleIgnores(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name    string
 		project string
@@ -151,6 +157,8 @@ func TestDecodeLifecycleIgnores(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			ev, err := decodeLifecycle(rawEvent(t, tc.project, tc.lc))
 			require.ErrorIs(t, err, errIgnored)
 			assert.Nil(t, ev)
@@ -162,6 +170,8 @@ func TestDecodeLifecycleIgnores(t *testing.T) {
 // as an error, and it has to be told apart from the ignores: route logs this
 // one and stays quiet about those.
 func TestDecodeLifecycleRejectsBadMetadata(t *testing.T) {
+	t.Parallel()
+
 	ev, err := decodeLifecycle(incusapi.Event{
 		Type: incusapi.EventTypeLifecycle, Project: "shop", Metadata: []byte("{"),
 	})

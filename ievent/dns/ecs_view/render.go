@@ -7,7 +7,7 @@ import (
 )
 
 // Render turns one name's addresses on one network into records, out of one
-// array and one buffer per type. They are shared by every view that can see this
+// array and one buffer per type. They are iutil by every view that can see this
 // network, so nothing may write to them.
 //
 // v4 must hold only IPv4 addresses and v6 only IPv6 ones, sorted by the caller.
@@ -83,7 +83,7 @@ func RenderCName(name, target string, base map[string]RRSets, keys []string, ttl
 
 		for qtype, rrs := range sets {
 			// Canonical name first, in its own array so the target's records
-			// stay shared.
+			// stay iutil.
 			chased := make([]dns.RR, 0, len(rrs)+1)
 			chased = append(chased, cname)
 			chased = append(chased, rrs...)

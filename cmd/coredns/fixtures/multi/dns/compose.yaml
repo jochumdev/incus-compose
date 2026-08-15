@@ -1,0 +1,43 @@
+name: dns
+
+x-incus:
+  "user.label.coredns.scope": "${PROJECT_NAME}"
+
+secrets:
+  token:
+    environment: INCUS_TOKEN
+
+services:
+  coredns:
+    image: ghcr.io/lxc/incus-compose/coredns:latest
+    build:
+      context: "${PROJECT_ROOT}"
+      dockerfile: container/coredns/Containerfile
+    entrypoint: ["entrypoint.sh", "run"]
+    networks:
+      dns:
+        ipv4_address: "${IPV4_COREDNS}/24"
+    deploy:
+      resources:
+        limits:
+          cpus: 4
+          memory: 100M
+    environment:
+      COREDNS_INCUS: "https://${IPV4_GATEWAY}:${INCUS_PORT}"
+      COREDNS_SECRETS_DIR: /etc/coredns
+      COREDNS_DATA_DIR: "${COREDNS_DATA_DIR}"
+      COREDNS_PROJECT_MARKER: "user.label.coredns.scope=${PROJECT_NAME}"
+      COREDNS_FORWARD: "${IPV4_GATEWAY}:53"
+      COREDNS_HTTP: ":9153"
+      COREDNS_TTL: "5"
+      COREDNS_TRACE: "${COREDNS_TRACE:-true}"
+    secrets:
+      - source: token
+        target: /etc/coredns/token
+
+networks:
+  dns:
+    x-incus:
+      ipv4.address: "${IPV4_GATEWAY}/24"
+      ipv4.nat: true
+  shared:

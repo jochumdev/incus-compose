@@ -1,0 +1,60 @@
+name: alpha
+
+x-incus:
+  "user.label.coredns.scope": "${PROJECT_NAME}"
+
+# One half of the cross-project visibility fixture. beta/ is its mirror.
+#
+#   alpha-api   shared, alpha-net
+#   alpha-db            alpha-net
+#
+# The shared bridge is external: it exists before this stack does, and beta
+# references the very same one. That is the case worth testing, because a bridge
+# two projects both use has to collapse to a single network key - keying it by
+# the watching project instead splits it in two, and instances on either half go
+# mutually blind while sitting on the same wire.
+#
+# Nothing here names beta, and beta names nothing here. What makes them see each
+# other is the shared bridge alone.
+x-container-template: &template
+  image: ghcr.io/lxc/incus-compose/debug:latest
+  build:
+    context: ${PROJECT_ROOT}/container/debug/
+    dockerfile: Containerfile
+  dns:
+    - "${IPV4_COREDNS}"
+  dns_search:
+    - ${DNS_SEARCH}
+  deploy:
+    resources:
+      limits:
+        cpus: 1
+
+services:
+  # On the shared bridge, so beta's api can see it and vice versa.
+  alpha-api:
+    <<: *template
+    networks:
+      shared:
+      alpha-net:
+
+  # Private to this project: nothing in beta shares a network with it, so it
+  # must stay invisible there however the shared bridge is keyed.
+  alpha-db:
+    <<: *template
+    networks:
+      alpha-net:
+
+networks:
+  # The dns stack's own bridge, referenced across projects as
+  # <user-visible-project>:<network>. It is external here because that stack
+  # brings it up and owns it; this one only attaches to it.
+  #
+  # The project name is generated per run, so the suite passes it in.
+  shared:
+    external: true
+    name: ${DNS_PROJECT}:dns
+
+  # Left to Incus: only the shared subnet has to be predictable.
+  alpha-net:
+    internal: true

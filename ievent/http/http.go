@@ -15,7 +15,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // name is what this plugin is called, in the chain and in a drop's reason.
@@ -56,12 +56,12 @@ type Config struct {
 type Plugin struct {
 	cfg Config
 
-	next shared.Next
+	next iutil.Next
 
 	// in is the source asking this plugin to finish, and out is the answer.
 	// Its own channel, so the question arrives whatever else is going on.
-	in  <-chan shared.Command
-	out chan<- shared.Command
+	in  <-chan iutil.Command
+	out chan<- iutil.Command
 
 	// ready is what dns last announced. It starts false, which is the truth
 	// before anything has been read.
@@ -112,10 +112,10 @@ func New(opts ...Option) *Plugin {
 func (p *Plugin) Name() string { return name }
 
 // Wants nothing: it is in the chain, so it sees whatever walks.
-func (p *Plugin) Wants() []shared.Want { return nil }
+func (p *Plugin) Wants() []iutil.Want { return nil }
 
 // Setup keeps the successor and starts nothing.
-func (p *Plugin) Setup(args shared.SetupArgs) error {
+func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.next = args.Next
 	p.in, p.out = args.CommandIn, args.CommandOut
 
@@ -125,20 +125,20 @@ func (p *Plugin) Setup(args shared.SetupArgs) error {
 // Handle folds the event into what is served and hands it straight on, on the
 // caller's goroutine. No inbox, like log: staying synchronous costs three
 // atomic stores.
-func (p *Plugin) Handle(ev *shared.Event) {
+func (p *Plugin) Handle(ev *iutil.Event) {
 	p.lastEvent.Store(time.Now().UnixNano())
 
 	switch ev.Action() {
-	case shared.ActionConnected:
+	case iutil.ActionConnected:
 		p.connected.Store(true)
 
-	case shared.ActionDisconnected:
+	case iutil.ActionDisconnected:
 		p.connected.Store(false)
 
-	case shared.ActionReady:
+	case iutil.ActionReady:
 		p.ready.Store(true)
 
-	case shared.ActionNotReady:
+	case iutil.ActionNotReady:
 		p.ready.Store(false)
 	}
 
@@ -268,4 +268,4 @@ func (p *Plugin) serveReady(w http.ResponseWriter, _ *http.Request) {
 }
 
 // _ pins the interface here, so a change to it fails the build at the plugin.
-var _ shared.Plugin = (*Plugin)(nil)
+var _ iutil.Plugin = (*Plugin)(nil)

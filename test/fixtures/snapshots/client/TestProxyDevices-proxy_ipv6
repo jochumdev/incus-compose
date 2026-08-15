@@ -1,0 +1,9 @@
+{
+  "config": {
+    "connect": "tcp:[fd42:ab37:29f:47d7::2]:80",
+    "listen": "tcp:[2a0a:51c4:7:7d5b::]:8080",
+    "nat": "true",
+    "type": "proxy"
+  },
+  "name": "proxy-8080"
+}

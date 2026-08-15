@@ -42,6 +42,8 @@ func query(name string) *dns.Msg {
 // TestWireWithNothingBehind pins the empty chain: the engine falls through to a
 // refusal rather than a nil handler, which would panic on every query.
 func TestWireWithNothingBehind(t *testing.T) {
+	t.Parallel()
+
 	view := ecs_view.New()
 
 	wire(view, nil)
@@ -63,6 +65,8 @@ func TestWireWithNothingBehind(t *testing.T) {
 // TestWireOrdersTheChain pins that main lists the chain in the order a query
 // travels it, and that the last one still reaches the refusal.
 func TestWireOrdersTheChain(t *testing.T) {
+	t.Parallel()
+
 	var walked []string
 
 	a := &marker{name: "a", walked: &walked}
@@ -102,6 +106,8 @@ func (m *marker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 }
 
 func TestAdapter(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		msg  *dns.Msg
@@ -152,6 +158,8 @@ func TestAdapter(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			a := &adapter{chain: &fakeChain{fn: tc.chain, rcode: tc.rcode}}
 
 			w := &recorder{}
@@ -167,6 +175,8 @@ func TestAdapter(t *testing.T) {
 // TestAdapterLeavesAnAnsweredQueryAlone pins the other half, an absence: an
 // NXDOMAIN the plugin wrote itself must not be written over. ecs_view does that.
 func TestAdapterLeavesAnAnsweredQueryAlone(t *testing.T) {
+	t.Parallel()
+
 	written := new(dns.Msg)
 	written.SetRcode(query("web.incus.test"), dns.RcodeNameError)
 	written.Ns = []dns.RR{&dns.SOA{Hdr: dns.RR_Header{

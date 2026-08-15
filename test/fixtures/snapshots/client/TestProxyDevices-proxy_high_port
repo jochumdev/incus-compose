@@ -1,0 +1,8 @@
+{
+  "config": {
+    "connect": "tcp:127.0.0.1:65535",
+    "listen": "tcp:0.0.0.0:65535",
+    "type": "proxy"
+  },
+  "name": "proxy-65535"
+}

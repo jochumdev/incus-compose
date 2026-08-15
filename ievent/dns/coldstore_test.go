@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // oneInstance is what the fold holds for a single instance: a zone, a label or
@@ -21,8 +21,8 @@ func oneInstance(zone, netKey, addr string) *instance {
 	return &instance{
 		zone: zone,
 		meta: map[string]string{"service": "api"},
-		nets: map[string]*shared.Network{
-			netKey: shared.NewNetwork("net0", "shop", true,
+		nets: map[string]*iutil.Network{
+			netKey: iutil.NewNetwork("net0", "shop", true,
 				[]netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")},
 				[]netip.Addr{netip.MustParseAddr(addr)}, nil),
 		},
@@ -46,6 +46,8 @@ func snapshotWithSerials(serials map[string]uint32) *ecs_view.Snapshot {
 // TestColdStoreRoundTrip pins the whole point of the file: what a restart reads
 // back is what the last run published.
 func TestColdStoreRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 
 	c := newColdStore(dir)
@@ -85,6 +87,8 @@ func TestColdStoreRoundTrip(t *testing.T) {
 // TestColdStoreIsStableAcrossRuns pins that two runs holding the same fleet
 // write the same bytes, so the file can be diffed.
 func TestColdStoreIsStableAcrossRuns(t *testing.T) {
+	t.Parallel()
+
 	held := map[string]*instance{
 		"shop/web":   oneInstance("shop.incus.", "shop/net0", "10.0.0.2"),
 		"shop/db":    oneInstance("shop.incus.", "shop/net0", "10.0.0.3"),
@@ -106,6 +110,8 @@ func TestColdStoreIsStableAcrossRuns(t *testing.T) {
 // TestColdStoreStartsCold covers every way there is nothing usable to read,
 // none of which is an error.
 func TestColdStoreStartsCold(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, dir string)
@@ -135,6 +141,8 @@ func TestColdStoreStartsCold(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			dir := t.TempDir()
 			tc.setup(t, dir)
 
@@ -148,6 +156,8 @@ func TestColdStoreStartsCold(t *testing.T) {
 // TestColdStoreDisabled pins that no data directory disables every method
 // rather than failing one. Nothing writes to disk unless it was asked to.
 func TestColdStoreDisabled(t *testing.T) {
+	t.Parallel()
+
 	c := newColdStore("")
 
 	assert.False(t, c.enabled())
@@ -165,6 +175,8 @@ func TestColdStoreDisabled(t *testing.T) {
 // TestColdStoreKeepsThePreviousFileOnAFailedWrite pins the fallback: a stale
 // cache costs one read, and no cache costs every serial.
 func TestColdStoreKeepsThePreviousFileOnAFailedWrite(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 
 	c := newColdStore(dir)
@@ -191,6 +203,8 @@ func TestColdStoreKeepsThePreviousFileOnAFailedWrite(t *testing.T) {
 // TestColdStoreStoreKeepsTheNewest pins the one-slot queue: a waiting encoding
 // is replaced rather than queued, since a newer one says everything it said.
 func TestColdStoreStoreKeepsTheNewest(t *testing.T) {
+	t.Parallel()
+
 	c := newColdStore(t.TempDir())
 
 	c.store([]byte("first"))
@@ -204,6 +218,8 @@ func TestColdStoreStoreKeepsTheNewest(t *testing.T) {
 // TestColdStoreWritesWhatItWasHandedLast pins that closing the channel flushes:
 // the encoding made on the way out holds the serials, which nothing can re-read.
 func TestColdStoreWritesWhatItWasHandedLast(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 
 	c := newColdStore(dir)
@@ -233,6 +249,8 @@ func TestColdStoreWritesWhatItWasHandedLast(t *testing.T) {
 // TestColdStoreWriteIsAtomic pins that a reader never sees a half-written file.
 // A big payload and a reader in a loop is what tells rename from write-in-place.
 func TestColdStoreWriteIsAtomic(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 
 	c := newColdStore(dir)

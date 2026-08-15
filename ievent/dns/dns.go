@@ -10,13 +10,14 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"sync"
 
 	"github.com/coredns/coredns/plugin"
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // name is what this plugin is called, in the chain and in a drop's reason.
@@ -72,16 +73,18 @@ type Config struct {
 type Plugin struct {
 	cfg Config
 
-	next  shared.Next
-	inbox chan *shared.Event
+	actions []string
+
+	next  iutil.Next
+	inbox chan *iutil.Event
 
 	// out puts an event in at the head of the chain, which is how readiness
 	// reaches every position rather than only what is behind this one.
-	out chan<- shared.Command
+	out chan<- iutil.Command
 
 	// in is the source asking this plugin to finish, on a channel of its own so
 	// it arrives whatever the inbox looks like.
-	in <-chan shared.Command
+	in <-chan iutil.Command
 
 	// view is the engine. It sources nothing and derives nothing: what it holds
 	// is whatever was last handed to it here.
@@ -160,13 +163,22 @@ func New(opts ...Option) *Plugin {
 	view.Metrics = cfg.Metrics
 	view.Server = cfg.Listen
 
-	return &Plugin{
+	p := &Plugin{
 		cfg:   cfg,
 		view:  view,
 		cold:  newColdStore(cfg.ColdDir),
 		held:  map[string]*instance{},
-		inbox: make(chan *shared.Event, cfg.InboxSize),
+		inbox: make(chan *iutil.Event, cfg.InboxSize),
 	}
+
+	wants := p.Wants()
+	knownActions := make([]string, len(wants))
+	for i, w := range wants {
+		knownActions[i] = w.Action
+	}
+
+	p.actions = knownActions
+	return p
 }
 
 func (p *Plugin) Name() string { return name }
@@ -177,24 +189,24 @@ func (p *Plugin) Addr() string { return p.cfg.Listen }
 // Wants the instance and its networks on anything that moves an instance, plus
 // the project labels where a name is built from them. A delete needs no read:
 // the name is in the event.
-func (p *Plugin) Wants() []shared.Want {
+func (p *Plugin) Wants() []iutil.Want {
 	// Debounce only where the action repeats. A start or a delete happens once,
 	// so collapsing it buys nothing and costs the whole window in latency.
-	return []shared.Want{
-		{Action: incusapi.EventLifecycleInstanceStarted, Enrich: shared.EnrichedInstance | shared.EnrichedNetworks | shared.EnrichedProject},
-		{Action: incusapi.EventLifecycleInstanceStopped, Enrich: shared.EnrichedInstance | shared.EnrichedNetworks},
-		{Action: incusapi.EventLifecycleInstanceUpdated, Enrich: shared.EnrichedInstance | shared.EnrichedNetworks | shared.EnrichedProject, Debounce: true},
+	return []iutil.Want{
+		{Action: incusapi.EventLifecycleInstanceStarted, Enrich: iutil.EnrichedInstance | iutil.EnrichedNetworks | iutil.EnrichedProject},
+		{Action: incusapi.EventLifecycleInstanceStopped, Enrich: iutil.EnrichedInstance | iutil.EnrichedNetworks | iutil.EnrichedProject},
+		{Action: incusapi.EventLifecycleInstanceUpdated, Enrich: iutil.EnrichedInstance | iutil.EnrichedNetworks | iutil.EnrichedProject, Debounce: true},
 		{Action: incusapi.EventLifecycleInstanceDeleted},
 		// No Debounce: collapsing two renames keeps the last OldName and loses
 		// the middle name, so the record under it would never be dropped.
-		{Action: incusapi.EventLifecycleInstanceRenamed, Enrich: shared.EnrichedInstance | shared.EnrichedNetworks},
-		{Action: incusapi.EventLifecycleNetworkUpdated, Enrich: shared.EnrichedNetworks, Debounce: true},
+		{Action: incusapi.EventLifecycleInstanceRenamed, Enrich: iutil.EnrichedInstance | iutil.EnrichedNetworks},
+		{Action: incusapi.EventLifecycleNetworkUpdated, Enrich: iutil.EnrichedNetworks, Debounce: true},
 	}
 }
 
 // Setup keeps the successor and the two command doors, and not the connection:
 // everything this plugin knows about Incus arrives as an event.
-func (p *Plugin) Setup(args shared.SetupArgs) error {
+func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.next = args.Next
 	p.in, p.out = args.CommandIn, args.CommandOut
 
@@ -203,7 +215,7 @@ func (p *Plugin) Setup(args shared.SetupArgs) error {
 
 // Handle puts the event on the inbox and returns. It runs on the previous
 // plugin's goroutine, so a full inbox is a marked drop rather than a wait.
-func (p *Plugin) Handle(ev *shared.Event) {
+func (p *Plugin) Handle(ev *iutil.Event) {
 	select {
 	case p.inbox <- ev:
 	default:
@@ -294,20 +306,35 @@ func (p *Plugin) Run(ctx context.Context) error {
 
 // fold applies one event to what is held, and hands it on. Everything it
 // touches belongs to Run's goroutine.
-func (p *Plugin) fold(ev *shared.Event) {
+func (p *Plugin) fold(ev *iutil.Event) {
 	// Unwinding the other way round: hand the event on, then say what it
 	// changed, so the cause reaches the chain ahead of its consequence.
-	defer p.announce()
+	defer func() {
+		now := p.view.Ready()
+		if now == p.ready {
+			return
+		}
+
+		p.ready = now
+
+		action := iutil.ActionNotReady
+		if now {
+			action = iutil.ActionReady
+		}
+
+		// Non-blocking: the source may already have stopped reading, and waiting
+		// would hold up the drain this runs inside.
+		select {
+		case p.out <- iutil.Command{Action: action}:
+		default:
+		}
+	}()
 
 	defer p.next(ev)
 
-	if ev.State() != shared.StateOk {
-		return
-	}
-
 	// A lost stream drops no record, but nothing is confirming them any more,
 	// which is what unready says.
-	if ev.Action() == shared.ActionDisconnected {
+	if ev.Action() == iutil.ActionDisconnected {
 		p.view.SetHealthy(false)
 
 		return
@@ -315,9 +342,13 @@ func (p *Plugin) fold(ev *shared.Event) {
 
 	// The closing bracket of a pass is where what is held is known to be
 	// everything there is.
-	if ev.Action() == shared.ActionSweepEnd {
+	if ev.Action() == iutil.ActionSweepEnd {
 		p.publish()
 
+		return
+	}
+
+	if ev.State() != iutil.StateOk || !slices.Contains(p.actions, ev.Action()) {
 		return
 	}
 
@@ -328,12 +359,6 @@ func (p *Plugin) fold(ev *shared.Event) {
 	}
 
 	key := heldKey(ev.Project(), ev.Name())
-
-	if ev.Action() == incusapi.EventLifecycleInstanceDeleted {
-		delete(p.held, key)
-
-		return
-	}
 
 	// What this instance was last read as, which distill needs for the parts of
 	// an event that did not arrive - the project's labels, above all.
@@ -352,21 +377,16 @@ func (p *Plugin) fold(ev *shared.Event) {
 		delete(p.held, old)
 	}
 
-	// Running but with no address yet: keep what is held rather than publish an
-	// absence the next pass would have to undo.
-	if ev.Running() && !p.serveable(ev) {
-		return
-	}
-
-	// A record pointing at an address nothing is listening on is worse than no
-	// record: the client waits out a timeout instead of being told at once.
-	if !ev.Running() {
+	if ev.Action() == incusapi.EventLifecycleInstanceDeleted {
 		delete(p.held, key)
-
 		return
 	}
 
-	inst := distill(ev, prev, p.cfg.Suffix)
+	if !p.serveable(ev) {
+		return
+	}
+
+	inst := patchInstance(ev, prev, p.cfg.Suffix)
 	if inst == nil {
 		return
 	}
@@ -404,32 +424,9 @@ func (p *Plugin) publish() {
 	p.cold.store(b)
 }
 
-// announce puts a readiness change in at the head of the chain. Edges rather
-// than a level, so whoever folds them starts not-ready.
-func (p *Plugin) announce() {
-	now := p.view.Ready()
-	if now == p.ready {
-		return
-	}
-
-	p.ready = now
-
-	action := shared.ActionNotReady
-	if now {
-		action = shared.ActionReady
-	}
-
-	// Non-blocking: the source may already have stopped reading, and waiting
-	// would hold up the drain this runs inside.
-	select {
-	case p.out <- shared.Command{Action: action}:
-	default:
-	}
-}
-
 // serveable reports whether this read found an address worth a record.
-func (p *Plugin) serveable(ev *shared.Event) bool {
-	if !ev.Enriched(shared.EnrichedNetworks) {
+func (p *Plugin) serveable(ev *iutil.Event) bool {
+	if !ev.Enriched(iutil.EnrichedNetworks) {
 		return false
 	}
 
@@ -444,4 +441,4 @@ func (p *Plugin) serveable(ev *shared.Event) bool {
 
 // _ pins the interface here, so a change to it fails the build at the plugin
 // rather than at the source that walks it.
-var _ shared.Plugin = (*Plugin)(nil)
+var _ iutil.Plugin = (*Plugin)(nil)

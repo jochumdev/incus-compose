@@ -1,0 +1,8 @@
+{
+  "config": {
+    "connect": "tcp:127.0.0.1:3000",
+    "listen": "tcp:192.168.1.100:3000",
+    "type": "proxy"
+  },
+  "name": "proxy-3000"
+}

@@ -1,0 +1,8 @@
+{
+  "config": {
+    "path": "/tmp",
+    "source": "tmpfs:",
+    "type": "disk"
+  },
+  "name": "tmpfs--tmp"
+}

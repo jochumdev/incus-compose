@@ -1,0 +1,9 @@
+{
+  "config": {
+    "path": "/run",
+    "size": "104857600",
+    "source": "tmpfs:",
+    "type": "disk"
+  },
+  "name": "tmpfs--run"
+}

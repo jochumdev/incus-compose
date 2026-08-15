@@ -1,0 +1,90 @@
+name: shop
+
+x-incus:
+  "user.label.coredns.scope": "project"
+  "user.label.coredns.zone": "$PROJECT_ZONE:-shop.incus}"
+
+x-container-template: &template
+  image: ghcr.io/lxc/incus-compose/debug:latest
+  build:
+    context: ../../../container/debug/
+    dockerfile: Containerfile
+  dns:
+    - "${IPV4_COREDNS}"
+  dns_search:
+    - ${DNS_SEARCH}
+  x-incus:
+    limits.cpu: 1
+
+secrets:
+  token:
+    environment: INCUS_TOKEN
+
+services:
+  coredns:
+    image: ghcr.io/lxc/incus-compose/coredns:latest
+    build:
+      context: "${PROJECT_ROOT}"
+      dockerfile: container/coredns/Containerfile
+    entrypoint: ["entrypoint.sh", "run"]
+    networks:
+      dns:
+        ipv4_address: "${IPV4_COREDNS}/24"
+    deploy:
+      resources:
+        limits:
+          cpus: 4
+          memory: 100M
+    environment:
+      COREDNS_INCUS: "https://${IPV4_GATEWAY}:${INCUS_PORT:-8443}"
+      COREDNS_SECRETS_DIR: /etc/coredns
+      COREDNS_DATA_DIR: "${COREDNS_DATA_DIR:-}"
+      COREDNS_PROJECT_MARKER: "user.label.coredns.scope=project"
+      COREDNS_FORWARD: "${IPV4_GATEWAY}:53"
+      COREDNS_HTTP: ":9153"
+      COREDNS_TTL: "5"
+      COREDNS_TRACE: "${COREDNS_TRACE:-true}"
+    secrets:
+      - source: token
+        target: /etc/coredns/token
+
+  gateway:
+    <<: *template
+    networks:
+      gateway:
+
+  users-api:
+    <<: *template
+    networks:
+      gateway:
+      users-net:
+
+  users-db:
+    <<: *template
+    networks:
+      users-net:
+
+  products-api:
+    <<: *template
+    networks:
+      gateway:
+      products-net:
+
+  products-db:
+    <<: *template
+    networks:
+      products-net:
+
+  delete-me:
+    <<: *template
+    networks:
+      products-net:
+
+networks:
+  dns:
+    x-incus:
+      ipv4.address: "${IPV4_GATEWAY}/24"
+      ipv4.nat: true
+  gateway:
+  users-net:
+  products-net:

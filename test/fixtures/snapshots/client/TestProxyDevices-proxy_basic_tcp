@@ -1,0 +1,8 @@
+{
+  "config": {
+    "connect": "tcp:127.0.0.1:80",
+    "listen": "tcp:0.0.0.0:8080",
+    "type": "proxy"
+  },
+  "name": "proxy-8080"
+}

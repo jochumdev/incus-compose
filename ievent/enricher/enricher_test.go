@@ -13,15 +13,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 	"github.com/lxc/incus-compose/testlib"
 )
 
 // wanted is the table the source would have built.
-var wanted = map[string]shared.Want{
+var wanted = map[string]iutil.Want{
 	incusapi.EventLifecycleInstanceUpdated: {
 		Action: incusapi.EventLifecycleInstanceUpdated,
-		Enrich: shared.EnrichedInstance | shared.EnrichedNetworks | shared.EnrichedProject,
+		Enrich: iutil.EnrichedInstance | iutil.EnrichedNetworks | iutil.EnrichedProject,
 	},
 	incusapi.EventLifecycleInstanceDeleted: {Action: incusapi.EventLifecycleInstanceDeleted},
 
@@ -29,7 +29,7 @@ var wanted = map[string]shared.Want{
 	// name does not imply an instance.
 	incusapi.EventLifecycleNetworkUpdated: {
 		Action: incusapi.EventLifecycleNetworkUpdated,
-		Enrich: shared.EnrichedNetworks,
+		Enrich: iutil.EnrichedNetworks,
 	},
 	incusapi.EventLifecycleNetworkDeleted: {Action: incusapi.EventLifecycleNetworkDeleted},
 	incusapi.EventLifecycleNetworkRenamed: {Action: incusapi.EventLifecycleNetworkRenamed},
@@ -41,15 +41,15 @@ var wanted = map[string]shared.Want{
 type harness struct {
 	t   *testing.T
 	p   *Plugin
-	out chan *shared.Event
+	out chan *iutil.Event
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
 	// in and raised are the two doors the source gives a plugin: one to ask it
 	// something, one for it to say something.
-	in     chan shared.Command
-	raised chan shared.Command
+	in     chan iutil.Command
+	raised chan iutil.Command
 
 	// forward stops the goroutine that plays the source, so a drain can read
 	// its own answer off raised rather than losing it to that goroutine.
@@ -86,9 +86,9 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		t:         t,
 		p:         New(Workers(8), ReadTimeout(time.Second)),
-		out:       make(chan *shared.Event, 64),
-		in:        make(chan shared.Command),
-		raised:    make(chan shared.Command, 8),
+		out:       make(chan *iutil.Event, 64),
+		in:        make(chan iutil.Command),
+		raised:    make(chan iutil.Command, 8),
 		forward:   make(chan struct{}),
 		forwarded: make(chan struct{}),
 		cancel:    cancel,
@@ -99,10 +99,10 @@ func newHarness(t *testing.T) *harness {
 	h.p.readNet = h.answerNet
 	h.p.list = h.fleetRead
 
-	err := h.p.Setup(shared.SetupArgs{
+	err := h.p.Setup(iutil.SetupArgs{
 		Context:    ctx,
 		Wanted:     wanted,
-		Next:       func(ev *shared.Event) { h.out <- ev },
+		Next:       func(ev *iutil.Event) { h.out <- ev },
 		CommandIn:  h.in,
 		CommandOut: h.raised,
 	})
@@ -117,7 +117,7 @@ func newHarness(t *testing.T) *harness {
 		for {
 			select {
 			case cmd := <-h.raised:
-				h.p.Handle(shared.NewEvent(time.Now(), cmd.Action, "", "", ""))
+				h.p.Handle(iutil.NewEvent(time.Now(), cmd.Action, "", "", ""))
 			case <-h.forward:
 				return
 			case <-ctx.Done():
@@ -161,7 +161,7 @@ func (h *harness) stop() {
 		}
 
 		select {
-		case h.in <- shared.Command{Action: shared.CommandDrain}:
+		case h.in <- iutil.Command{Action: iutil.CommandDrain}:
 		case <-time.After(5 * time.Second):
 			h.t.Error("the enricher never took the drain")
 
@@ -171,7 +171,7 @@ func (h *harness) stop() {
 		for {
 			select {
 			case cmd := <-h.raised:
-				if cmd.Action != shared.CommandDrain {
+				if cmd.Action != iutil.CommandDrain {
 					continue
 				}
 
@@ -212,7 +212,7 @@ func (h *harness) answer(
 
 	inst := testlib.NewInstance(project, 0, 0)
 	inst.Name = name
-	inst.ExpandedConfig[testlib.LabelPrefix+"service"] = name
+	inst.ExpandedConfig["user.label."+testlib.LabelPrefix+"service"] = name
 
 	return &inst, testlib.NewInstanceState(0, 0), nil
 }
@@ -287,10 +287,10 @@ func (h *harness) netReadsOf(project, name string) int {
 func (h *harness) send(action, project, name string) {
 	h.t.Helper()
 
-	h.p.Handle(shared.NewEvent(time.Now(), action, project, name, ""))
+	h.p.Handle(iutil.NewEvent(time.Now(), action, project, name, ""))
 }
 
-func (h *harness) next() *shared.Event {
+func (h *harness) next() *iutil.Event {
 	h.t.Helper()
 
 	select {
@@ -306,6 +306,8 @@ func (h *harness) next() *shared.Event {
 // TestOrderIsArrivalOrder is the contract the whole shape rests on, and the one
 // worth pinning before any read exists to disturb it.
 func TestOrderIsArrivalOrder(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		arrive []string
@@ -317,6 +319,8 @@ func TestOrderIsArrivalOrder(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			h := newHarness(t)
 
 			for _, n := range tc.arrive {
@@ -333,6 +337,8 @@ func TestOrderIsArrivalOrder(t *testing.T) {
 // TestPassesEverythingThrough covers the kinds that need no read at all. They
 // still take their place in the line rather than overtaking.
 func TestPassesEverythingThrough(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		action string
@@ -340,19 +346,21 @@ func TestPassesEverythingThrough(t *testing.T) {
 	}{
 		{name: "an action with nothing to enrich", action: incusapi.EventLifecycleInstanceDeleted, who: "one"},
 		{name: "an action nobody wanted", action: incusapi.EventLifecycleInstanceMigrated, who: "one"},
-		{name: "the source's own, which carries no name", action: shared.ActionConnected},
-		{name: "a sweep bracket", action: shared.ActionSweepStart},
+		{name: "the source's own, which carries no name", action: iutil.ActionConnected},
+		{name: "a sweep bracket", action: iutil.ActionSweepStart},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			h := newHarness(t)
 
 			h.send(tc.action, "p", tc.who)
 
 			ev := h.next()
 			assert.Equal(t, tc.action, ev.Action())
-			assert.Equal(t, shared.StateOk, ev.State())
+			assert.Equal(t, iutil.StateOk, ev.State())
 		})
 	}
 }
@@ -361,19 +369,23 @@ func TestPassesEverythingThrough(t *testing.T) {
 // with is walking for the observers, and enriching it would be a read nobody
 // asked for.
 func TestAlreadyFinishedEventsAreUntouched(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
-	ev := shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", "")
+	ev := iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", "")
 	h.p.Handle(ev.WithDropped("debounce"))
 
 	out := h.next()
-	assert.Equal(t, shared.StateDropped, out.State())
+	assert.Equal(t, iutil.StateDropped, out.State())
 	assert.Equal(t, "debounce", out.Reason(), "the first reason is the one that stands")
 }
 
 // TestShutdownHandsOnWhatItHolds: nothing this plugin accepted may be swallowed
 // on the way out, because an event the chain never saw is worse than a late one.
 func TestShutdownHandsOnWhatItHolds(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	for _, n := range []string{"a", "b", "c"} {
@@ -393,38 +405,42 @@ func TestShutdownHandsOnWhatItHolds(t *testing.T) {
 // so it may not wait. A drop rather than a failure - nothing went wrong with a
 // read, this plugin is behind.
 func TestFullInboxDropsRatherThanBlocks(t *testing.T) {
+	t.Parallel()
+
 	// No Run, so nothing drains the inbox: Handle has to cope on its own.
-	seen := []*shared.Event{}
+	seen := []*iutil.Event{}
 	p := New()
-	p.next = func(ev *shared.Event) { seen = append(seen, ev) }
+	p.next = func(ev *iutil.Event) { seen = append(seen, ev) }
 
 	for range defaultInboxSize {
-		p.Handle(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
+		p.Handle(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "one", ""))
 	}
 
 	require.Empty(t, seen, "nothing dropped before the inbox was full")
 
-	p.Handle(shared.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "two", ""))
+	p.Handle(iutil.NewEvent(time.Now(), incusapi.EventLifecycleInstanceUpdated, "p", "two", ""))
 
 	require.Len(t, seen, 1)
-	assert.Equal(t, shared.StateDropped, seen[0].State())
+	assert.Equal(t, iutil.StateDropped, seen[0].State())
 	assert.Equal(t, name, seen[0].Reason(), "and says who dropped it")
 }
 
 // TestEnrichesFromTheRead is the point of the plugin: what leaves carries what
 // the read found, and says so.
 func TestEnrichesFromTheRead(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
 	ev := h.next()
 
-	assert.Equal(t, shared.StateOk, ev.State())
-	assert.True(t, ev.Enriched(shared.EnrichedInstance), "the instance read landed")
+	assert.Equal(t, iutil.StateOk, ev.State())
+	assert.True(t, ev.Enriched(iutil.EnrichedInstance), "the instance read landed")
 	assert.True(t, ev.Running())
 
-	service, ok := ev.Metadata(testlib.LabelPrefix + "service")
+	service, ok := ev.Label(testlib.LabelPrefix + "service")
 	assert.True(t, ok)
 	assert.Equal(t, "one", service, "the labels came off the instance that was read")
 }
@@ -432,6 +448,8 @@ func TestEnrichesFromTheRead(t *testing.T) {
 // TestFailedReadFails is rule 7: what asked for something and did not get it
 // says so, rather than arriving looking complete.
 func TestFailedReadFails(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
@@ -442,14 +460,16 @@ func TestFailedReadFails(t *testing.T) {
 
 	ev := h.next()
 
-	assert.Equal(t, shared.StateFailed, ev.State())
+	assert.Equal(t, iutil.StateFailed, ev.State())
 	assert.Equal(t, "source/read", ev.Reason(), "an actor, not a bare cause")
-	assert.False(t, ev.Enriched(shared.EnrichedInstance), "and nothing pretends to have landed")
+	assert.False(t, ev.Enriched(iutil.EnrichedInstance), "and nothing pretends to have landed")
 }
 
 // TestCoalescesReadsPerKey: coalescing saves the read, not the event. Two
 // events on one key cost one read and both still walk, carrying what it found.
 func TestCoalescesReadsPerKey(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// Held, so the second event arrives while the first read is still out.
@@ -470,8 +490,8 @@ func TestCoalescesReadsPerKey(t *testing.T) {
 
 	first, second := h.next(), h.next()
 
-	assert.True(t, first.Enriched(shared.EnrichedInstance))
-	assert.True(t, second.Enriched(shared.EnrichedInstance), "both carry what the one read found")
+	assert.True(t, first.Enriched(iutil.EnrichedInstance))
+	assert.True(t, second.Enriched(iutil.EnrichedInstance), "both carry what the one read found")
 	assert.Equal(t, 1, h.readsOf("p", "one"), "and it was one read")
 }
 
@@ -479,6 +499,8 @@ func TestCoalescesReadsPerKey(t *testing.T) {
 // concurrently, delivery does not. A read still out at the front keeps
 // everything behind it waiting, however long ago those finished.
 func TestSlowReadHoldsTheLine(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
@@ -510,10 +532,12 @@ func TestSlowReadHoldsTheLine(t *testing.T) {
 // TestDeleteCostsNoRead is rule 3: a delete says the subject is gone, and
 // reading to confirm it would be a read whose answer we already have.
 func TestDeleteCostsNoRead(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
-	require.True(t, h.next().Enriched(shared.EnrichedInstance))
+	require.True(t, h.next().Enriched(iutil.EnrichedInstance))
 
 	h.send(incusapi.EventLifecycleInstanceDeleted, "p", "one")
 
@@ -526,6 +550,8 @@ func TestDeleteCostsNoRead(t *testing.T) {
 // instance. A network action carries one too, and reading an instance called
 // net0 is the mistake this guards.
 func TestOnlyInstanceActionsAreRead(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.send(incusapi.EventLifecycleNetworkUpdated, "p", "net0")
@@ -533,7 +559,7 @@ func TestOnlyInstanceActionsAreRead(t *testing.T) {
 	ev := h.next()
 
 	assert.Equal(t, incusapi.EventLifecycleNetworkUpdated, ev.Action())
-	assert.Equal(t, shared.StateOk, ev.State())
+	assert.Equal(t, iutil.StateOk, ev.State())
 	assert.Zero(t, h.readsOf("p", "net0"), "no instance read for a network's name")
 
 	// It is read, just as the thing it actually is.
@@ -542,10 +568,10 @@ func TestOnlyInstanceActionsAreRead(t *testing.T) {
 }
 
 // collect takes n events off the far end.
-func (h *harness) collect(n int) []*shared.Event {
+func (h *harness) collect(n int) []*iutil.Event {
 	h.t.Helper()
 
-	out := make([]*shared.Event, 0, n)
+	out := make([]*iutil.Event, 0, n)
 	for range n {
 		out = append(out, h.next())
 	}
@@ -556,28 +582,30 @@ func (h *harness) collect(n int) []*shared.Event {
 // TestConnectedSweeps: a stream coming up makes everything held suspect at
 // once, because whatever happened while it was down was announced to nobody.
 func TestConnectedSweeps(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
 	h.fleet = testlib.NewProject("p", 2, 1)
 	h.mu.Unlock()
 
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 
 	// The bracket, then what the pass found, then the closing bracket. The
 	// brackets are what let a plugin behind here tell absence from silence.
 	got := h.collect(5)
 
-	assert.Equal(t, shared.ActionConnected, got[0].Action())
-	assert.Equal(t, shared.ActionSweepStart, got[1].Action())
+	assert.Equal(t, iutil.ActionConnected, got[0].Action())
+	assert.Equal(t, iutil.ActionSweepStart, got[1].Action())
 
 	names := []string{got[2].Name(), got[3].Name()}
 	assert.ElementsMatch(t, []string{testlib.InstanceName(0), testlib.InstanceName(1)}, names)
 
-	assert.Equal(t, shared.ActionSweepEnd, got[4].Action())
+	assert.Equal(t, iutil.ActionSweepEnd, got[4].Action())
 
 	for _, ev := range got[2:4] {
-		assert.True(t, ev.Enriched(shared.EnrichedInstance|shared.EnrichedNetworks),
+		assert.True(t, ev.Enriched(iutil.EnrichedInstance|iutil.EnrichedNetworks),
 			"a pass reads the networks too, so what it announces is complete")
 		assert.Equal(t, incusapi.EventLifecycleInstanceUpdated, ev.Action())
 	}
@@ -586,6 +614,8 @@ func TestConnectedSweeps(t *testing.T) {
 // TestSweepFillsTheWires is what makes EnrichedNetworks mean anything: the pass
 // reads the networks, so an instance read after it lands under a known wire.
 func TestSweepFillsTheWires(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
@@ -593,14 +623,14 @@ func TestSweepFillsTheWires(t *testing.T) {
 	h.mu.Unlock()
 
 	// connected, the bracket, the one instance, the closing bracket.
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 	h.collect(4)
 
 	// Now a single instance read finds the wire the pass put there.
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", testlib.InstanceName(0))
 
 	out := h.next()
-	require.True(t, out.Enriched(shared.EnrichedNetworks))
+	require.True(t, out.Enriched(iutil.EnrichedNetworks))
 
 	found := false
 	for _, net := range out.Networks() {
@@ -620,33 +650,35 @@ func TestSweepFillsTheWires(t *testing.T) {
 // Both doors, because they are two: the pass pushes what it found straight into
 // the queue, and an event arriving afterwards goes round through accept.
 func TestSweepFillsTheProjectLabels(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	fleet := testlib.NewProject("p", 1, 1)
-	fleet.Project.Config["user.label.coredns.zone"] = "example.test"
+	fleet.Project.Config["coredns.zone"] = "example.test"
 
 	h.mu.Lock()
 	h.fleet = fleet
 	h.mu.Unlock()
 
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 
 	// connected, the bracket, the one instance, the closing bracket. The
 	// instance is the one the pass pushed itself.
 	got := h.collect(4)
 
 	swept := got[2]
-	require.True(t, swept.Enriched(shared.EnrichedProject),
+	require.True(t, swept.Enriched(iutil.EnrichedProject),
 		"the pass read the project and handed its instance over without the labels")
-	assert.Equal(t, map[string]string{"user.label.coredns.zone": "example.test"},
-		swept.ProjectMetadatas())
+	assert.Equal(t, map[string]string{"coredns.zone": "example.test"},
+		swept.Labels())
 
 	// And an event arriving after it, which takes the other door.
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", testlib.InstanceName(0))
 
 	out := h.next()
-	require.True(t, out.Enriched(shared.EnrichedProject))
-	assert.Equal(t, "example.test", must(out.ProjectMetadata("user.label.coredns.zone")))
+	require.True(t, out.Enriched(iutil.EnrichedProject))
+	assert.Equal(t, "example.test", must(out.Label("coredns.zone")))
 }
 
 // TestProjectLabelsWaitForTheProjectToBeRead pins the difference between "this
@@ -654,6 +686,8 @@ func TestSweepFillsTheProjectLabels(t *testing.T) {
 // empty map would make them one, and a consumer acting on the first would prune
 // a name the second only has not heard about yet.
 func TestProjectLabelsWaitForTheProjectToBeRead(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	// No pass has run, so the model knows no project at all.
@@ -661,9 +695,10 @@ func TestProjectLabelsWaitForTheProjectToBeRead(t *testing.T) {
 
 	out := h.next()
 
-	assert.False(t, out.Enriched(shared.EnrichedProject),
+	assert.False(t, out.Enriched(iutil.EnrichedProject),
 		"a project nothing has read was reported as read")
-	assert.Empty(t, out.ProjectMetadatas())
+	assert.Equal(t, map[string]string{"testlib.service": testlib.InstanceName(0)}, out.Labels(),
+		"the instance's own label came through; an unread project added nothing")
 }
 
 // must is the value of a two-value read the test has already required.
@@ -673,6 +708,8 @@ func must(value string, _ bool) string { return value }
 // event fails fast so the line keeps moving, the key is noted, and a pass
 // repairs it.
 func TestFailedReadPullsASweepIn(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
@@ -683,22 +720,24 @@ func TestFailedReadPullsASweepIn(t *testing.T) {
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", testlib.InstanceName(0))
 
 	failed := h.next()
-	require.Equal(t, shared.StateFailed, failed.State(), "the event does not wait on a retry")
+	require.Equal(t, iutil.StateFailed, failed.State(), "the event does not wait on a retry")
 
 	// dirtyDelay later, a pass runs on its own - nothing asked it to.
 	require.Eventually(t, func() bool { return h.lists.Load() > 0 },
 		10*time.Second, 10*time.Millisecond, "a failed read pulls a pass in")
 
 	got := h.collect(3)
-	assert.Equal(t, shared.ActionSweepStart, got[0].Action())
-	assert.True(t, got[1].Enriched(shared.EnrichedInstance), "and the pass repairs what failed")
-	assert.Equal(t, shared.ActionSweepEnd, got[2].Action())
+	assert.Equal(t, iutil.ActionSweepStart, got[0].Action())
+	assert.True(t, got[1].Enriched(iutil.EnrichedInstance), "and the pass repairs what failed")
+	assert.Equal(t, iutil.ActionSweepEnd, got[2].Action())
 }
 
 // TestOneSweepAtATime: a second pass would read the same fleet for the same
 // answer, and its events would interleave with the first's, so absence would
 // stop meaning anything.
 func TestOneSweepAtATime(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
@@ -708,17 +747,17 @@ func TestOneSweepAtATime(t *testing.T) {
 	h.mu.Unlock()
 
 	// The pass shares the gate with the instance reads, so it is held out.
-	h.send(shared.ActionConnected, "", "")
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 
-	require.Equal(t, shared.ActionConnected, h.next().Action())
-	require.Equal(t, shared.ActionConnected, h.next().Action())
+	require.Equal(t, iutil.ActionConnected, h.next().Action())
+	require.Equal(t, iutil.ActionConnected, h.next().Action())
 
 	close(gate)
 
 	got := h.collect(3)
-	assert.Equal(t, shared.ActionSweepStart, got[0].Action())
-	assert.Equal(t, shared.ActionSweepEnd, got[2].Action())
+	assert.Equal(t, iutil.ActionSweepStart, got[0].Action())
+	assert.Equal(t, iutil.ActionSweepEnd, got[2].Action())
 
 	assert.Equal(t, int32(1), h.lists.Load(), "two reasons, one pass")
 }
@@ -726,6 +765,8 @@ func TestOneSweepAtATime(t *testing.T) {
 // TestGoneIsNotAFailure: an instance read after it went is the ordinary race
 // between an event and the delete that overtook it, not something to repair.
 func TestGoneIsNotAFailure(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()
@@ -736,8 +777,8 @@ func TestGoneIsNotAFailure(t *testing.T) {
 
 	ev := h.next()
 
-	assert.Equal(t, shared.StateOk, ev.State(), "nothing failed; it is simply not there")
-	assert.False(t, ev.Enriched(shared.EnrichedInstance), "and nothing pretends to have landed")
+	assert.Equal(t, iutil.StateOk, ev.State(), "nothing failed; it is simply not there")
+	assert.False(t, ev.Enriched(iutil.EnrichedInstance), "and nothing pretends to have landed")
 
 	// No pass is owed: re-reading something that no longer exists repairs
 	// nothing, so the fleet is left alone.
@@ -748,6 +789,8 @@ func TestGoneIsNotAFailure(t *testing.T) {
 // TestSweepReadsProjectLabels: the project's own settings come off the project,
 // which is what `incus project set` writes.
 func TestSweepReadsProjectLabels(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	fleet := testlib.NewProject("p", 1, 1)
@@ -757,7 +800,7 @@ func TestSweepReadsProjectLabels(t *testing.T) {
 	h.fleet = fleet
 	h.mu.Unlock()
 
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 	h.collect(4)
 
 	h.stop()
@@ -775,6 +818,8 @@ func TestSweepReadsProjectLabels(t *testing.T) {
 // reading them as the project's says nothing the instance did not, and leaves
 // `incus project set user.label.coredns.zone=...` with nowhere to land.
 func TestFleetLabelsTakesTheProjectNotItsProfile(t *testing.T) {
+	t.Parallel()
+
 	projects := []incusapi.Project{
 		{
 			Name: "shop",
@@ -813,7 +858,7 @@ func seeded(t *testing.T, instances, networks int) *harness {
 	h.fleet = testlib.NewProject("p", instances, networks)
 	h.mu.Unlock()
 
-	h.send(shared.ActionConnected, "", "")
+	h.send(iutil.ActionConnected, "", "")
 
 	// connected, the bracket, one event per instance, the closing bracket.
 	h.collect(3 + instances)
@@ -821,9 +866,11 @@ func seeded(t *testing.T, instances, networks int) *harness {
 	return h
 }
 
-// TestNetworkUpdatePatchesAndFansOut: a wire is shared, so a subnet moving
+// TestNetworkUpdatePatchesAndFansOut: a wire is iutil, so a subnet moving
 // changes every record on it. The event says so and the re-reads follow.
 func TestNetworkUpdatePatchesAndFansOut(t *testing.T) {
+	t.Parallel()
+
 	h := seeded(t, 2, 1)
 
 	before := h.readsOf("p", testlib.InstanceName(0))
@@ -845,6 +892,8 @@ func TestNetworkUpdatePatchesAndFansOut(t *testing.T) {
 // TestNetworkDeleteForgetsTheWire: the wire goes, and what was on it is re-read
 // so nothing is left holding addresses under a key that describes nothing.
 func TestNetworkDeleteForgetsTheWire(t *testing.T) {
+	t.Parallel()
+
 	h := seeded(t, 1, 1)
 
 	h.send(incusapi.EventLifecycleNetworkDeleted, "p", testlib.NetworkName(0))
@@ -863,9 +912,11 @@ func TestNetworkDeleteForgetsTheWire(t *testing.T) {
 // else happens - the wire is still there, but not under the name its addresses
 // were filed under.
 func TestNetworkRenameDropsTheOldKey(t *testing.T) {
+	t.Parallel()
+
 	h := seeded(t, 1, 1)
 
-	ev := shared.NewEvent(time.Now(), incusapi.EventLifecycleNetworkRenamed,
+	ev := iutil.NewEvent(time.Now(), incusapi.EventLifecycleNetworkRenamed,
 		"p", "renamed", testlib.NetworkName(0))
 	h.p.Handle(ev)
 
@@ -883,6 +934,8 @@ func TestNetworkRenameDropsTheOldKey(t *testing.T) {
 // TestProfileUpdateFansOut: a profile re-expands the configuration of every
 // instance using it, and the event names none of them.
 func TestProfileUpdateFansOut(t *testing.T) {
+	t.Parallel()
+
 	h := seeded(t, 3, 1)
 
 	h.send(incusapi.EventLifecycleProfileUpdated, "p", "default")
@@ -900,6 +953,8 @@ func TestProfileUpdateFansOut(t *testing.T) {
 // TestProfileUpdateInAnEmptyProjectCostsNothing: nothing to re-expand, nothing
 // to read.
 func TestProfileUpdateInAnEmptyProjectCostsNothing(t *testing.T) {
+	t.Parallel()
+
 	h := seeded(t, 1, 1)
 
 	h.send(incusapi.EventLifecycleProfileUpdated, "elsewhere", "default")
@@ -912,6 +967,8 @@ func TestProfileUpdateInAnEmptyProjectCostsNothing(t *testing.T) {
 // A read failing every second would otherwise keep the repair permanently five
 // seconds away, and the one thing that repairs a failed read would never run.
 func TestFailingReadsDoNotStarveThePass(t *testing.T) {
+	t.Parallel()
+
 	h := newHarness(t)
 
 	h.mu.Lock()

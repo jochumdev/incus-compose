@@ -2,15 +2,12 @@ package ecs_view
 
 import (
 	"github.com/coredns/coredns/plugin"
-	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // Name is the name of the plugin, and the subsystem its metrics publish under.
 const Name = "ecs_view"
-
-var log = clog.NewWithPlugin(Name)
 
 var (
 	requestCount = promauto.NewCounterVec(prometheus.CounterOpts{

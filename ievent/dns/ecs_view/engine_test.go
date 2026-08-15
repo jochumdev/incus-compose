@@ -169,6 +169,8 @@ func reversePiece() *Snapshot {
 }
 
 func TestRenderPTRSharesOneArray(t *testing.T) {
+	t.Parallel()
+
 	sets := RenderPTR("20.1.0.10.in-addr.arpa.", []string{"a.shop.incus.", "b.shop.incus."}, testTTL)
 
 	rrs := sets[dns.TypePTR]
@@ -187,6 +189,8 @@ func TestRenderPTRSharesOneArray(t *testing.T) {
 // TestAnswerReverseObeysVisibility is the reverse half of the visibility rule: a
 // PTR answers only a querier on the address's network, NXDOMAIN otherwise.
 func TestAnswerReverseObeysVisibility(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		qname string
@@ -224,6 +228,8 @@ func TestAnswerReverseObeysVisibility(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			v := New()
 			v.Replace(reversePiece())
 			v.SetHealthy(true)
@@ -253,6 +259,8 @@ func TestAnswerReverseObeysVisibility(t *testing.T) {
 // TestAnswerReverseNameHasOnlyPTR keeps NODATA and NXDOMAIN apart: the name
 // exists for this querier, so asking it for an address is nothing to say.
 func TestAnswerReverseNameHasOnlyPTR(t *testing.T) {
+	t.Parallel()
+
 	v := New()
 	v.Replace(reversePiece())
 	v.SetHealthy(true)
@@ -271,6 +279,8 @@ func TestAnswerReverseNameHasOnlyPTR(t *testing.T) {
 // TestAnswerReverseFallsThroughUnclaimedSubnet is why the reverse zone comes
 // from the addresses served: a subnet nothing sits on is not ours to answer for.
 func TestAnswerReverseFallsThroughUnclaimedSubnet(t *testing.T) {
+	t.Parallel()
+
 	v := New()
 	v.Replace(reversePiece())
 	v.SetHealthy(true)
@@ -285,6 +295,8 @@ func TestAnswerReverseFallsThroughUnclaimedSubnet(t *testing.T) {
 }
 
 func TestLookupVisibility(t *testing.T) {
+	t.Parallel()
+
 	snap := testTopology()
 
 	tests := []struct {
@@ -314,6 +326,8 @@ func TestLookupVisibility(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			view, ok := snap.ViewFor(netip.MustParseAddr(tc.from))
 			require.True(t, ok, "no querier for %s", tc.from)
 
@@ -325,9 +339,11 @@ func TestLookupVisibility(t *testing.T) {
 	}
 }
 
-// TestLookupMultiHomedAnswersSharedNetworkOnly pins the rule that a querier is
+// TestLookupMultiHomedAnswersiutilNetworkOnly pins the rule that a querier is
 // never handed an address on a network it is not itself attached to.
-func TestLookupMultiHomedAnswersSharedNetworkOnly(t *testing.T) {
+func TestLookupMultiHomedAnswersiutilNetworkOnly(t *testing.T) {
+	t.Parallel()
+
 	snap := testTopology()
 
 	// user-api holds 10.0.1.20 and 10.0.2.20; each querier gets only one.
@@ -341,6 +357,8 @@ func TestLookupMultiHomedAnswersSharedNetworkOnly(t *testing.T) {
 // TestQuerierAnonymousOnKnownNetwork covers an address belonging to no host but
 // on a known network: it resolves when some host sits on exactly that set.
 func TestQuerierAnonymousOnKnownNetwork(t *testing.T) {
+	t.Parallel()
+
 	snap := testTopology()
 
 	// gateway sits on api-net alone, so an anonymous api-net address names the very
@@ -362,6 +380,8 @@ func TestQuerierAnonymousOnKnownNetwork(t *testing.T) {
 // empty-net is known to the snapshot with nothing attached, so an address there
 // identifies a querier while naming a view that was never built.
 func TestResolveRefusesUnmaterializedView(t *testing.T) {
+	t.Parallel()
+
 	piece := pieceOf("shop.incus.", testTTL, map[string][]map[string][]string{
 		"gateway.shop.incus.": {{"api-net": {"10.0.1.10"}}},
 	}, []NetEntry{
@@ -383,6 +403,8 @@ func TestResolveRefusesUnmaterializedView(t *testing.T) {
 // TestLookupServiceFansOutToReplicas checks that one name carrying several hosts
 // answers with every one the querier can reach, and no others.
 func TestLookupServiceFansOutToReplicas(t *testing.T) {
+	t.Parallel()
+
 	piece := pieceOf("shop.incus.", testTTL, map[string][]map[string][]string{
 		// Two replicas on api-net, a third reachable only over products-net.
 		"worker.shop.incus.": {
@@ -406,6 +428,8 @@ func TestLookupServiceFansOutToReplicas(t *testing.T) {
 }
 
 func TestMatchZoneLongestWins(t *testing.T) {
+	t.Parallel()
+
 	snap := &Snapshot{ByZone: map[string]*Zone{
 		"incus.":      {},
 		"shop.incus.": {},
@@ -426,16 +450,18 @@ func TestMatchZoneLongestWins(t *testing.T) {
 // TestAmbiguousAddressIdentifiesNobody pins the refusal: an address claimed by
 // more than one host makes the querier unknowable. Detecting it is the source's.
 func TestAmbiguousAddressIdentifiesNobody(t *testing.T) {
-	shared := netip.MustParseAddr("10.0.1.10")
+	t.Parallel()
+
+	iutil := netip.MustParseAddr("10.0.1.10")
 
 	snap := &Snapshot{
 		ByZone: map[string]*Zone{"a.incus.": {Names: map[string]map[string]RRSets{}}},
-		ByAddr: map[netip.Addr]ViewID{shared: AmbiguousView},
+		ByAddr: map[netip.Addr]ViewID{iutil: AmbiguousView},
 		Views:  map[ViewID]map[string]RRSets{},
 		Nets:   []NetEntry{{Prefix: netip.MustParsePrefix("10.0.1.0/24"), Key: "a/net"}},
 	}
 
-	_, ok := snap.ViewFor(shared)
+	_, ok := snap.ViewFor(iutil)
 	assert.False(t, ok, "an ambiguous address must identify nobody")
 
 	// And it must not fall through to the anonymous path, which would hand it the
@@ -448,6 +474,8 @@ func TestAmbiguousAddressIdentifiesNobody(t *testing.T) {
 // TestWithTTLSharesUnlessClamped is why answering is allocation-free: the normal
 // path reslices the snapshot's own records, and only a different TTL copies.
 func TestWithTTLSharesUnlessClamped(t *testing.T) {
+	t.Parallel()
+
 	rrs := Render("gateway.shop.incus.", []netip.Addr{netip.MustParseAddr("10.0.1.10")}, nil, testTTL)[dns.TypeA]
 
 	same := withTTL(rrs, testTTL, testTTL)
@@ -502,6 +530,8 @@ func query(qname string, qtype uint16, from string) *dns.Msg {
 }
 
 func TestAnswerVisibleHost(t *testing.T) {
+	t.Parallel()
+
 	v := engineWith(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -518,6 +548,8 @@ func TestAnswerVisibleHost(t *testing.T) {
 }
 
 func TestAnswerFallsThroughForeignZone(t *testing.T) {
+	t.Parallel()
+
 	v := engineWith(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -530,6 +562,8 @@ func TestAnswerFallsThroughForeignZone(t *testing.T) {
 // TestAnswerWithoutAnyIdentityFailsClosed pins the security property: with no
 // way to place the querier, nothing is disclosed.
 func TestAnswerWithoutAnyIdentityFailsClosed(t *testing.T) {
+	t.Parallel()
+
 	v := engineWith(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -544,6 +578,8 @@ func TestAnswerWithoutAnyIdentityFailsClosed(t *testing.T) {
 // deployment: nothing relays the query, so no client subnet is attached, but the
 // source address is the querier.
 func TestAnswerIdentifiesQuerierBySourceAddress(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		tcp  bool
@@ -552,6 +588,8 @@ func TestAnswerIdentifiesQuerierBySourceAddress(t *testing.T) {
 		{name: "tcp", tcp: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			v := engineWith(t)
 			w := dnstest.NewRecorder(&test.ResponseWriter{RemoteIP: "10.0.1.10", TCP: tc.tcp})
 
@@ -570,6 +608,8 @@ func TestAnswerIdentifiesQuerierBySourceAddress(t *testing.T) {
 // TestAnswerSourceAddressObeysVisibility checks the fallback is filtered like any
 // other querier rather than being trusted with the whole zone.
 func TestAnswerSourceAddressObeysVisibility(t *testing.T) {
+	t.Parallel()
+
 	v := engineWith(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{RemoteIP: "10.0.1.10"})
 
@@ -584,6 +624,8 @@ func TestAnswerSourceAddressObeysVisibility(t *testing.T) {
 // resolver puts its own address on the packet, so the client subnet is the more
 // specific answer whenever both are present.
 func TestAnswerClientSubnetWinsOverSourceAddress(t *testing.T) {
+	t.Parallel()
+
 	v := engineWith(t)
 
 	// The packet comes from user-db, the subnet says gateway. Only gateway may
@@ -601,6 +643,8 @@ func TestAnswerClientSubnetWinsOverSourceAddress(t *testing.T) {
 }
 
 func TestAnswerApex(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		qtype   uint16
 		name    string
@@ -611,6 +655,8 @@ func TestAnswerApex(t *testing.T) {
 		{dns.TypeA, "A", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			v := engineWith(t)
 			w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -661,10 +707,12 @@ func replyECS(t *testing.T, m *dns.Msg) *dns.EDNS0_SUBNET {
 }
 
 // TestAnswerEchoesClientSubnetScope pins RFC 7871's SCOPE PREFIX-LENGTH. It is
-// the only signal a cache in front has for how widely an answer may be shared,
+// the only signal a cache in front has for how widely an answer may be iutil,
 // and no option at all reads as "not tailored" - which is the cross-network leak
 // the views exist to prevent, arriving in front of the plugin chain.
 func TestAnswerEchoesClientSubnetScope(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		qname string
@@ -680,6 +728,8 @@ func TestAnswerEchoesClientSubnetScope(t *testing.T) {
 		{"apex is the same for every querier", "shop.incus.", dns.TypeSOA, "10.0.1.10", dns.RcodeSuccess, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			v := echoingEngine(t)
 			w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -715,6 +765,8 @@ func TestAnswerEchoesClientSubnetScope(t *testing.T) {
 // TestAnswerEchoesIPv6Scope is the same rule for an IPv6 querier, whose whole
 // address is 128 bits.
 func TestAnswerEchoesIPv6Scope(t *testing.T) {
+	t.Parallel()
+
 	v := New()
 	v.Replace(pieceOf("shop.incus.", testTTL, map[string][]map[string][]string{
 		"gateway.shop.incus.":  {{"api-net": {"fd00:1::10"}}},
@@ -744,6 +796,8 @@ func TestAnswerEchoesIPv6Scope(t *testing.T) {
 // asserted a client subnet, so there is nothing to echo and nothing in front to
 // mislead.
 func TestAnswerWithoutClientSubnetEchoesNone(t *testing.T) {
+	t.Parallel()
+
 	v := echoingEngine(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{RemoteIP: "10.0.1.10"})
 
@@ -759,6 +813,8 @@ func TestAnswerWithoutClientSubnetEchoesNone(t *testing.T) {
 // unread would be answering a question this plugin does not understand - so the
 // reply gets a record of its own with the subnet alone on it.
 func TestAnswerEchoKeepsOtherOptionsOffTheReply(t *testing.T) {
+	t.Parallel()
+
 	v := echoingEngine(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -786,6 +842,8 @@ func TestAnswerEchoKeepsOtherOptionsOffTheReply(t *testing.T) {
 // the query path allocations per query, so it is off until a Corefile asks for
 // it - and then an answer is the same answer either way.
 func TestAnswerEchoIsOptIn(t *testing.T) {
+	t.Parallel()
+
 	v := engineWith(t)
 	w := dnstest.NewRecorder(&test.ResponseWriter{})
 
@@ -801,6 +859,8 @@ func TestAnswerEchoIsOptIn(t *testing.T) {
 // TestAnswerClampsTTLWhileUnhealthy checks the stale clamp: while a source says
 // its data is not fresh, answers expire fast whatever the configured TTL.
 func TestAnswerClampsTTLWhileUnhealthy(t *testing.T) {
+	t.Parallel()
+
 	v := New()
 	v.Replace(testPieceTTL(3600))
 	v.SetHealthy(false)
@@ -860,6 +920,8 @@ func cnamePiece() *Snapshot {
 // same three map lookups as answering anything else: the target's records are
 // already in the set the query will ask for, canonical name first.
 func TestRenderCNameChasesAtBuildTime(t *testing.T) {
+	t.Parallel()
+
 	base := map[string]RRSets{
 		"api-net": Render("gateway.shop.incus.", []netip.Addr{netip.MustParseAddr("10.0.1.10")}, nil, testTTL),
 	}
@@ -879,7 +941,7 @@ func TestRenderCNameChasesAtBuildTime(t *testing.T) {
 	assert.Same(t, cname[0], a[0], "the same CNAME value serves both sets")
 	assert.Equal(t, "gateway.shop.incus.", cname[0].(*dns.CNAME).Target)
 
-	// The target's own records are still shared rather than copied per name.
+	// The target's own records are still iutil rather than copied per name.
 	assert.Same(t, base["api-net"][dns.TypeA][0], a[1])
 }
 
@@ -887,6 +949,8 @@ func TestRenderCNameChasesAtBuildTime(t *testing.T) {
 // not a name. A bare CNAME on a wire the target has no records on would send a
 // querier after something it cannot resolve.
 func TestRenderCNameSkipsNetworksTheTargetIsNotOn(t *testing.T) {
+	t.Parallel()
+
 	base := map[string]RRSets{
 		"api-net": Render("gateway.shop.incus.", []netip.Addr{netip.MustParseAddr("10.0.1.10")}, nil, testTTL),
 	}
@@ -902,11 +966,15 @@ func TestRenderCNameSkipsNetworksTheTargetIsNotOn(t *testing.T) {
 // a zone invented to hold a handful of names may not blackhole the rest of the
 // domain, which the fleet still has to resolve through the forwarder.
 func TestAnswerFallthroughZoneClaimsOnlyItsNames(t *testing.T) {
+	t.Parallel()
+
 	v := New()
 	v.Replace(cnamePiece())
 	v.SetHealthy(true)
 
 	t.Run("a name it holds is answered here", func(t *testing.T) {
+		t.Parallel()
+
 		w := dnstest.NewRecorder(&test.ResponseWriter{})
 
 		handled, _, err := v.Answer(context.Background(), w, query("me.example.com.", dns.TypeA, "10.0.1.10"))
@@ -920,6 +988,8 @@ func TestAnswerFallthroughZoneClaimsOnlyItsNames(t *testing.T) {
 	})
 
 	t.Run("a name it does not hold goes to the forwarder", func(t *testing.T) {
+		t.Parallel()
+
 		w := dnstest.NewRecorder(&test.ResponseWriter{})
 
 		handled, _, err := v.Answer(context.Background(), w, query("www.example.com.", dns.TypeA, "10.0.1.10"))
@@ -929,6 +999,8 @@ func TestAnswerFallthroughZoneClaimsOnlyItsNames(t *testing.T) {
 	})
 
 	t.Run("the apex is not ours to answer either", func(t *testing.T) {
+		t.Parallel()
+
 		w := dnstest.NewRecorder(&test.ResponseWriter{})
 
 		handled, _, err := v.Answer(context.Background(), w, query("example.com.", dns.TypeSOA, "10.0.1.10"))
@@ -943,6 +1015,8 @@ func TestAnswerFallthroughZoneClaimsOnlyItsNames(t *testing.T) {
 // visible - otherwise the forwarder's answer for a name this querier may not see
 // would tell it the name exists here.
 func TestAnswerFallthroughZoneStillHidesInvisibleNames(t *testing.T) {
+	t.Parallel()
+
 	v := New()
 	v.Replace(cnamePiece())
 	v.SetHealthy(true)

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // coldVersion is the on-disk format. A file written by any other version is
@@ -51,7 +51,7 @@ type coldInstance struct {
 }
 
 // coldNetwork is one wire and the addresses this instance holds on it, together
-// for the same reason shared.Network joins them.
+// for the same reason iutil.Network joins them.
 type coldNetwork struct {
 	Name     string         `json:"name"`
 	Project  string         `json:"project"`
@@ -262,11 +262,11 @@ func decodeCold(b []byte) (map[string]*instance, map[string]uint32, error) {
 			meta:     one.Meta,
 			project:  one.Project,
 			transfer: transferable(one.Project),
-			nets:     make(map[string]*shared.Network, len(one.Nets)),
+			nets:     make(map[string]*iutil.Network, len(one.Nets)),
 		}
 
 		for netKey, n := range one.Nets {
-			inst.nets[netKey] = shared.NewNetwork(
+			inst.nets[netKey] = iutil.NewNetwork(
 				n.Name, n.Project, n.Managed, n.Prefixes, n.IPv4, n.IPv6)
 		}
 

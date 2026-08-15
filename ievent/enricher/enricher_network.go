@@ -8,7 +8,7 @@ import (
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // The network path: a wire is patched in place, and everything sitting on it is
@@ -38,7 +38,7 @@ func incusNetReader(conn *iclient.Connection) netReadFunc {
 // The event itself carries no enrichment: its subject is a wire, and there is
 // nothing about a wire that an event shaped for an instance can hold. What it
 // causes is the patch, and the re-read of everything on that wire.
-func (p *Plugin) acceptNetwork(ctx context.Context, ev *shared.Event) bool {
+func (p *Plugin) acceptNetwork(ctx context.Context, ev *iutil.Event) bool {
 	if !strings.HasPrefix(ev.Action(), networkPrefix) {
 		return false
 	}

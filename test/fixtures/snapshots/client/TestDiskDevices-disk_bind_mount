@@ -1,0 +1,9 @@
+{
+  "config": {
+    "path": "/app/config",
+    "shift": "true",
+    "source": "/host/config",
+    "type": "disk"
+  },
+  "name": "bind-config"
+}

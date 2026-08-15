@@ -11,7 +11,7 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // instance is one instance as this plugin holds it: everything a record needs
@@ -31,18 +31,18 @@ type instance struct {
 
 	// nets is every network this instance sits on, keyed by Network.Key. The
 	// value carries the wire and this instance's addresses on it together.
-	nets map[string]*shared.Network
+	nets map[string]*iutil.Network
 }
 
-// distill turns one enriched event into what is held. Nil when no networks were
+// patchInstance turns one enriched event into what is held. Nil when no networks were
 // read: an instance that cannot be placed on a wire has no record to serve.
 //
 // prev is this instance as it was last held, under whatever name it had then,
 // or nil. Only a read that reached the project may replace its labels: the
 // enricher leaves them off an action nobody asked for them on, and a map that
 // was never read is not a project that sets nothing.
-func distill(ev *shared.Event, prev *instance, suffix string) *instance {
-	if !ev.Enriched(shared.EnrichedNetworks) {
+func patchInstance(ev *iutil.Event, prev *instance, suffix string) *instance {
+	if !ev.Enriched(iutil.EnrichedNetworks) {
 		return nil
 	}
 
@@ -53,7 +53,7 @@ func distill(ev *shared.Event, prev *instance, suffix string) *instance {
 	var project map[string]string
 
 	switch {
-	case ev.Enriched(shared.EnrichedProject):
+	case ev.Enriched(iutil.EnrichedProject):
 		project = projectLabels(ev)
 	case prev != nil:
 		project = prev.project
@@ -280,7 +280,7 @@ func indexAddrs(snap *ecs_view.Snapshot, list []netip.Addr, id ecs_view.ViewID) 
 	}
 }
 
-// subnets maps every network's prefixes to its key. Duplicates go: a shared
+// subnets maps every network's prefixes to its key. Duplicates go: a iutil
 // network is listed by each project referencing it, and LookupNet needs one.
 func subnets(held map[string]*instance) []ecs_view.NetEntry {
 	var entries []ecs_view.NetEntry

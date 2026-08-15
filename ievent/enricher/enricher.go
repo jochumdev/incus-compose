@@ -33,6 +33,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -40,7 +41,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
 // name is what this plugin is called, in the chain and in the reason of what it
@@ -121,10 +122,10 @@ type Plugin struct {
 	// wanted is the source's finished table: what each action has to be read
 	// for. An action absent from it never walks, so a lookup that misses is an
 	// event nobody asked for and nothing needs doing to it.
-	wanted map[string]shared.Want
+	wanted map[string]iutil.Want
 
-	next  shared.Next
-	inbox chan *shared.Event
+	next  iutil.Next
+	inbox chan *iutil.Event
 
 	// read and list are what a worker calls. Fields so a test can hand over
 	// Incus values without a daemon; Setup and Run fill them in from the
@@ -137,11 +138,11 @@ type Plugin struct {
 	// out puts an event in at the head of the chain. The sweep brackets go this
 	// way rather than out of next: everything in front of here, debounce most
 	// of all, has to see them.
-	out chan<- shared.Command
+	out chan<- iutil.Command
 
 	// in is the source asking this plugin to finish, on a channel of its own so
 	// it arrives whatever the inbox looks like.
-	in <-chan shared.Command
+	in <-chan iutil.Command
 
 	results chan result
 	sweeps  chan sweepResult
@@ -179,7 +180,7 @@ type Plugin struct {
 }
 
 // options is what main decides about this plugin. Its own rather than a set
-// shared with every other plugin: naming one is already naming this package,
+// iutil with every other plugin: naming one is already naming this package,
 // and nothing here has a window, which is debounce's job in front of it.
 type options struct {
 	Workers       int
@@ -238,7 +239,7 @@ func New(opts ...Option) *Plugin {
 
 	return &Plugin{
 		opts:  o,
-		inbox: make(chan *shared.Event, o.InboxSize),
+		inbox: make(chan *iutil.Event, o.InboxSize),
 		// Buffered by the same number as there can be reads in flight, so a
 		// worker never blocks handing its answer back.
 		results: make(chan result, o.Workers),
@@ -254,10 +255,10 @@ func (p *Plugin) Name() string { return name }
 // It is the plugin that performs everybody else's wants, so wanting any of its
 // own would double-count them. What it must read is SetupArgs.Wanted, which the
 // source has finished building before any Setup runs.
-func (p *Plugin) Wants() []shared.Want { return nil }
+func (p *Plugin) Wants() []iutil.Want { return nil }
 
 // Setup keeps the successor, the table and the connection, and starts nothing.
-func (p *Plugin) Setup(args shared.SetupArgs) error {
+func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.next = args.Next
 	p.wanted = args.Wanted
 
@@ -282,7 +283,7 @@ func (p *Plugin) Setup(args shared.SetupArgs) error {
 // inbox is a drop rather than a wait. Dropped rather than failed: nothing went
 // wrong with a read, this plugin is simply behind, and StateFailed is reserved
 // for an event that asked for something and did not get it.
-func (p *Plugin) Handle(ev *shared.Event) {
+func (p *Plugin) Handle(ev *iutil.Event) {
 	select {
 	case p.inbox <- ev:
 	default:
@@ -355,7 +356,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 			// every event this plugin ever took, in the order it took them.
 			// Reads still in flight are abandoned rather than waited for - what
 			// they would have filled in is enrichment nobody is left to serve.
-			for _, ev := range p.q.drain() {
+			for ev := range p.q.drain() {
 				p.next(ev)
 			}
 
@@ -371,7 +372,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 		case ev := <-p.inbox:
 			p.accept(ctx, ev)
 
-			for _, ev := range p.q.release() {
+			for ev := range p.q.release() {
 				p.next(ev)
 			}
 
@@ -406,7 +407,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 			// the head and travels the chain to get here, so announcing the
 			// pass before it arrived would put the news in front of the notice.
 			p.harvest = &res
-			p.raise(ctx, shared.ActionSweepStart)
+			p.raise(ctx, iutil.ActionSweepStart)
 
 		case <-p.sweep.C:
 			p.startSweep(ctx)
@@ -437,7 +438,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 			switch {
 			case res.err == nil:
 
-			case gone(res.err):
+			case incusapi.StatusErrorCheck(res.err, http.StatusNotFound):
 				// Read after it went. Nothing is owed a repair, and the delete
 				// that overtook this is on its way with the same news.
 				p.m.dropInstance(f.project, f.name)
@@ -451,10 +452,20 @@ func (p *Plugin) Run(ctx context.Context) error {
 			}
 
 			for _, it := range f.items {
-				p.q.settle(it, fill(it.ev, e, res.err))
+				if res.err != nil && !incusapi.StatusErrorCheck(res.err, http.StatusNotFound) {
+					p.q.settle(it, it.ev.WithFailed("source/read"))
+					continue
+				}
+
+				if e == nil {
+					p.q.settle(it, it.ev)
+					continue
+				}
+
+				p.q.settle(it, it.ev.WithInstance(e.running, e.config, e.nets))
 			}
 
-			for _, ev := range p.q.release() {
+			for ev := range p.q.release() {
 				p.next(ev)
 			}
 
@@ -483,7 +494,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 // flush - is in front of it.
 func (p *Plugin) raise(ctx context.Context, action string) {
 	select {
-	case p.out <- shared.Command{Action: action}:
+	case p.out <- iutil.Command{Action: action}:
 	case <-ctx.Done():
 	}
 }
@@ -499,8 +510,8 @@ func (p *Plugin) raise(ctx context.Context, action string) {
 // with nothing, so a consumer can tell "this project sets none" from "this
 // project has not been read". Both arrive as an empty map otherwise, and only
 // one of them is worth acting on.
-func (p *Plugin) withProject(ev *shared.Event) *shared.Event {
-	if p.wanted[ev.Action()].Enrich&shared.EnrichedProject == 0 {
+func (p *Plugin) withProject(ev *iutil.Event) *iutil.Event {
+	if p.wanted[ev.Action()].Enrich&iutil.EnrichedProject == 0 {
 		return ev
 	}
 
@@ -513,11 +524,11 @@ func (p *Plugin) withProject(ev *shared.Event) *shared.Event {
 }
 
 // accept puts one event in the line, issuing whatever read it needs first.
-func (p *Plugin) accept(ctx context.Context, ev *shared.Event) {
+func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 	// The source reporting a stream is the one thing that makes everything held
 	// here suspect at once: whatever happened while it was down was announced
 	// to nobody.
-	if ev.Action() == shared.ActionConnected {
+	if ev.Action() == iutil.ActionConnected {
 		p.q.push(ev, true)
 		p.startSweep(ctx)
 
@@ -526,7 +537,7 @@ func (p *Plugin) accept(ctx context.Context, ev *shared.Event) {
 
 	// The bracket this plugin raised, having traveled the chain. Everything
 	// the pass found goes out behind it, before the closing bracket does.
-	if ev.Action() == shared.ActionSweepStart && p.harvest != nil {
+	if ev.Action() == iutil.ActionSweepStart && p.harvest != nil {
 		p.q.push(ev, true)
 		p.announce(ctx)
 
@@ -542,7 +553,7 @@ func (p *Plugin) accept(ctx context.Context, ev *shared.Event) {
 	// An event somebody has already finished with is walking for the observers,
 	// and one with no name has no subject to read. Neither is worth a read, and
 	// both keep their place rather than overtaking what is still waiting.
-	if ev.State() != shared.StateOk || ev.Name() == "" {
+	if ev.State() != iutil.StateOk || ev.Name() == "" {
 		p.q.push(ev, true)
 
 		return
@@ -586,7 +597,7 @@ func (p *Plugin) accept(ctx context.Context, ev *shared.Event) {
 	// second is not implied by the first: a network action can be wanted for
 	// its networks, and it has a name, and that name is not an instance's.
 	instance := strings.HasPrefix(ev.Action(), instancePrefix) &&
-		want.Enrich&shared.EnrichedInstance != 0
+		want.Enrich&iutil.EnrichedInstance != 0
 
 	if !instance {
 		p.q.push(ev, true)
@@ -636,7 +647,7 @@ func (p *Plugin) issue(ctx context.Context, f *flight) {
 // the set into whichever of them arrived last.
 func (p *Plugin) fanOut(ctx context.Context, subjects []subject) {
 	for _, s := range subjects {
-		ev := shared.NewEvent(time.Now(),
+		ev := iutil.NewEvent(time.Now(),
 			incusapi.EventLifecycleInstanceUpdated, s.project, s.name, "")
 
 		it := p.q.push(ev, false)

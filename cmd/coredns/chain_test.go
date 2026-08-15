@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lxc/incus-compose/ievent/iutil"
 	"github.com/lxc/incus-compose/ievent/log"
-	"github.com/lxc/incus-compose/ievent/shared"
 )
 
 // positions is a chain shaped like the real one: two observers and something
@@ -21,7 +21,7 @@ func positions() []position {
 	}
 }
 
-func names(plugins []shared.Plugin) []string {
+func names(plugins []iutil.Plugin) []string {
 	out := make([]string, 0, len(plugins))
 
 	for _, p := range plugins {

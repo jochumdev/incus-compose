@@ -1,11 +1,11 @@
 package ecs_view
 
 import (
+	"log/slog"
 	"net/netip"
 	"slices"
 	"sort"
 
-	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
 )
@@ -71,10 +71,7 @@ func (v *ECSView) transfer(state request.Request) (int, error) {
 		serial = asked.Serial
 	}
 
-	if clog.D.Value() {
-		log.Debugf("%s %s: peer=%s serial=%d have=%d",
-			zoneName, dns.TypeToString[state.QType()], peer, serial, z.Serial)
-	}
+	slog.Debug("Transfer", "zone", zoneName, "qtype", state.QType(), "peer", peer, "serial", serial, "have", z.Serial)
 
 	apex := soa(zoneName, z.Serial, snap.TTL)
 

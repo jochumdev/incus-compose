@@ -1,0 +1,9 @@
+{
+  "config": {
+    "connect": "tcp:127.0.0.1:8443",
+    "listen": "tcp:0.0.0.0:443",
+    "nat": "true",
+    "type": "proxy"
+  },
+  "name": "proxy-443"
+}

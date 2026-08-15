@@ -8,10 +8,10 @@ package log
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"time"
 
-	"github.com/lxc/incus-compose/ievent/shared"
+	"github.com/lxc/incus-compose/ievent/iutil"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // name is what this plugin is called when a position was not named.
@@ -40,25 +40,7 @@ type Plugin struct {
 	// ctx is the process lifetime, kept because slog takes one.
 	ctx context.Context
 
-	next shared.Next
-}
-
-// stringToSlogLevel parses a string level to an Level.
-func stringToSlogLevel(l string) slog.Level {
-	switch strings.ToUpper(l) {
-	case "TRACE":
-		return shared.LevelTrace
-	case "DEBUG":
-		return slog.LevelDebug
-	case "INFO":
-		return slog.LevelInfo
-	case "WARN":
-		return slog.LevelWarn
-	case "ERROR":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
+	next iutil.Next
 }
 
 // Option sets one of them. The zero value means unset, and New fills this
@@ -72,7 +54,7 @@ func At(at string) Option { return func(cfg *Config) { cfg.At = at } }
 // that carries this position costs only the call unless the handler was opened
 // up. It is per position, because two logs in one chain are two constructions.
 func Level(l string) Option {
-	return func(cfg *Config) { cfg.Level = stringToSlogLevel(l) }
+	return func(cfg *Config) { cfg.Level = shared.StringToSlogLevel(l) }
 }
 
 // New builds a log for one position.
@@ -103,10 +85,10 @@ func New(opts ...Option) *Plugin {
 func (p *Plugin) Name() string { return p.cfg.At }
 
 // Wants nothing of its own: it is in the chain, so it sees whatever walks.
-func (p *Plugin) Wants() []shared.Want { return nil }
+func (p *Plugin) Wants() []iutil.Want { return nil }
 
 // Setup keeps the successor and the context, and starts nothing.
-func (p *Plugin) Setup(args shared.SetupArgs) error {
+func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.ctx, p.next = args.Context, args.Next
 
 	return nil
@@ -114,9 +96,9 @@ func (p *Plugin) Setup(args shared.SetupArgs) error {
 
 // Handle prints the event and hands it straight on, on the caller's goroutine.
 // It never guards on State: seeing dropped and failed events is the point of it.
-func (p *Plugin) Handle(ev *shared.Event) {
+func (p *Plugin) Handle(ev *iutil.Event) {
 	level := p.cfg.Level
-	if ev.State() == shared.StateFailed {
+	if ev.State() == iutil.StateFailed {
 		level = max(level, slog.LevelWarn)
 	}
 
@@ -135,6 +117,10 @@ func (p *Plugin) Handle(ev *shared.Event) {
 
 	if ev.Name() != "" {
 		attrs = append(attrs, "name", ev.Name())
+	}
+
+	if ev.Enriched(iutil.EnrichedInstance) {
+		attrs = append(attrs, "running", ev.Running())
 	}
 
 	if ev.OldName() != "" {

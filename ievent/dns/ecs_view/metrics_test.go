@@ -16,6 +16,8 @@ import (
 // not. The collectors are package-level, so the label is this test's own server
 // name: another test answering a query must not be able to move these numbers.
 func TestMetricsAreOptional(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name    string
 		metrics bool
@@ -38,6 +40,9 @@ func TestMetricsAreOptional(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Not t.Parallel(): both subtests hit the same package-level
+			// zonesGauge, and the sentinel-reset-then-check dance below only
+			// holds up if they run one at a time.
 			v := engineWith(t)
 			v.Metrics = tc.metrics
 			v.Server = tc.server
