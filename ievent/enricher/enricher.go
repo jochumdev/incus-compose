@@ -161,6 +161,20 @@ type Plugin struct {
 	// read, not the event, so both still walk carrying what it found.
 	flights map[string]*flight
 
+	// warm says the first whole-fleet pass has landed, so every network an
+	// instance might sit on is in wires. An instance can only ever be created
+	// on a network that already exists, so once this is true nothing an
+	// instance read distills against is unknown for having not been read yet -
+	// only for not existing. Never cleared once set: a reconnect leaves wires
+	// exactly as stale as everything else this plugin holds, which is what the
+	// pass on reconnect is for.
+	warm bool
+
+	// cold is every instance key an event arrived for before warm, in arrival
+	// order, held in flights like a real flight but never submitted - issued
+	// for real the moment the first pass lands.
+	cold []string
+
 	// waiting is what the pool refused, oldest first, and retry is when to
 	// offer them again.
 	waiting []*flight
@@ -322,6 +336,8 @@ func (p *Plugin) Run(ctx context.Context) error {
 	p.q = &queue{}
 	p.m = newModel()
 	p.flights = map[string]*flight{}
+	p.warm = false
+	p.cold = nil
 	p.retry = time.NewTimer(retryDelay)
 	p.sweep = time.NewTimer(p.opts.SweepInterval)
 
@@ -607,12 +623,55 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 
 	it := p.q.push(ev, false)
 
-	p.issue(ctx, &flight{
+	p.issueOrHold(ctx, &flight{
 		key:     flightKey(false, ev.Project(), ev.Name()),
 		project: ev.Project(),
 		name:    ev.Name(),
 		items:   []*item{it},
 	})
+}
+
+// issueOrHold sends one instance read, unless the first whole-fleet pass has
+// not landed yet - in which case it joins flights the same way issue does, but
+// leaves the read for thaw to send once wires can be trusted.
+//
+// Only instance reads wait: a network read patches the one wire it names
+// directly, and a profile or network fan-out only ever names instances the
+// model already holds, which is nothing while cold either way.
+func (p *Plugin) issueOrHold(ctx context.Context, f *flight) {
+	if p.warm {
+		p.issue(ctx, f)
+
+		return
+	}
+
+	out, holding := p.flights[f.key]
+	if holding {
+		out.items = append(out.items, f.items...)
+
+		return
+	}
+
+	p.flights[f.key] = f
+	p.cold = append(p.cold, f.key)
+}
+
+// thaw sends every read cold held back, in the order their events arrived.
+//
+// Called once, from the first pass to land: wires answers for every network an
+// instance could be on from here on, so nothing distilled from here on can
+// read one as unknown for want of having been read yet.
+func (p *Plugin) thaw(ctx context.Context) {
+	keys := p.cold
+	p.cold = nil
+	p.warm = true
+
+	for _, key := range keys {
+		f := p.flights[key]
+		delete(p.flights, key)
+
+		p.issue(ctx, f)
+	}
 }
 
 // issue sends one read, or joins the one already out for that key.

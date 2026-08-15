@@ -101,6 +101,12 @@ func (p *Plugin) announce(ctx context.Context) {
 	// re-read any more.
 	clear(p.m.dirty)
 
+	// The first pass to land is what wires goes from empty to trustworthy, so
+	// this is where whatever accumulated while it was out gets its own read.
+	if !p.warm {
+		p.thaw(ctx)
+	}
+
 	p.due(p.opts.SweepInterval)
 	p.raise(ctx, iutil.ActionSweepEnd)
 }

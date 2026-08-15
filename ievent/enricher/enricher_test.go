@@ -321,7 +321,7 @@ func TestOrderIsArrivalOrder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			h := newHarness(t)
+			h := seeded(t, 0, 0)
 
 			for _, n := range tc.arrive {
 				h.send(incusapi.EventLifecycleInstanceUpdated, "p", n)
@@ -430,7 +430,7 @@ func TestFullInboxDropsRatherThanBlocks(t *testing.T) {
 func TestEnrichesFromTheRead(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
@@ -450,7 +450,7 @@ func TestEnrichesFromTheRead(t *testing.T) {
 func TestFailedReadFails(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
 	h.mu.Lock()
 	h.err = errors.New("incusd said no")
@@ -470,7 +470,7 @@ func TestFailedReadFails(t *testing.T) {
 func TestCoalescesReadsPerKey(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
 	// Held, so the second event arrives while the first read is still out.
 	h.mu.Lock()
@@ -501,7 +501,7 @@ func TestCoalescesReadsPerKey(t *testing.T) {
 func TestSlowReadHoldsTheLine(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
 	h.mu.Lock()
 	h.gate = make(chan struct{})
@@ -534,7 +534,7 @@ func TestSlowReadHoldsTheLine(t *testing.T) {
 func TestDeleteCostsNoRead(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 	require.True(t, h.next().Enriched(iutil.EnrichedInstance))
@@ -688,10 +688,11 @@ func TestSweepFillsTheProjectLabels(t *testing.T) {
 func TestProjectLabelsWaitForTheProjectToBeRead(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
-	// No pass has run, so the model knows no project at all.
-	h.send(incusapi.EventLifecycleInstanceUpdated, "p", testlib.InstanceName(0))
+	// The pass read project "p", never "other" - so an instance event naming it
+	// finds no project the same way one would before any pass had run at all.
+	h.send(incusapi.EventLifecycleInstanceUpdated, "other", testlib.InstanceName(0))
 
 	out := h.next()
 
@@ -710,12 +711,13 @@ func must(value string, _ bool) string { return value }
 func TestFailedReadPullsASweepIn(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 1, 1)
 
 	h.mu.Lock()
 	h.err = errors.New("incusd said no")
-	h.fleet = testlib.NewProject("p", 1, 1)
 	h.mu.Unlock()
+
+	before := h.lists.Load()
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", testlib.InstanceName(0))
 
@@ -723,7 +725,7 @@ func TestFailedReadPullsASweepIn(t *testing.T) {
 	require.Equal(t, iutil.StateFailed, failed.State(), "the event does not wait on a retry")
 
 	// dirtyDelay later, a pass runs on its own - nothing asked it to.
-	require.Eventually(t, func() bool { return h.lists.Load() > 0 },
+	require.Eventually(t, func() bool { return h.lists.Load() > before },
 		10*time.Second, 10*time.Millisecond, "a failed read pulls a pass in")
 
 	got := h.collect(3)
@@ -767,11 +769,13 @@ func TestOneSweepAtATime(t *testing.T) {
 func TestGoneIsNotAFailure(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 0, 0)
 
 	h.mu.Lock()
 	h.err = incusapi.StatusErrorf(http.StatusNotFound, "instance not found")
 	h.mu.Unlock()
+
+	before := h.lists.Load()
 
 	h.send(incusapi.EventLifecycleInstanceUpdated, "p", "one")
 
@@ -782,7 +786,7 @@ func TestGoneIsNotAFailure(t *testing.T) {
 
 	// No pass is owed: re-reading something that no longer exists repairs
 	// nothing, so the fleet is left alone.
-	assert.Never(t, func() bool { return h.lists.Load() > 0 },
+	assert.Never(t, func() bool { return h.lists.Load() > before },
 		2*dirtyDelay, 50*time.Millisecond, "a gone instance pulls in no pass")
 }
 
@@ -969,12 +973,13 @@ func TestProfileUpdateInAnEmptyProjectCostsNothing(t *testing.T) {
 func TestFailingReadsDoNotStarveThePass(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t)
+	h := seeded(t, 1, 1)
 
 	h.mu.Lock()
 	h.err = errors.New("incusd said no")
-	h.fleet = testlib.NewProject("p", 1, 1)
 	h.mu.Unlock()
+
+	before := h.lists.Load()
 
 	// Steadily, and faster than the pass is ever due.
 	stop := make(chan struct{})
@@ -991,7 +996,7 @@ func TestFailingReadsDoNotStarveThePass(t *testing.T) {
 		}
 	}()
 
-	require.Eventually(t, func() bool { return h.lists.Load() > 0 },
+	require.Eventually(t, func() bool { return h.lists.Load() > before },
 		4*dirtyDelay, 20*time.Millisecond,
 		"the pass runs despite failures arriving faster than its delay")
 }

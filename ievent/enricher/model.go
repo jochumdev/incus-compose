@@ -299,7 +299,15 @@ func (m *model) addressesByNetwork(
 			continue
 		}
 
+		// A managed network names itself directly; a NIC attached to an
+		// unmanaged host bridge instead carries nictype and parent, with no
+		// network key at all - both are valid device shapes, and the parent
+		// is that device's name the same way network is a managed one's.
 		network := devices[device]["network"]
+		if network == "" {
+			network = devices[device]["parent"]
+		}
+
 		if network == "" {
 			continue
 		}

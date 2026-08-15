@@ -7,7 +7,7 @@ x-incus:
 x-container-template: &template
   image: ghcr.io/lxc/incus-compose/debug:latest
   build:
-    context: ../../../container/debug/
+    context: ${PROJECT_ROOT}/container/debug/
     dockerfile: Containerfile
   dns:
     - "${IPV4_COREDNS}"

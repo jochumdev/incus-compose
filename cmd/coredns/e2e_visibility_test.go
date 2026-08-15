@@ -343,7 +343,7 @@ func (s *stack) testRespondsToInstanceDelete(t *testing.T) {
 	_, err := s.ask(deleteCtx, t, viaResolver, "products-api", "delete-me."+s.zone(), "A")
 	require.NoError(t, err)
 
-	out, err := s.compose(deleteCtx, "incus", "delete", "--force", "delete-me")
+	out, err := s.compose(deleteCtx, "incus", "delete", "--force", "delete-me-1")
 	require.NoError(t, err, "delete delete-me: %s", out)
 
 	require.Eventually(t, func() bool {

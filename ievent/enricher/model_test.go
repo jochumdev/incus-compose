@@ -75,6 +75,21 @@ func TestPutInstance(t *testing.T) {
 			wantNets: nil,
 		},
 		{
+			// nictype+parent, with no network key at all, is how a NIC attaches to
+			// an unmanaged host bridge - a real, valid device shape network alone
+			// would silently drop every address on.
+			name: "a NIC named by parent rather than network is still found",
+			change: func(p *testlib.Project) {
+				nic := p.Instances[0].ExpandedDevices["eth0"]
+				delete(nic, "network")
+				nic["nictype"] = "bridged"
+				nic["parent"] = testlib.NetworkName(0)
+			},
+			running:  true,
+			wantNets: []string{"p/net0"},
+			wantIPv4: []string{"10.0.0.10"},
+		},
+		{
 			name: "the loopback is never a network",
 			change: func(p *testlib.Project) {
 				p.Instances[0].ExpandedDevices["lo"] = map[string]string{"type": "nic", "network": "net0"}
