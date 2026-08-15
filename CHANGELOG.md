@@ -11,6 +11,10 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ## [Unreleased]
 
+### Added
+
+- `healthd status` prints the shared daemon's health status key. (by @jochumdev)
+
 ### Changed
 
 - **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -
