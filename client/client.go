@@ -420,12 +420,16 @@ func (c *Client) HealthdRunning() (bool, error) {
 		return false, err
 	}
 
-	state, _, err := conn.GetInstanceState(c.ctx, name)
+	inst, _, err := conn.GetInstance(c.ctx, name, nil)
 	if err != nil {
 		return false, fmt.Errorf("getting the healthd %q instance state: %w", name, err)
 	}
 
-	return state.StatusCode == incusApi.Running, nil
+	if inst.Config[shared.HealthStatusKey] != shared.HealthStatusHealthy {
+		return false, fmt.Errorf("healthd %q instance status is: %v", name, inst.Config[shared.HealthStatusKey])
+	}
+
+	return inst.StatusCode == incusApi.Running, nil
 }
 
 // healthdTarget locates the daemon watching this project. Every instance start
