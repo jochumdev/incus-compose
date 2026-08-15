@@ -325,6 +325,11 @@ func (s *ResourceStore) Get(kind Kind, name string, incus bool) Resource {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.getLocked(kind, name, incus)
+}
+
+// getLocked is Get for a caller already holding mu.
+func (s *ResourceStore) getLocked(kind Kind, name string, incus bool) Resource {
 	idx := slices.IndexFunc(s.resources, func(r Resource) bool {
 		if !incus {
 			return r.Kind() == kind && r.Name() == name
@@ -336,4 +341,32 @@ func (s *ResourceStore) Get(kind Kind, name string, incus bool) Resource {
 		return nil
 	}
 	return s.resources[idx]
+}
+
+// GetOrCreate atomic returns or creates a resource.
+func (s *ResourceStore) GetOrCreate(kind Kind, name string, create func() (Resource, error)) (Resource, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if res := s.getLocked(kind, name, false); res != nil {
+		return res, nil
+	}
+	if res := s.getLocked(kind, name, true); res != nil {
+		return res, nil
+	}
+
+	res, err := create()
+	if err != nil {
+		return nil, err
+	}
+
+	if existing := s.getLocked(kind, res.Name(), false); existing != nil {
+		return existing, nil
+	}
+	if existing := s.getLocked(kind, res.IncusName(), true); existing != nil {
+		return existing, nil
+	}
+
+	s.resources = append(s.resources, res)
+	return res, nil
 }
