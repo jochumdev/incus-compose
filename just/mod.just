@@ -84,11 +84,11 @@ boundary:
 
     echo "boundaries hold"
 
-lint:
-    golangci-lint run ./...
+lint path="./...":
+    golangci-lint run {{ path }}
 
-fix:
-    golangci-lint run --fix ./...
+fix path="./...":
+    golangci-lint run --fix {{ path }}
 
 # Run golangci-lint over the module and the nested benchmarks. Carries on past a
 # failure so a sweep shows all of it, but still exits non-zero for pre-commit.

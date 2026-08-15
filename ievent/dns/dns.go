@@ -106,6 +106,17 @@ type Plugin struct {
 	// belongs to the goroutine Run owns, never to Handle's caller.
 	held map[string]*instance
 
+	// sweeping is open between a pass's brackets, where publishing per instance
+	// would cost the whole fleet's worth of cold-store writes for what the
+	// closing bracket already publishes once.
+	sweeping bool
+
+	// warm says the first pass has published, so what a live fold changes from
+	// here is a fleet already known whole rather than whatever happened to
+	// arrive first. Before it, a live fold still updates held - so the first
+	// pass finds it already caught up - but only the pass itself publishes.
+	warm bool
+
 	// published is the last snapshot handed over, kept so a zone's serial can
 	// be carried forward when its records did not change.
 	published *ecs_view.Snapshot
@@ -340,9 +351,19 @@ func (p *Plugin) fold(ev *iutil.Event) {
 		return
 	}
 
+	// Opens the bracket: everything folded until it closes is the pass's own,
+	// and publishes once there rather than once per instance.
+	if ev.Action() == iutil.ActionSweepStart {
+		p.sweeping = true
+
+		return
+	}
+
 	// The closing bracket of a pass is where what is held is known to be
 	// everything there is.
 	if ev.Action() == iutil.ActionSweepEnd {
+		p.sweeping = false
+		p.warm = true
 		p.publish()
 
 		return
@@ -379,6 +400,8 @@ func (p *Plugin) fold(ev *iutil.Event) {
 
 	if ev.Action() == incusapi.EventLifecycleInstanceDeleted {
 		delete(p.held, key)
+		p.publishLive()
+
 		return
 	}
 
@@ -392,6 +415,18 @@ func (p *Plugin) fold(ev *iutil.Event) {
 	}
 
 	p.held[key] = inst
+	p.publishLive()
+}
+
+// publishLive publishes what a live fold just changed. A pass's own instances
+// fold the same way but arrive between its brackets, where they are this
+// plugin's to batch rather than one instance's to publish alone.
+func (p *Plugin) publishLive() {
+	if p.sweeping || !p.warm {
+		return
+	}
+
+	p.publish()
 }
 
 // publish renders what is held, hands it to the engine, and stores it.

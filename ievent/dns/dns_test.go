@@ -9,6 +9,7 @@ import (
 	"time"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
+	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -205,6 +206,37 @@ func TestReadinessIsEdges(t *testing.T) {
 	p.fold(event(iutil.ActionDisconnected, "", ""))
 	require.Len(t, raised, 1)
 	assert.Equal(t, iutil.ActionNotReady, (<-raised).Action)
+}
+
+// TestLiveFoldPublishesOnceWarm pins the bug a live fold used to leave open: a
+// delete arriving after the first pass folded into held correctly, but nothing
+// republished it, so the record it dropped kept answering until the next pass -
+// up to SweepInterval later, thirty minutes by default.
+func TestLiveFoldPublishesOnceWarm(t *testing.T) {
+	t.Parallel()
+
+	p := New(Suffix("incus"))
+	p.next = func(_ *iutil.Event) {}
+
+	// Two instances, so the zone survives web's delete and the answer below is
+	// NXDOMAIN within it rather than a refusal of a zone that no longer exists.
+	p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "web", "10.0.0.2"))
+	p.fold(enriched(incusapi.EventLifecycleInstanceStarted, "shop", "db", "10.0.0.3"))
+	p.fold(event(iutil.ActionSweepEnd, "", ""))
+
+	wire(p.view, nil)
+	a := &adapter{chain: p.view}
+
+	w := &recorder{}
+	a.ServeDNS(w, subnetQuery("web.shop.incus.", "10.0.0.2"))
+	require.Equal(t, dns.RcodeSuccess, w.msg.Rcode, "known from the pass")
+
+	p.fold(event(incusapi.EventLifecycleInstanceDeleted, "shop", "web"))
+
+	w = &recorder{}
+	a.ServeDNS(w, subnetQuery("web.shop.incus.", "10.0.0.3"))
+	assert.Equal(t, dns.RcodeNameError, w.msg.Rcode,
+		"gone the moment the delete folded, not whenever the next pass runs")
 }
 
 // TestHandleDropsRatherThanBlocks pins the inbox door: a full inbox is a drop
