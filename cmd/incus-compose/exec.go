@@ -116,7 +116,7 @@ func newExecCommand() *cli.Command {
 			}
 			defer func() { _ = c.Done() }()
 
-			allResources, err := p.Resources(c, project.ResourcesFull())
+			allResources, err := p.Resources(c)
 			if err != nil {
 				c.LogError("Getting project resources in reCreate", "error", err)
 				return errLogged.Wrap(err)

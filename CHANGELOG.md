@@ -11,6 +11,16 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ## [Unreleased]
 
+### Changed
+
+- **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -
+  `Instance.fetch()` now always fetches runtime state, so `ps`, `list` and
+  `exec` no longer need to opt in. `Instance.HasFull()` and
+  `InstanceState.IncusInstanceFull` are renamed to `HasState()` and
+  `IncusInstanceState` (now `*api.InstanceState`, not `*api.InstanceFull`).
+  Waiting for a container's IP now reports a clearer timeout, naming the
+  likely cause and a command to check it. (by @jochumdev)
+
 ### Fixed
 
 - `HealthdRunning`, used before waiting on health-check dependencies, checked

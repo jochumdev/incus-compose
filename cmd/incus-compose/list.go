@@ -160,7 +160,7 @@ func newListCommand() *cli.Command {
 			}
 			defer func() { _ = c.Done() }()
 
-			resources, err := p.Resources(c, project.ResourcesFull())
+			resources, err := p.Resources(c)
 			if err != nil {
 				c.LogError("Getting project resources in reCreate", "error", err)
 				return errLogged.Wrap(err)
@@ -201,7 +201,7 @@ func newListCommand() *cli.Command {
 
 					c.LogDebug("Found healthd name", "name", name, "scope", scope, "project", hc.IncusProject())
 
-					inst, err := hc.Resource(client.KindInstance, name, &client.InstanceConfig{Full: true})
+					inst, err := hc.Resource(client.KindInstance, name, &client.InstanceConfig{})
 					if err != nil {
 						c.LogWarn(err.Error())
 						return errLogged.Wrap(err)
@@ -287,21 +287,22 @@ func newListCommand() *cli.Command {
 						continue
 					}
 
-					if !instance.HasFull() {
+					if !instance.HasState() {
 						c.LogWarn("Skipping", "error", client.NewError("not all instance details provided").WithResource(r))
 						statuses.Add(status)
 						continue
 					}
 
-					instFull := instance.State().IncusInstanceFull
+					base := instance.State().IncusInstance
+					state := instance.State().IncusInstanceState
 
 					status.Name = instance.ServiceName()
-					status.Status = instFull.State.Status
+					status.Status = state.Status
 					status.Image = instance.Config.Image
-					status.Description = instFull.Description
+					status.Description = base.Description
 
 					// Get IP addresses
-					for _, network := range instFull.State.Network {
+					for _, network := range state.Network {
 						for _, addr := range network.Addresses {
 							if addr.Family == "inet" && addr.Scope == "global" {
 								status.Addresses = append(status.Addresses, addr.Address)
@@ -310,7 +311,7 @@ func newListCommand() *cli.Command {
 					}
 
 					// Use the healthcheck status if available.
-					if val, ok := instFull.Config[client.HealthStatusKey]; ok {
+					if val, ok := base.Config[client.HealthStatusKey]; ok {
 						status.Health = titleCaser.String(val)
 					}
 				}

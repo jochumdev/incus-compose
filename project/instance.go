@@ -137,7 +137,6 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	instCfg := &client.InstanceConfig{
 		ServiceName:  service.Name,
 		Image:        image.Name(),
-		Full:         options.Full,
 		Resources:    slices.Clone(resources),
 		Extensions:   config,
 		Devices:      devices,
