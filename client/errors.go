@@ -51,7 +51,7 @@ func (e *Error) WithKindName(kind Kind, name string) *Error {
 func (e *Error) WithText(text string) *Error {
 	return &Error{
 		sentinel: e.sentinel,
-		text:     fmt.Sprintf("%v %v", e.text, text),
+		text:     fmt.Sprintf("%v: %v", e.text, text),
 		wrapped:  e.wrapped,
 		severity: e.severity,
 	}
@@ -61,7 +61,7 @@ func (e *Error) WithText(text string) *Error {
 func (e *Error) WithAction(action Action) *Error {
 	return &Error{
 		sentinel: e.sentinel,
-		text:     fmt.Sprintf("%v %v", e.text, action),
+		text:     fmt.Sprintf("%v: %v", e.text, action),
 		wrapped:  e.wrapped,
 		severity: e.severity,
 	}
