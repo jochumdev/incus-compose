@@ -198,7 +198,7 @@ func TestImageEnsure(t *testing.T) {
 		},
 		{
 			name:  "with create github",
-			image: "ghcr.io/linuxcontainers/alpine:latest",
+			image: "ghcr.io/ghcr-library/busybox:glibc",
 			opts:  []Option{OptionCreate()},
 		},
 		{
