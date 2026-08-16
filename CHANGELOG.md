@@ -33,6 +33,10 @@ for correct semver ordering. Headings below preserve each release's announced fo
   to track it. It now waits for the health status key to become `healthy`.
   (by @jochumdev)
 
+- A health check could fail with `websocket: bad handshake` instead of
+  reporting its result. The exec control socket was dialed in map order, so a
+  fast command could finish and retire the operation first. (by @jochumdev)
+
 ## [v1.2.0] - 2026-08-14
 
 ### Changed
