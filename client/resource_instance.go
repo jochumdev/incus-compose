@@ -304,11 +304,7 @@ func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]Interf
 			ips = append(ips, InterfaceIPs{Network: device["network"], IPv4s: iPv4s, IPv6s: iPv6s})
 		}
 
-		if len(ips) < 1 {
-			return nil, ErrNotFound.WithText("no Networks/IPs found")
-		}
-
-		if !r.missingIPv6(ips, networkIpv6) {
+		if len(ips) > 0 && !r.missingIPv6(ips, networkIpv6) {
 			return ips, nil
 		}
 
