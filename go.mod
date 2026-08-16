@@ -1,6 +1,6 @@
 module github.com/lxc/incus-compose
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
@@ -19,7 +19,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/pkg/sftp v1.13.11
-	github.com/urfave/cli/v3 v3.10.1
+	github.com/urfave/cli/v3 v3.11.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
@@ -46,7 +46,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
-	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/sirupsen/logrus v1.10.0 // indirect
 	github.com/ulikunitz/xz v0.5.16 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	gitlab.com/gitlab-org/api/client-go v1.46.0 // indirect

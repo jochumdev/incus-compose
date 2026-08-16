@@ -39,6 +39,8 @@ jobs:
       INCUS_COMPOSE_IMAGE_CACHE: incus-compose-tests-cache
       NO_COLOR: 1
       INCUS_COMPOSE_TEST_E2E: 1
+      # testlib builds the CLI with -cover and points the subprocess here.
+      INCUS_COMPOSE_TEST_COVERDIR: ${{ github.workspace }}/reports/covdata
       INCUS_COMPOSE_UP_DEPENDENCY_TIMEOUT: "5m"
       INCUS_COMPOSE_UP_TIMEOUT: "5m"
       INCUS_COMPOSE_DOWN_TIMEOUT: "2m"
@@ -77,7 +79,7 @@ jobs:
 
       - name: Test
         run: |
-          mkdir -p "$REPORTS_DIR"
+          mkdir -p "$REPORTS_DIR" "$INCUS_COMPOSE_TEST_COVERDIR"
 
           gotestsum \
             --packages="./..." \
@@ -85,7 +87,8 @@ jobs:
             --jsonfile="$REPORTS_DIR/test.json" \
             --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num=10 --jsonfile=$REPORTS_DIR/test.json'" \
             -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
-               -covermode=atomic -coverprofile="$REPORTS_DIR/cover.out" -v 2>&1
+               -cover -covermode=atomic -v \
+               -args -test.gocoverdir="$INCUS_COMPOSE_TEST_COVERDIR" 2>&1
 
       - name: Publish test results
         if: always()
@@ -96,11 +99,19 @@ jobs:
           reporter: java-junit
           fail-on-error: false
 
+      # always(), or a failing suite reports no coverage at all.
       - name: Publish coverage
         if: always()
         run: |
-          echo -e '# Coverage\n' >> $GITHUB_STEP_SUMMARY
-          go tool cover -func="$REPORTS_DIR/cover.out" >> $GITHUB_STEP_SUMMARY
+          go tool covdata textfmt -i="$INCUS_COMPOSE_TEST_COVERDIR" -o "$REPORTS_DIR/cover.out"
+
+          {
+            echo '# Coverage'
+            echo
+            echo '```'
+            just cover "$REPORTS_DIR/cover.out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   test-example:
     needs: test-e2e

@@ -9,6 +9,34 @@ Version numbering moved from `0.0.1` to `1.0.0` at beta11 (1.0.0 is the intended
 final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced form.
 
+## [Unreleased]
+
+### Added
+
+- `healthd status` prints the shared daemon's health status key. (by @jochumdev)
+
+### Changed
+
+- **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -
+  `Instance.fetch()` now always fetches runtime state, so `ps`, `list` and
+  `exec` no longer need to opt in. `Instance.HasFull()` and
+  `InstanceState.IncusInstanceFull` are renamed to `HasState()` and
+  `IncusInstanceState` (now `*api.InstanceState`, not `*api.InstanceFull`).
+  Waiting for a container's IP now reports a clearer timeout, naming the
+  likely cause and a command to check it. (by @jochumdev)
+
+### Fixed
+
+- `HealthdRunning`, used before waiting on health-check dependencies, checked
+  only that the healthd instance was `Running`, not that its own health
+  checks had passed - a service could start before healthd was actually ready
+  to track it. It now waits for the health status key to become `healthy`.
+  (by @jochumdev)
+
+- A health check could fail with `websocket: bad handshake` instead of
+  reporting its result. The exec control socket was dialed in map order, so a
+  fast command could finish and retire the operation first. (by @jochumdev)
+
 ## [v1.2.0] - 2026-08-14
 
 ### Changed

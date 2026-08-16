@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // TestExecSelectsCorrectInstance is a regression test for the exec command
@@ -22,13 +22,13 @@ func TestExecSelectsCorrectInstance(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/proxy/compose.yaml"
+	compose := testlib.Fixture(t, "proxy", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -42,10 +42,10 @@ func TestExecSelectsCorrectInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.service, func(t *testing.T) {
-			stdout, err := runCommand(ctx, t, pn, "-f", compose, "exec", "--no-tty", tt.service, "hostname")
+			stdout, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "exec", "--no-tty", tt.service, "hostname")
 			require.NoError(t, err)
-			if strings.TrimSpace(stdout.String()) != tt.wantHost {
-				t.Errorf("got hostname %q, want %q", strings.TrimSpace(stdout.String()), tt.wantHost)
+			if strings.TrimSpace(stdout) != tt.wantHost {
+				t.Errorf("got hostname %q, want %q", strings.TrimSpace(stdout), tt.wantHost)
 			}
 		})
 	}
@@ -61,28 +61,28 @@ func TestE2EExecRunsAsInstanceUser(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/with-user/compose.yaml"
+	compose := testlib.Fixture(t, "with-user", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project", "--volumes")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project", "--volumes")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	// The write only succeeds if the process runs as 1000, since /data is owned
 	// by the shifted instance user.
-	_, err = runCommand(ctx, t, pn, "-f", compose, "exec", "--no-tty", "web",
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "exec", "--no-tty", "web",
 		"--", "sh", "-c", "echo hello > /data/test.txt")
 	require.NoError(t, err)
 
-	stdout, err := runCommand(ctx, t, pn, "-f", compose, "exec", "--no-tty", "web",
+	stdout, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "exec", "--no-tty", "web",
 		"--", "ls", "-ln", "/data/test.txt")
 	require.NoError(t, err)
 
 	// ls -ln columns: perms links owner group size date... name.
-	fields := strings.Fields(stdout.String())
-	require.GreaterOrEqual(t, len(fields), 4, "unexpected ls output: %q", stdout.String())
+	fields := strings.Fields(stdout)
+	require.GreaterOrEqual(t, len(fields), 4, "unexpected ls output: %q", stdout)
 	assert.Equal(t, "1000", fields[2], "file owner uid")
 	assert.Equal(t, "1000", fields[3], "file owner gid")
 }

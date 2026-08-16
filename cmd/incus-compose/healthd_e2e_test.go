@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
@@ -12,11 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
-	"github.com/lxc/incus-compose/testlib"
 )
 
-const healthdScopeCompose = "../../test/fixtures/healthd-scope/compose.yaml"
+func healthdScopeCompose(t *testing.T) string {
+	t.Helper()
+
+	return testlib.Fixture(t, "healthd-scope", "compose.yaml")
+}
 
 // projectScope returns the scope the Incus project carries.
 func projectScope(t *testing.T, c *client.Client) string {
@@ -59,10 +62,10 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", healthdScopeCompose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", healthdScopeCompose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -128,15 +131,15 @@ services:
 
 	t.Cleanup(func() {
 		// Before the project, or the daemon still holds a NIC on hnet.
-		_, _ = runCommand(context.Background(), t, pn, "-P", noProject, "healthd", "down", "--force")
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-P", noProject, "healthd", "down", "--force")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	// The first project to create the daemon supplies its settings, so this only
 	// takes effect with nothing running.
-	_, _ = runCommand(ctx, t, pn, "-P", noProject, "healthd", "down", "--force")
+	_, _ = testlib.RunCompose(ctx, t, pn, "", nil, "-P", noProject, "healthd", "down", "--force")
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -162,10 +165,10 @@ func TestE2EHealthdProjectScope(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", healthdScopeCompose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", healthdScopeCompose, "up", "--detach", "--healthd-scope", "project")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach", "--healthd-scope", "project")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -190,14 +193,14 @@ func TestE2EHealthdCoexistence(t *testing.T) {
 	projectPN := t.Name() + "-project"
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, globalPN, "-f", healthdScopeCompose, "down", "--project")
-		_, _ = runCommand(context.Background(), t, projectPN, "-f", healthdScopeCompose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, globalPN, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, projectPN, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, globalPN, "-f", healthdScopeCompose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, globalPN, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, projectPN, "-f", healthdScopeCompose, "up", "--detach", "--healthd-scope", "project")
+	_, err = testlib.RunCompose(ctx, t, projectPN, "", nil, "-f", healthdScopeCompose(t), "up", "--detach", "--healthd-scope", "project")
 	require.NoError(t, err)
 
 	gc := projectClient(ctx, t, globalPN)
@@ -228,7 +231,7 @@ func TestE2EHealthdCoexistence(t *testing.T) {
 	assert.NotContains(t, watched, pc.IncusProject())
 
 	// Taking the project-scoped daemon down leaves the shared one alone.
-	_, err = runCommand(ctx, t, projectPN, "-f", healthdScopeCompose, "healthd", "down")
+	_, err = testlib.RunCompose(ctx, t, projectPN, "", nil, "-f", healthdScopeCompose(t), "healthd", "down")
 	require.NoError(t, err)
 
 	local, err = pc.InstanceExists(healthdInstanceName(pc.IncusProject(), false))
@@ -252,10 +255,10 @@ func TestE2EHealthdNoComposeFile(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
 
-	// -P moves the working directory, which is what leaves the commands with no
-	// compose file to find.
-	noProject := func(args ...string) (*bytes.Buffer, error) {
-		return runCommand(ctx, t, t.Name(), append([]string{"-P", dir}, args...)...)
+	// An empty project directory is what leaves the commands with no compose
+	// file to find.
+	noProject := func(args ...string) (string, error) {
+		return testlib.RunCompose(ctx, t, t.Name(), dir, nil, args...)
 	}
 
 	dc := projectClient(ctx, t, systemProject)
@@ -304,12 +307,12 @@ func TestE2EHealthdDownNeedsForce(t *testing.T) {
 	two := t.Name() + "-two"
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, one, "-f", healthdScopeCompose, "down", "--project")
-		_, _ = runCommand(context.Background(), t, two, "-f", healthdScopeCompose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, one, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, two, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
 	})
 
 	for _, pn := range []string{one, two} {
-		_, err := runCommand(ctx, t, pn, "-f", healthdScopeCompose, "up", "--detach")
+		_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
 		require.NoError(t, err)
 	}
 
@@ -317,7 +320,7 @@ func TestE2EHealthdDownNeedsForce(t *testing.T) {
 
 	// Two projects carry scope=global, so taking the daemon down is refused:
 	// the tests have no terminal to confirm on.
-	_, err := runCommand(ctx, t, one, "-f", healthdScopeCompose, "healthd", "down")
+	_, err := testlib.RunCompose(ctx, t, one, "", nil, "-f", healthdScopeCompose(t), "healthd", "down")
 	require.Error(t, err)
 
 	global, err := dc.InstanceExists(globalHealthdName)
@@ -325,7 +328,7 @@ func TestE2EHealthdDownNeedsForce(t *testing.T) {
 	assert.True(t, global, "a refused healthd down must leave the daemon running")
 
 	// --force is the second telling.
-	_, err = runCommand(ctx, t, one, "-f", healthdScopeCompose, "healthd", "down", "--force")
+	_, err = testlib.RunCompose(ctx, t, one, "", nil, "-f", healthdScopeCompose(t), "healthd", "down", "--force")
 	require.NoError(t, err)
 
 	global, err = dc.InstanceExists(globalHealthdName)
@@ -343,10 +346,10 @@ func TestE2EHealthdMigratesToGlobal(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", healthdScopeCompose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", healthdScopeCompose, "up", "--detach", "--healthd-scope", "project")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach", "--healthd-scope", "project")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -367,7 +370,7 @@ func TestE2EHealthdMigratesToGlobal(t *testing.T) {
 	writable.Config[shared.HealthScopeKey] = shared.HealthScopeGlobal
 	require.NoError(t, conn.UpdateProject(ctx, c.IncusProject(), writable, etag))
 
-	_, err = runCommand(ctx, t, pn, "-f", healthdScopeCompose, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
 	require.NoError(t, err)
 
 	assert.Equal(t, shared.HealthScopeGlobal, projectScope(t, c))

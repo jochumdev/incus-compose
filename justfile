@@ -4,10 +4,7 @@
 #   just dev-install    # Set up nested Incus for testing
 #   just run <args>     # Run incus-compose against nested Incus
 #   just test           # Run tests against nested Incus
-#
-# Local development (uses your real Incus - be careful!):
-#   just run-local <args>
-#   just test-local
+#   just test-local     # Unit tests only, no Incus needed
 #
 # Recipes live in just/*.just by topic. Everything the coredns merge brings is
 # an import of its own, so it lands here without touching these.

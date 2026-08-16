@@ -12,6 +12,10 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 )
 
+// execFDControl is the exec operation's control websocket, keyed by name where
+// the others are numbered.
+const execFDControl = "control"
+
 // InstanceExecArgs is where a non-interactive exec sends its output. A nil
 // writer discards that stream.
 //
@@ -53,7 +57,7 @@ func (c *Connection) ExecInstance(ctx context.Context, name string, exec api.Ins
 
 	streams := &sync.WaitGroup{}
 
-	// Every advertised descriptor has to be connected or the server times out waiting.
+	// 0, 1 and 2 all have to be connected or the server times out waiting.
 	writers := map[string]io.Writer{"1": args.Stdout, "2": args.Stderr}
 
 	fds, ok := started.Metadata["fds"].(map[string]any)
@@ -63,8 +67,18 @@ func (c *Connection) ExecInstance(ctx context.Context, name string, exec api.Ins
 		return nil, fmt.Errorf("exec on %q: the operation advertised no file descriptors", name)
 	}
 
-	for fd, raw := range fds {
-		secret, ok := raw.(string)
+	// Control first, and never from the map: a non-interactive exec does not
+	// count it among the connections it waits for, so the command can run and
+	// end the operation while a later dial is still in flight.
+	order := []string{execFDControl}
+	for fd := range fds {
+		if fd != execFDControl {
+			order = append(order, fd)
+		}
+	}
+
+	for _, fd := range order {
+		secret, ok := fds[fd].(string)
 		if !ok || secret == "" {
 			continue
 		}

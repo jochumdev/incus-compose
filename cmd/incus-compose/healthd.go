@@ -782,6 +782,43 @@ func healthdReload(ctx context.Context, c *client.Client, h *client.Instance) er
 	return err
 }
 
+func newHealthdStatusCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "status",
+		Usage: "Prints the status of healthd",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			globalClient, err := clientFromContext(ctx)
+			if err != nil {
+				return err
+			}
+			if err := globalClient.Connect(); err != nil {
+				return err
+			}
+
+			target, done, err := resolveHealthdTarget(ctx, cmd, globalClient)
+			if err != nil {
+				globalClient.LogError("Finding healthd", "error", err)
+				return errLogged.Wrap(err)
+			}
+			defer done()
+
+			err = client.RunAction(ctx, target.instance, client.ActionEnsure)
+			if err != nil {
+				return fmt.Errorf("while fetching healthd: %w", err)
+			}
+
+			state := target.instance.State()
+			if state == nil {
+				return errors.New("no healthd state after fetch")
+			}
+
+			_, _ = fmt.Fprint(cmd.Root().Writer, state.IncusInstance.Config[shared.HealthStatusKey])
+
+			return nil
+		},
+	}
+}
+
 func newHealthdCommand() *cli.Command {
 	return &cli.Command{
 		Name:     "healthd",
@@ -791,6 +828,7 @@ func newHealthdCommand() *cli.Command {
 			newHealthdLogsCommand(),
 			newHealthdReloadCommand(),
 			newHealthdRestartCommand(),
+			newHealthdStatusCommand(),
 			newHealthdUpCommand(),
 			newHealthdDownCommand(),
 		},

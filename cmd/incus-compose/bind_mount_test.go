@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func TestBindMounts(t *testing.T) {
@@ -18,7 +18,7 @@ func TestBindMounts(t *testing.T) {
 	testlib.SkipLocal(t)
 
 	pn := t.Name()
-	compose := "../../test/fixtures/with-bind-mounts/compose.yaml"
+	compose := testlib.Fixture(t, "with-bind-mounts", "compose.yaml")
 	ctx := t.Context()
 
 	gc, err := client.NewTestClient(ctx)
@@ -29,10 +29,10 @@ func TestBindMounts(t *testing.T) {
 	skipNotSameHost(t, gc)
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	t.Run("file bind-mount", func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestBindMountErrorsOnRemote(t *testing.T) {
 	testlib.SkipLocal(t)
 
 	pn := t.Name()
-	compose := "../../test/fixtures/with-bind-mounts/compose.yaml"
+	compose := testlib.Fixture(t, "with-bind-mounts", "compose.yaml")
 	ctx := t.Context()
 
 	gc, err := client.NewTestClient(ctx)
@@ -65,7 +65,7 @@ func TestBindMountErrorsOnRemote(t *testing.T) {
 		t.Skip("this test requires the incus server to be on a remote host")
 	}
 
-	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.Error(t, err)
 }
 
@@ -74,7 +74,7 @@ func TestSeededBindMounts(t *testing.T) {
 	testlib.SkipLocal(t)
 
 	pn := t.Name()
-	compose := "../../test/fixtures/with-seeded-bind-mounts/compose.yaml"
+	compose := testlib.Fixture(t, "with-seeded-bind-mounts", "compose.yaml")
 	ctx := t.Context()
 
 	if _, err := client.NewTestClient(ctx); err != nil {
@@ -82,10 +82,10 @@ func TestSeededBindMounts(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	t.Run("file bind-mount", func(t *testing.T) {
@@ -106,7 +106,7 @@ func TestBindMountNoShift(t *testing.T) {
 	testlib.SkipLocal(t)
 
 	pn := t.Name()
-	compose := "../../test/fixtures/with-bind-mount-no-shift/compose.yaml"
+	compose := testlib.Fixture(t, "with-bind-mount-no-shift", "compose.yaml")
 	ctx := t.Context()
 
 	gc, err := client.NewTestClient(ctx)
@@ -117,10 +117,10 @@ func TestBindMountNoShift(t *testing.T) {
 	skipNotSameHost(t, gc)
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	// With security.shifted=false the bind mount is not id-shifted, so the host
@@ -150,8 +150,7 @@ func pollServiceExec(ctx context.Context, t *testing.T, pn, compose, service str
 	var lastErr error
 
 	for {
-		stdout, err := runCommand(ctx, t, pn, args...)
-		out := stdout.String()
+		out, err := testlib.RunCompose(ctx, t, pn, "", nil, args...)
 		if err == nil {
 			if !strings.Contains(out, want) {
 				return fmt.Errorf("%q not found in output %q", want, out)
@@ -159,6 +158,7 @@ func pollServiceExec(ctx context.Context, t *testing.T, pn, compose, service str
 
 			return nil
 		}
+
 		lastOut = out
 		lastErr = err
 

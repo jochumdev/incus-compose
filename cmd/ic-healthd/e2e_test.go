@@ -16,8 +16,8 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
-	"github.com/lxc/incus-compose/testlib"
 )
 
 // newToken mints the trust token incus-compose hands the sidecar. Incus takes

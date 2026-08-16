@@ -296,20 +296,12 @@ func (p *Project) InstanceNames() []string {
 
 // ResourcesOptions configures how services are converted to stack operations.
 type ResourcesOptions struct {
-	Full  bool
 	Scale map[string]int // service name -> replica count override
 	marks map[string]string
 }
 
 // ResourcesOption is a functional option for ToStack.
 type ResourcesOption func(o *ResourcesOptions)
-
-// ResourcesFull fetches complete instance state including image alias and full instance details.
-func ResourcesFull() ResourcesOption {
-	return func(o *ResourcesOptions) {
-		o.Full = true
-	}
-}
 
 // ResourcesScale sets replica count overrides for services.
 func ResourcesScale(scale map[string]int) ResourcesOption {

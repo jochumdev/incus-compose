@@ -66,9 +66,6 @@ type InstanceConfig struct {
 	// Type is the instance type (container or VM).
 	Type incusApi.InstanceType
 
-	// Full fetches the full instance.
-	Full bool
-
 	// Image is the OCI image to create the instance from.
 	Image string
 
@@ -126,7 +123,7 @@ type InstanceState struct {
 	UID uint64
 	GID uint64
 
-	IncusInstanceFull *incusApi.InstanceFull
+	IncusInstanceState *incusApi.InstanceState
 }
 
 // Instance represents an Incus container or virtual machine.
@@ -238,14 +235,12 @@ func (r *Instance) ServiceName() string {
 // container may not have its DHCP lease(s) yet, so this gives it time. On
 // timeout it returns an error: DNSWatcher registers an AAAA-equivalent record
 // for any address family it waited for, so a missing one must not pass silently.
+//
+// Incus has no lifecycle event for a NIC acquiring an address, so this cannot
+// rely on the event-driven fetch() calls alone - it re-fetches itself on an
+// interval. The device to network map comes from the instance and does not
+// change while we wait; only its state does, which ips() reads each round.
 func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]InterfaceIPs, error) {
-	// The device to network map comes from the instance and does not change
-	// while we wait; only its state does, which ips() reads each round.
-	err := r.fetch(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	networkIpv6 := r.expectedIPv6()
 
 	deadline, cancel := context.WithTimeout(ctx, timeout)
@@ -254,15 +249,76 @@ func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]Interf
 	for {
 		r.client.LogDebug("Waiting for IPs", "instance", r)
 
-		ips, err := r.ips(ctx)
-		if err == nil && !r.missingIPv6(ips, networkIpv6) {
+		err := r.fetch(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		curr := r.State()
+
+		info := curr.IncusInstance
+		if info == nil {
+			return nil, ErrNotEnsured.WithResource(r)
+		}
+
+		if info.StatusCode != incusApi.Running {
+			return nil, ErrNotRunning.WithText("in ips")
+		}
+
+		state := curr.IncusInstanceState
+		if state == nil {
+			return nil, ErrNotFound.WithText("no state fetched")
+		}
+
+		ips := []InterfaceIPs{}
+
+		for sDevice, sNetwork := range state.Network {
+			if sNetwork.Type == "loopback" || sNetwork.Addresses == nil {
+				continue
+			}
+
+			device, ok := info.Devices[sDevice]
+			if !ok {
+				continue
+			}
+
+			iPv4s := []string{}
+			iPv6s := []string{}
+			for _, addr := range sNetwork.Addresses {
+				if addr.Scope != "global" || addr.Address == "" {
+					continue
+				}
+
+				switch addr.Family {
+				case "inet":
+					iPv4s = append(iPv4s, addr.Address)
+				case "inet6":
+					iPv6s = append(iPv6s, addr.Address)
+				}
+			}
+
+			if len(iPv4s) < 1 && len(iPv6s) < 1 {
+				continue
+			}
+
+			ips = append(ips, InterfaceIPs{Network: device["network"], IPv4s: iPv4s, IPv6s: iPv6s})
+		}
+
+		if len(ips) > 0 && !r.missingIPv6(ips, networkIpv6) {
 			return ips, nil
 		}
 
 		select {
 		case <-deadline.Done():
-			return nil, NewError("WaitIPs").WithText(fmt.Sprintf("timeout after: %v", timeout))
+			return nil, NewError("timeout waiting for an IP address").WithText(fmt.Sprintf(
+				"after %v; a container whose process exits right after start never reports one - check it actually stays running, e.g. `incus-compose incus start --console %s`",
+				timeout, r.IncusName(),
+			))
 		case <-time.After(250 * time.Millisecond):
+		}
+
+		if err := r.fetch(deadline); err != nil {
+			return nil, err
 		}
 	}
 }
@@ -330,72 +386,9 @@ func (r *Instance) missingIPv6(ips []InterfaceIPs, networkIpv6 map[string]bool) 
 	return false
 }
 
-// ips reads the global addresses of each attached NIC, keyed by the network the
-// device is on. The instance must be ensured and running.
-func (r *Instance) ips(ctx context.Context) ([]InterfaceIPs, error) {
-	conn, err := r.client.Connection()
-	if err != nil {
-		return nil, err
-	}
-
-	state, _, err := conn.GetInstanceState(ctx, r.incusName)
-	if err != nil {
-		return nil, err
-	}
-
-	if state.StatusCode != incusApi.Running {
-		return nil, ErrNotRunning.WithText("in ips")
-	}
-
-	info := r.State().IncusInstance
-	if info == nil {
-		return nil, ErrNotEnsured.WithResource(r)
-	}
-
-	result := []InterfaceIPs{}
-
-	for sDevice, sNetwork := range state.Network {
-		if sNetwork.Type == "loopback" || sNetwork.Addresses == nil {
-			continue
-		}
-
-		device, ok := info.Devices[sDevice]
-		if !ok {
-			continue
-		}
-
-		iPv4s := []string{}
-		iPv6s := []string{}
-		for _, addr := range sNetwork.Addresses {
-			if addr.Scope != "global" || addr.Address == "" {
-				continue
-			}
-
-			switch addr.Family {
-			case "inet":
-				iPv4s = append(iPv4s, addr.Address)
-			case "inet6":
-				iPv6s = append(iPv6s, addr.Address)
-			}
-		}
-
-		if len(iPv4s) < 1 && len(iPv6s) < 1 {
-			continue
-		}
-
-		result = append(result, InterfaceIPs{Network: device["network"], IPv4s: iPv4s, IPv6s: iPv6s})
-	}
-
-	if len(result) < 1 {
-		return nil, ErrNotFound.WithText("no Networks/IPs found")
-	}
-
-	return result, nil
-}
-
-// HasFull returns true if the instance has a full instance.
-func (r *Instance) HasFull() bool {
-	return r.State().IncusInstanceFull != nil
+// HasState returns true if the instance's runtime state was fetched.
+func (r *Instance) HasState() bool {
+	return r.State().IncusInstanceState != nil
 }
 
 func (r *Instance) fetch(ctx context.Context) error {
@@ -406,7 +399,7 @@ func (r *Instance) fetch(ctx context.Context) error {
 
 	// Fresh instance. The ETag covers the editable config only, not StatusCode,
 	// so it cannot be used to skip this.
-	instance, etag, err := conn.GetInstance(ctx, r.incusName, &iclient.GetInstanceArgs{Full: r.Config.Full})
+	instance, etag, err := conn.GetInstance(ctx, r.incusName, nil)
 	if err != nil {
 		return err
 	}
@@ -427,9 +420,12 @@ func (r *Instance) fetch(ctx context.Context) error {
 		}
 	}
 
-	if r.Config.Full {
-		newState.IncusInstanceFull = instance
+	state, _, err := conn.GetInstanceState(ctx, r.incusName)
+	if err != nil {
+		return err
 	}
+
+	newState.IncusInstanceState = state
 
 	// Under the cond's lock: a waiter that has just evaluated its condition and
 	// not yet parked would otherwise miss the broadcast and wait out its timeout.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // pulledImageAliases runs the wrapped `incus image list --format=json` inside the
@@ -18,7 +18,7 @@ import (
 func pulledImageAliases(ctx context.Context, t *testing.T, projectName, compose string) []string {
 	t.Helper()
 
-	stdout, err := runCommand(ctx, t, projectName, "-f", compose, "incus", "image", "list", "--format=json")
+	stdout, err := testlib.RunCompose(ctx, t, projectName, "", nil, "-f", compose, "incus", "image", "list", "--format=json")
 	require.NoError(t, err)
 
 	var images []struct {
@@ -26,7 +26,7 @@ func pulledImageAliases(ctx context.Context, t *testing.T, projectName, compose 
 			Name string `json:"name"`
 		} `json:"aliases"`
 	}
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &images))
+	require.NoError(t, json.Unmarshal([]byte(stdout), &images))
 
 	var aliases []string
 	for _, img := range images {
@@ -54,10 +54,10 @@ func TestE2EPull(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/simple/compose.yaml"
+	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	tests := []struct {
@@ -80,7 +80,7 @@ func TestE2EPull(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := runCommand(ctx, t, pn, tt.args...)
+			_, err := testlib.RunCompose(ctx, t, pn, "", nil, tt.args...)
 			require.NoError(t, err)
 
 			aliases := pulledImageAliases(ctx, t, pn, compose)
@@ -99,14 +99,14 @@ func TestE2EPullWithDeps(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/postgres-redis/compose.yaml"
+	compose := testlib.Fixture(t, "postgres-redis", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	// Pulling just "api" copies its own image, not its dependencies.
-	_, err := runCommand(ctx, t, pn, "-f", compose, "pull", "--no-healthd", "api")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "api")
 	require.NoError(t, err)
 
 	aliases := pulledImageAliases(ctx, t, pn, compose)
@@ -115,7 +115,7 @@ func TestE2EPullWithDeps(t *testing.T) {
 	require.False(t, hasImage(aliases, "redis"), "did not expect dep images, got %v", aliases)
 
 	// --with-deps follows depends_on and also pulls postgres and redis.
-	_, err = runCommand(ctx, t, pn, "-f", compose, "pull", "--no-healthd", "--with-deps", "api")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "--with-deps", "api")
 	require.NoError(t, err)
 
 	aliases = pulledImageAliases(ctx, t, pn, compose)
@@ -142,10 +142,10 @@ func TestE2EPullInvalidImage(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "pull")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull")
 	require.Error(t, err)
 }
 
@@ -158,13 +158,13 @@ func TestE2EPullIgnoreBuildable(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/with-build/compose.yaml"
+	compose := testlib.Fixture(t, "with-build", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	// --ignore-buildable skips images with a build config, leaving nothing to pull.
-	_, err := runCommand(ctx, t, pn, "-f", compose, "pull", "--ignore-buildable")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--ignore-buildable")
 	require.NoError(t, err)
 }

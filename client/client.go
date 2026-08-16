@@ -265,54 +265,37 @@ func (c *Client) IsConnected() bool {
 // 	return idx != -1
 // }
 
-// Resource returns an existing resource or creates a new one.
-// Deduplication uses IncusName so differently-formatted inputs that resolve
-// to the same Incus resource (e.g. "nginx:alpine" vs "docker.io/library/nginx:alpine") return the same object.
+// Resource returns an existing resource or creates a new one. You might use a nil config for lookups.
 func (c *Client) Resource(kind Kind, name string, config Config) (Resource, error) {
-	// Fast path: check by raw name before constructing the resource.
-	if res := c.resources.Get(kind, name, false); res != nil {
+	if config == nil {
+		res := c.resources.Get(kind, name, false)
+		if res != nil {
+			return res, nil
+		}
+
+		res = c.resources.Get(kind, name, true)
+		if res == nil {
+			return nil, ErrNotFound.WithKindName(kind, name)
+		}
 		return res, nil
 	}
-	if res := c.resources.Get(kind, name, true); res != nil {
-		return res, nil
-	}
 
-	var (
-		res Resource
-		err error
-	)
-
-	switch kind {
-	case KindProfile:
-		res, err = newProfile(c, name, config)
-	case KindNetwork:
-		res, err = newNetwork(c, name, config)
-	case KindStorageVolume:
-		res, err = newStorageVolume(c, name, config)
-	case KindImage:
-		res, err = newImage(c, name, config)
-	case KindInstance:
-		res, err = newInstance(c, name, config)
-	default:
-		return nil, ErrUnknownResource.WithText(string(kind))
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Deduplicate by Name().
-	if existing := c.resources.Get(kind, res.Name(), false); existing != nil {
-		return existing, nil
-	}
-
-	// Deduplicate by IncusName().
-	if existing := c.resources.Get(kind, res.IncusName(), true); existing != nil {
-		return existing, nil
-	}
-
-	c.resources.Add(res)
-	return res, nil
+	return c.resources.GetOrCreate(kind, name, func() (Resource, error) {
+		switch kind {
+		case KindProfile:
+			return newProfile(c, name, config)
+		case KindNetwork:
+			return newNetwork(c, name, config)
+		case KindStorageVolume:
+			return newStorageVolume(c, name, config)
+		case KindImage:
+			return newImage(c, name, config)
+		case KindInstance:
+			return newInstance(c, name, config)
+		default:
+			return nil, ErrUnknownResource.WithText(string(kind))
+		}
+	})
 }
 
 // AddHookBefore adds a hook that will be executed before any action.
@@ -437,12 +420,16 @@ func (c *Client) HealthdRunning() (bool, error) {
 		return false, err
 	}
 
-	state, _, err := conn.GetInstanceState(c.ctx, name)
+	inst, _, err := conn.GetInstance(c.ctx, name, nil)
 	if err != nil {
 		return false, fmt.Errorf("getting the healthd %q instance state: %w", name, err)
 	}
 
-	return state.StatusCode == incusApi.Running, nil
+	if inst.Config[shared.HealthStatusKey] != shared.HealthStatusHealthy {
+		return false, fmt.Errorf("healthd %q instance status is: %v", name, inst.Config[shared.HealthStatusKey])
+	}
+
+	return inst.StatusCode == incusApi.Running, nil
 }
 
 // healthdTarget locates the daemon watching this project. Every instance start

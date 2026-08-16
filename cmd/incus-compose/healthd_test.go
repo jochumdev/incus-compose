@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
-	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestParseHealthdNetwork(t *testing.T) {
@@ -96,10 +96,10 @@ func TestParseHealthdNetwork(t *testing.T) {
 
 // 	ctx := context.Background()
 // 	pn := t.Name()
-// 	compose := "../../test/fixtures/healthd-debug/compose.yaml"
+// 	compose := testlib.Fixture(t, "healthd-debug", "compose.yaml")
 
 // 	t.Cleanup(func() {
-// 		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+// 		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 // 	})
 
 // 	tests := []struct {
@@ -137,7 +137,7 @@ func TestParseHealthdNetwork(t *testing.T) {
 // 	}
 
 // 	for _, tt := range tests {
-// 		_, err := runCommand(ctx, t, pn, tt.args...)
+// 		_, err := testlib.RunCompose(ctx, t, pn, "", nil, tt.args...)
 // 		require.NoError(t, err)
 // 	}
 // }
@@ -149,13 +149,13 @@ func TestNoHealthdSkipsHealthdInstance(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/with-restart/compose.yaml"
+	compose := testlib.Fixture(t, "with-restart", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-healthd")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd")
 	require.NoError(t, err)
 
 	gc, err := client.NewTestClient(ctx)
@@ -181,13 +181,13 @@ func TestNoHealthdWhenNotNeeded(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/simple/compose.yaml"
+	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	gc, err := client.NewTestClient(ctx)

@@ -10,8 +10,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/cmd/incus-compose/version"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
-	"github.com/lxc/incus-compose/testlib"
 )
 
 func TestVersionCommand(t *testing.T) {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -172,12 +172,5 @@ func healthKeys(pairs map[string]string) map[string]string {
 }
 
 func TestMain(m *testing.M) {
-	logger := slog.New(slog.NewTextHandler(
-		os.Stderr,
-		&slog.HandlerOptions{Level: slog.LevelDebug - 4}),
-	)
-
-	slog.SetDefault(logger)
-
-	os.Exit(m.Run())
+	os.Exit(testlib.Main(m))
 }

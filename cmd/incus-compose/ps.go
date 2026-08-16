@@ -86,7 +86,7 @@ func newPsCommand() *cli.Command {
 			}
 			defer func() { _ = c.Done() }()
 
-			resources, err := p.Resources(c, project.ResourcesFull())
+			resources, err := p.Resources(c)
 			if err != nil {
 				c.LogError("Getting project resources in reCreate", "error", err)
 				return errLogged.Wrap(err)
@@ -166,22 +166,23 @@ func newPsCommand() *cli.Command {
 					Addresses: []string{},
 				}
 
-				// If resource is an Instance resource and has full details, use them.
-				if inst.IsEnsured() && inst.HasFull() {
-					full := inst.State().IncusInstanceFull
-					if full == nil || full.State == nil {
+				// If resource is an Instance resource and has state, use it.
+				if inst.IsEnsured() && inst.HasState() {
+					base := inst.State().IncusInstance
+					state := inst.State().IncusInstanceState
+					if base == nil || state == nil {
 						continue
 					}
 
-					if util.IsTrue(full.Config[client.HealthKeyPrefix+"daemon"]) {
+					if util.IsTrue(base.Config[client.HealthKeyPrefix+"daemon"]) {
 						continue
 					}
 
-					entry.Status = full.State.Status
+					entry.Status = state.Status
 					entry.Image = inst.Config.Image
 
 					// collect addresses
-					for _, nw := range full.State.Network {
+					for _, nw := range state.Network {
 						for _, a := range nw.Addresses {
 							if a.Family == "inet" && a.Scope == "global" {
 								entry.Addresses = append(entry.Addresses, a.Address)
