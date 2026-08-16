@@ -27,6 +27,13 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Fixed
 
+- `up` could hang until the start timeout on a service that had already been
+  reported healthy, and then fail. Waiting for a container's IP refreshed the
+  instance state as it polled, so a reading taken before ic-healthd reported
+  could overwrite the verdict a dependent service was waiting for - and
+  ic-healthd never repeats a status it has already written. Those polls now read
+  into a state of their own. (by @jochumdev)
+
 - `HealthdRunning`, used before waiting on health-check dependencies, checked
   only that the healthd instance was `Running`, not that its own health
   checks had passed - a service could start before healthd was actually ready

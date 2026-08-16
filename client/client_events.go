@@ -57,7 +57,7 @@ func addEventHook(c *Client) {
 					}
 
 					// We ignore errors here as on stop/delete this would log an error.
-					err = inst.fetch(listenCtx)
+					err = inst.fetch(listenCtx, nil)
 					if err == nil {
 						c.LogDebug("New lifecycle event", "resource", inst, "action", lc.Action, "health_status", inst.State().IncusInstance.Config[HealthStatusKey])
 					}

@@ -25,7 +25,7 @@ test folder="./..." *args:
       status=0; \
       gotestsum --hide-summary=skipped --format testname --jsonfile=work/logs/${DATE}.json --packages={{ folder }} \
         --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num 10 --jsonfile work/logs/${DATE}.json'" \
-        -- -race -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -cover -covermode atomic -v "${@:2}" \
+        -- -race -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -cover -covermode atomic -coverpkg ./... -v "${@:2}" \
         -args -test.gocoverdir="${INCUS_COMPOSE_TEST_COVERDIR}" || status=$?; \
       go tool covdata textfmt -i="${INCUS_COMPOSE_TEST_COVERDIR}" -o work/logs/${DATE}-cover.out; \
       just cover work/logs/${DATE}-cover.out; \
