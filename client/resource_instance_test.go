@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
-	"github.com/lxc/incus-compose/testlib"
 )
 
 // ----------------------------------------------------------------------------

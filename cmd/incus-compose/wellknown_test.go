@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func TestWellKnownRegistryQuayIO(t *testing.T) {
@@ -26,10 +26,10 @@ func TestWellKnownRegistryQuayIO(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "pull", "--no-healthd", "hello")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "hello")
 	require.NoError(t, err)
 }
 
@@ -49,9 +49,9 @@ func TestWellKnownRegistryMCR(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "pull", "--no-healthd", "hello")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "hello")
 	require.NoError(t, err)
 }

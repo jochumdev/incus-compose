@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func assertBackupVolumeExists(t *testing.T, c *client.Client, pool, name string) {
@@ -175,21 +175,21 @@ func TestE2EBackupCreate(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -218,21 +218,21 @@ func TestE2EBackupCreateLive(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "--live")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "--live")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -259,21 +259,21 @@ func TestE2EBackupCreateNamed(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "--name", "daily")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "--name", "daily")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -290,24 +290,24 @@ func TestE2EBackupCreateIncremental(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "--name", "first")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "--name", "first")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "--name", "second")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "--name", "second")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -360,14 +360,14 @@ volumes:
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "--project-directory", projectDir, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "--project-directory", projectDir, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "backup", "create", "db")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "backup", "create", "db")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -392,21 +392,21 @@ func TestE2EBackupCreateNoVolumes(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "nonexistent")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "nonexistent")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -442,14 +442,14 @@ volumes:
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "--project-directory", projectDir, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "--project-directory", projectDir, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "backup", "create")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "backup", "create")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)
@@ -470,18 +470,18 @@ func TestE2EBackupCreateParallel(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -490,7 +490,7 @@ func TestE2EBackupCreateParallel(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "--live")
+			_, errs[i] = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "--live")
 		}(i)
 	}
 	wg.Wait()
@@ -519,18 +519,18 @@ func TestE2EBackupCreateDataIntegrity(t *testing.T) {
 	testlib.SkipLocal(t)
 	t.Parallel()
 
-	compose := "../../test/fixtures/with-backup/compose.yaml"
+	compose := testlib.Fixture(t, "with-backup", "compose.yaml")
 	projectDir := t.TempDir()
 
 	ctx := t.Context()
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
-	_, err := runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	// Seed a file into the compose volume.
@@ -549,7 +549,7 @@ func TestE2EBackupCreateDataIntegrity(t *testing.T) {
 	require.NoError(t, f.Close())
 	require.NoError(t, sc.Close())
 
-	_, err = runCommand(ctx, t, pn, "--project-directory", projectDir, "-f", compose, "backup", "create", "--live")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--project-directory", projectDir, "-f", compose, "backup", "create", "--live")
 	require.NoError(t, err)
 
 	bp := openBackupProject(ctx, t, pn)

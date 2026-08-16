@@ -8,7 +8,7 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // TestIncusVolumeSFTP writes a file into a custom volume and reads it back,

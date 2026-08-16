@@ -102,14 +102,17 @@ purge-projects:
     set -euo pipefail
 
     remote="${INCUS_REMOTE:-local}"
-    projects=$(incus project list "${remote}:" -f json | jq -r '.[] .name')
+    projects=$(incus project list "${remote}:" -f json | jq -r '.[] | select(.name != "default" and .name != "incus-compose" and .name != "incus-compose-cache" and .name != "incus-compose-tests-cache") | .name')
+
+    if [[ -z "${projects}" ]]; then
+        echo "No projects found."
+        exit 1
+    fi
 
     echo "Deleting projects on remote '${remote}':"
     while IFS= read -r project; do
-        if [[ $project != "default" ]] && [[ $project != "incus-compose-tests-cache" ]] then
-          echo "  Deleting: ${project}"
-          echo -e "yes\n" | incus project delete -f "${remote}:${project}"
-        fi
+        echo "  Deleting: ${project}"
+        echo -e "yes\n" | incus project delete -f "${remote}:${project}"
     done <<< "${projects}"
     echo "Done."
 
@@ -138,7 +141,7 @@ purge-certs:
     set -euo pipefail
 
     remote="${INCUS_REMOTE:-local}"
-    certs=$(incus config trust list "${remote}:" -f json | jq -r '.[] | select(.name != "client.crt") | .fingerprint')
+    certs=$(incus config trust list "${remote}:" -f json | jq -r '.[] | select(.name != "client.crt" and .name != "dev01") | .fingerprint')
 
     if [[ -z "${certs}" ]]; then
         echo "No certificates found."

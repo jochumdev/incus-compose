@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func ensuredLockTestVolume(t *testing.T, c *Client, name string) *StorageVolume {

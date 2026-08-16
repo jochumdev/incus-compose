@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
-	"github.com/lxc/incus-compose/testlib"
 )
 
 // runFlags parses args through the real run command and hands back the config

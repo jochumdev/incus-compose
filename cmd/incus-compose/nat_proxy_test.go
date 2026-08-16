@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // TestE2ENatProxy verifies that published ports create NAT proxy devices
@@ -21,10 +21,10 @@ func TestE2ENATProxy(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/with-ports/compose.yaml"
+	compose := testlib.Fixture(t, "with-ports", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	tests := []e2eTest{
@@ -74,10 +74,10 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -129,10 +129,10 @@ networks:
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	inst, _, err := conn.GetInstance(ctx, "web-1", nil)

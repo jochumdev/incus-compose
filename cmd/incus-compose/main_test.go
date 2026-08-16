@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -13,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
-	"github.com/lxc/incus-compose/testlib"
 )
 
 var snapshotter = cupaloy.New(cupaloy.SnapshotSubdirectory(filepath.Join("..", "..", "test", "snapshots", "e2e")))
@@ -32,19 +31,8 @@ func skipNotSameHost(t *testing.T, gc *client.GlobalClient) {
 	}
 }
 
-func runCommand(ctx context.Context, t *testing.T, projectName string, args ...string) (*bytes.Buffer, error) {
-	t.Helper()
-
-	mArgs := append([]string{"incus-compose"}, testlib.Args(projectName, args...)...)
-	t.Log("Running", mArgs)
-
-	stdout := &bytes.Buffer{}
-	cmd := newRootCommand()
-	cmd.Writer = stdout
-	cmd.ErrWriter = t.Output()
-	err := cmd.Run(ctx, mArgs)
-
-	return stdout, err
+func TestMain(m *testing.M) {
+	os.Exit(testlib.Main(m))
 }
 
 // runCommandSnapshot runs args and snapshots its own stdout. Use this when the
@@ -52,7 +40,7 @@ func runCommand(ctx context.Context, t *testing.T, projectName string, args ...s
 func runCommandSnapshot(ctx context.Context, t *testing.T, projectName string, strip bool, args ...string) {
 	t.Helper()
 
-	stdout, err := runCommand(ctx, t, projectName, args...)
+	stdout, err := testlib.RunCompose(ctx, t, projectName, "", nil, args...)
 	require.NoError(t, err)
 	snapshotter.SnapshotT(t, stripOutput(t, stdout, strip))
 }
@@ -63,7 +51,7 @@ func runCommandSnapshot(ctx context.Context, t *testing.T, projectName string, s
 func runCommandSnapshotList(ctx context.Context, t *testing.T, projectName string, strip bool, args ...string) {
 	t.Helper()
 
-	_, err := runCommand(ctx, t, projectName, args...)
+	_, err := testlib.RunCompose(ctx, t, projectName, "", nil, args...)
 	require.NoError(t, err)
 
 	// This makes sure that health status settles and makes tests less flaky.
@@ -77,28 +65,20 @@ func runCommandSnapshotList(ctx context.Context, t *testing.T, projectName strin
 	}
 
 	forwarded = append(forwarded, "list", "--format=json")
-	listArgs := append([]string{"incus-compose"}, testlib.Args(projectName, forwarded...)...)
 
-	t.Log("Running", listArgs)
-
-	stdout := &bytes.Buffer{}
-	cmd := newRootCommand()
-	cmd.Writer = stdout
-	cmd.ErrWriter = t.Output()
-	err = cmd.Run(ctx, listArgs)
-
+	stdout, err := testlib.RunCompose(ctx, t, projectName, "", nil, forwarded...)
 	require.NoError(t, err)
 	snapshotter.SnapshotT(t, stripOutput(t, stdout, strip))
 }
 
-func stripOutput(t *testing.T, output *bytes.Buffer, stripHealth bool) string {
+func stripOutput(t *testing.T, output string, stripHealth bool) string {
 	t.Helper()
 
 	if stripHealth {
-		return testlib.StripHealth(output.String())
+		return testlib.StripHealth(output)
 	}
 
-	return testlib.Strip(output.String())
+	return testlib.Strip(output)
 }
 
 func plannedNetworkNames(ctx context.Context, t *testing.T, projectName, compose string) []string {
@@ -168,7 +148,7 @@ func runE2ETests(ctx context.Context, t *testing.T, projectName string, tests []
 			case tt.snapshot:
 				runCommandSnapshot(ctx, t, projectName, tt.snapStripHealth, tt.args...)
 			default:
-				_, err := runCommand(ctx, t, projectName, tt.args...)
+				_, err := testlib.RunCompose(ctx, t, projectName, "", nil, tt.args...)
 				if !tt.wantErr {
 					if err != nil {
 						prevFailed = true
@@ -197,80 +177,80 @@ func TestConfigCommand(t *testing.T) {
 		{
 			name:     "simple yaml",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/simple/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "simple", "compose.yaml")},
 		},
 		{
 			name:     "simple json",
 			args:     []string{"config", "--format", "json"},
-			fixtures: []string{"../../test/fixtures/simple/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "simple", "compose.yaml")},
 		},
 		{
 			name:     "two-services yaml",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/two-services/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "two-services", "compose.yaml")},
 		},
 		{
 			name:     "wordpress",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/wordpress/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "wordpress", "compose.yaml")},
 		},
 		{
 			name:     "with-secrets",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-secrets/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-secrets", "compose.yaml")},
 		},
 		{
 			name:     "with-configs",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-configs/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-configs", "compose.yaml")},
 		},
 		{
 			name:     "with-restart",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-restart/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-restart", "compose.yaml")},
 		},
 		{
 			name:     "with-incus-options",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-incus-options/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-incus-options", "compose.yaml")},
 		},
 		{
 			name:     "with-project-options",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-project-options/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-project-options", "compose.yaml")},
 		},
 		{
 			name:     "with-build",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-build/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-build", "compose.yaml")},
 		},
 		{
 			name:     "with-multi-files",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/with-multi-files/a.yaml", "../../test/fixtures/with-multi-files/b.yaml"},
+			fixtures: []string{testlib.Fixture(t, "with-multi-files", "a.yaml"), testlib.Fixture(t, "with-multi-files", "b.yaml")},
 		},
 		{
 			name: "project-directory simple",
-			args: []string{"--project-directory", "../../test/fixtures/simple", "config"},
+			args: []string{"--project-directory", testlib.Fixture(t, "simple"), "config"},
 		},
 		{
 			name: "project-directory docker-compose with incus overlay",
-			args: []string{"-P", "../../test/fixtures/with-docker-compose", "config"},
+			args: []string{"-P", testlib.Fixture(t, "with-docker-compose"), "config"},
 		},
 		{
 			name: "file docker-compose with incus overlay",
-			args: []string{"-P", "../../test/fixtures/with-docker-compose", "config"},
+			args: []string{"-P", testlib.Fixture(t, "with-docker-compose"), "config"},
 		},
 		{
 			name:     "nonexistent file",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/i-dont-exists/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "i-dont-exists", "compose.yaml")},
 			wantErr:  true,
 		},
 		{
 			name:     "invalid yaml",
 			args:     []string{"config"},
-			fixtures: []string{"../../test/fixtures/invalid/compose.yaml"},
+			fixtures: []string{testlib.Fixture(t, "invalid", "compose.yaml")},
 			wantErr:  true,
 		},
 	}
@@ -284,20 +264,18 @@ func TestConfigCommand(t *testing.T) {
 			}
 			args = append(args, tt.args...)
 
-			stdout, err := runCommand(t.Context(), t, "test-local-config", args...)
+			stdout, err := testlib.RunCompose(t.Context(), t, "test-local-config", "", nil, args...)
 
 			if tt.wantErr {
-				require.Error(t, err, "Stdout: %s", stdout.String())
+				require.Error(t, err, "Stdout: %s", stdout)
 			} else {
 				require.NoError(t, err)
 
-				output := ""
+				output := stdout
 				if len(tt.fixtures) > 0 {
-					absFixturePath, _ := filepath.Abs(filepath.Dir(tt.fixtures[0]))
-					output = strings.ReplaceAll(stdout.String(), absFixturePath, "$FIXTURE_PATH")
-				} else {
-					output = stdout.String()
+					output = strings.ReplaceAll(stdout, filepath.Dir(tt.fixtures[0]), "$FIXTURE_PATH")
 				}
+
 				snapshotter.SnapshotT(t, strings.Trim(output, "\n"))
 			}
 		})
@@ -314,40 +292,39 @@ func TestConfigFilterByService(t *testing.T) {
 	}{
 		{
 			name:    "wordpress filter db service",
-			args:    []string{"-f", "../../test/fixtures/wordpress/compose.yaml", "config", "db"},
-			fixture: "../../test/fixtures/wordpress",
+			args:    []string{"-f", testlib.Fixture(t, "wordpress", "compose.yaml"), "config", "db"},
+			fixture: testlib.Fixture(t, "wordpress"),
 		},
 		{
 			name:    "wordpress filter wordpress service includes db dependency",
-			args:    []string{"-f", "../../test/fixtures/wordpress/compose.yaml", "config", "wordpress"},
-			fixture: "../../test/fixtures/wordpress",
+			args:    []string{"-f", testlib.Fixture(t, "wordpress", "compose.yaml"), "config", "wordpress"},
+			fixture: testlib.Fixture(t, "wordpress"),
 		},
 		{
 			name:    "config --services list",
-			args:    []string{"-f", "../../test/fixtures/wordpress/compose.yaml", "config", "--services"},
-			fixture: "../../test/fixtures/wordpress",
+			args:    []string{"-f", testlib.Fixture(t, "wordpress", "compose.yaml"), "config", "--services"},
+			fixture: testlib.Fixture(t, "wordpress"),
 		},
 		{
 			name:    "config --volumes list",
-			args:    []string{"-f", "../../test/fixtures/wordpress/compose.yaml", "config", "--volumes"},
-			fixture: "../../test/fixtures/wordpress",
+			args:    []string{"-f", testlib.Fixture(t, "wordpress", "compose.yaml"), "config", "--volumes"},
+			fixture: testlib.Fixture(t, "wordpress"),
 		},
 		{
 			name:    "config --quiet validation",
-			args:    []string{"-f", "../../test/fixtures/wordpress/compose.yaml", "config", "--quiet"},
-			fixture: "../../test/fixtures/wordpress",
+			args:    []string{"-f", testlib.Fixture(t, "wordpress", "compose.yaml"), "config", "--quiet"},
+			fixture: testlib.Fixture(t, "wordpress"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stdout, err := runCommand(t.Context(), t, "test-local-config-filter", tt.args...)
+			stdout, err := testlib.RunCompose(t.Context(), t, "test-local-config-filter", "", nil, tt.args...)
 			require.NoError(t, err)
 
 			if tt.fixture != "" {
-				absFixturePath, _ := filepath.Abs(tt.fixture)
-				output := strings.ReplaceAll(stdout.String(), absFixturePath, "$FIXTURE_PATH")
+				output := strings.ReplaceAll(stdout, tt.fixture, "$FIXTURE_PATH")
 				snapshotter.SnapshotT(t, strings.Trim(output, "\n"))
 			}
 		})
@@ -360,10 +337,10 @@ func TestUpDownUpSimple(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/simple/compose.yaml"
+	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	tests := []e2eTest{
@@ -396,10 +373,10 @@ func TestNormalLifecycle(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/two-services/compose.yaml"
+	compose := testlib.Fixture(t, "two-services", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
 	tests := []e2eTest{
@@ -441,16 +418,16 @@ func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	compose := "../../test/fixtures/downscale/compose.yaml"
+	compose := testlib.Fixture(t, "downscale", "compose.yaml")
 
 	networks := plannedNetworkNames(ctx, t, pn, compose)
 	require.NotEmpty(t, networks)
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -463,7 +440,7 @@ func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
 	before := dnsServiceIPs(t, c, networks, "web")
 	require.NotEmpty(t, before, "web should have DNS records for 3 replicas")
 
-	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--scale=web=1")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--scale=web=1")
 	require.NoError(t, err)
 
 	survivor, err := c.InstanceExists("web-1")
@@ -492,23 +469,23 @@ func TestDNSCnameAliasAcrossProjects(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	composeDNS := "../../test/fixtures/dns/compose.yaml"
-	composeDNS2 := "../../test/fixtures/dns2/compose.yaml"
+	composeDNS := testlib.Fixture(t, "dns", "compose.yaml")
+	composeDNS2 := testlib.Fixture(t, "dns2", "compose.yaml")
 
 	// dns2's compose.yaml hardcodes x-incus-compose.network: dns-default, so
 	// the dns project must be named literally "dns" for the names to line up.
 	// Cleanups run LIFO, so dns2 (registered second) is torn down before dns.
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, "dns", "-f", composeDNS, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, "dns", "", nil, "-f", composeDNS, "down", "--project")
 	})
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, "dns2", "-f", composeDNS2, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, "dns2", "", nil, "-f", composeDNS2, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, "dns", "-f", composeDNS, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, "dns", "", nil, "-f", composeDNS, "up", "--detach")
 	require.NoError(t, err)
 
-	_, err = runCommand(ctx, t, "dns2", "-f", composeDNS2, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, "dns2", "", nil, "-f", composeDNS2, "up", "--detach")
 	require.NoError(t, err)
 
 	// Matches dns2's hardcoded x-incus-compose.network: dns-default.

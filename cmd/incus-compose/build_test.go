@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/testlib"
+	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func skipIfNoBuilder(t *testing.T) {
@@ -38,13 +38,13 @@ func TestBuildCommandWithBuildFixture(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	fixture := "../../test/fixtures/with-build/compose.yaml"
+	fixture := testlib.Fixture(t, "with-build", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", fixture, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", fixture, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", fixture, "build")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", fixture, "build")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -87,10 +87,10 @@ RUN echo "built by incus-compose"
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "build", "app")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "build", "app")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -127,10 +127,10 @@ ENV PATH=/opt/bin:/usr/bin
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -171,10 +171,10 @@ RUN echo "built by incus-compose"
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -192,7 +192,7 @@ RUN echo "built by incus-compose"
 	require.NotEmpty(t, app)
 	require.NotEmpty(t, plain)
 
-	_, err = runCommand(ctx, t, pn, "-f", compose, "up", "--detach", "--no-start", "--no-healthd", "--build")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-start", "--no-healthd", "--build")
 	require.NoError(t, err)
 
 	require.NotEqual(t, app, uuid("app-1"), "--build must recreate the service it rebuilt")
@@ -205,13 +205,13 @@ func TestBuildCommandWithNoBuildServices(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	fixture := "../../test/fixtures/simple/compose.yaml"
+	fixture := testlib.Fixture(t, "simple", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", fixture, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", fixture, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", fixture, "build")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", fixture, "build")
 	require.NoError(t, err)
 }
 
@@ -221,13 +221,13 @@ func TestBuildCommandWithNoMatchingBuildServices(t *testing.T) {
 
 	ctx := t.Context()
 	pn := t.Name()
-	fixture := "../../test/fixtures/with-build/compose.yaml"
+	fixture := testlib.Fixture(t, "with-build", "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", fixture, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", fixture, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", fixture, "build", "missing")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", fixture, "build", "missing")
 	require.Error(t, err)
 }
 
@@ -251,10 +251,10 @@ func TestBuildCommandWithNonBuildServiceFilter(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "build", "sidecar")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "build", "sidecar")
 	require.Error(t, err)
 }
 
@@ -279,10 +279,10 @@ func TestBuildCommandRejectsMultiplePlatforms(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "build")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "build")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "build.platforms with multiple platforms is not supported")
 }
@@ -307,10 +307,10 @@ func TestBuildCommandRejectsUnsupportedPlatform(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(ctx, t, pn, "-f", compose, "build")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "build")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported build platform linux/unsupported")
 }
@@ -332,15 +332,11 @@ func TestBuildCommandReportsMissingBuilder(t *testing.T) {
 	compose := filepath.Join(dir, "compose.yaml")
 
 	t.Cleanup(func() {
-		_, _ = runCommand(context.Background(), t, pn, "-f", compose, "down", "--project")
+		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
 	})
 
-	_, err := runCommand(
-		ctx,
-		t,
-		pn,
-		"-f", compose, "build", "--builder", "ic-unknown-builder",
-	)
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil,
+		"-f", compose, "build", "--builder", "ic-unknown-builder")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no container builder")
 }
