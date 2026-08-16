@@ -114,6 +114,14 @@ func (c *InstanceConfig) GetConfig() any {
 	return c
 }
 
+const (
+	// healthPollInterval only re-reads the published state, so it costs no requests.
+	healthPollInterval = 100 * time.Millisecond
+
+	// healthRecheckInterval is the backstop for a verdict the listener missed.
+	healthRecheckInterval = 10 * time.Second
+)
+
 type InstanceState struct {
 	// State - nil means not ensured.
 	IncusInstance *incusApi.Instance
@@ -138,9 +146,6 @@ type Instance struct {
 	// mu serializes the actions; two workers may share one resource object.
 	// Nothing the actions call may take it again - it is not reentrant.
 	mu sync.Mutex
-
-	// updated is broadcast whenever state changes; its lock guards nothing else.
-	updated *sync.Cond
 
 	// deleteMarked indicates that this instance will be deleted after Ensure(),
 	// this is for down scaling instances.
@@ -182,7 +187,6 @@ func newInstance(c *Client, name string, configGetter Config) (*Instance, error)
 		client:       c,
 		incusName:    SanitizeIncusName(name, -1),
 		Config:       *config,
-		updated:      sync.NewCond(&sync.Mutex{}),
 	}
 
 	// Every accessor dereferences this, so it must never be nil.
@@ -240,21 +244,25 @@ func (r *Instance) ServiceName() string {
 // rely on the event-driven fetch() calls alone - it re-fetches itself on an
 // interval. The device to network map comes from the instance and does not
 // change while we wait; only its state does, which ips() reads each round.
+//
+// Those rounds read into a state of their own, so a read taken before ic-healthd
+// reported cannot rewind the status another instance is waiting on. The instance
+// state is published once, from the round that succeeded.
 func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]InterfaceIPs, error) {
 	networkIpv6 := r.expectedIPv6()
 
 	deadline, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	curr := &InstanceState{}
+
 	for {
 		r.client.LogDebug("Waiting for IPs", "instance", r)
 
-		err := r.fetch(ctx)
+		err := r.fetch(ctx, curr)
 		if err != nil {
 			return nil, err
 		}
-
-		curr := r.State()
 
 		info := curr.IncusInstance
 		if info == nil {
@@ -305,6 +313,11 @@ func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]Interf
 		}
 
 		if len(ips) > 0 && !r.missingIPv6(ips, networkIpv6) {
+			// A library user reads State() after this returns. Nothing writes
+			// curr again, and the round that found the addresses is the newest
+			// read there is, so publishing it beats fetching once more.
+			r.state.Store(curr)
+
 			return ips, nil
 		}
 
@@ -315,10 +328,6 @@ func (r *Instance) WaitIPs(ctx context.Context, timeout time.Duration) ([]Interf
 				timeout, r.IncusName(),
 			))
 		case <-time.After(250 * time.Millisecond):
-		}
-
-		if err := r.fetch(deadline); err != nil {
-			return nil, err
 		}
 	}
 }
@@ -391,7 +400,10 @@ func (r *Instance) HasState() bool {
 	return r.State().IncusInstanceState != nil
 }
 
-func (r *Instance) fetch(ctx context.Context) error {
+// fetch reads the instance. A nil state publishes it as the instance's own,
+// which is what the event listener does; a non-nil one is filled instead and
+// nothing shared is touched, so a poll cannot rewind what the listener stored.
+func (r *Instance) fetch(ctx context.Context, state *InstanceState) error {
 	conn, err := r.client.Connection()
 	if err != nil {
 		return err
@@ -420,19 +432,18 @@ func (r *Instance) fetch(ctx context.Context) error {
 		}
 	}
 
-	state, _, err := conn.GetInstanceState(ctx, r.incusName)
+	newState.IncusInstanceState, _, err = conn.GetInstanceState(ctx, r.incusName)
 	if err != nil {
 		return err
 	}
 
-	newState.IncusInstanceState = state
+	if state == nil {
+		r.state.Store(newState)
 
-	// Under the cond's lock: a waiter that has just evaluated its condition and
-	// not yet parked would otherwise miss the broadcast and wait out its timeout.
-	r.updated.L.Lock()
-	r.state.Store(newState)
-	r.updated.Broadcast()
-	r.updated.L.Unlock()
+		return nil
+	}
+
+	*state = *newState
 
 	return nil
 }
@@ -468,7 +479,7 @@ func (r *Instance) ensure(ctx context.Context, opts ...Option) (bool, error) {
 
 	// Try to get existing
 	// Check if exists
-	err := r.fetch(ctx)
+	err := r.fetch(ctx, nil)
 	if err == nil {
 		// Keys only: a changed value still needs --recreate.
 		if addErr := r.addMissingConfig(ctx); addErr != nil {
@@ -633,7 +644,7 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 	}
 
 	// Get instance to extract UID/GID
-	if err := r.fetch(ctx); err != nil {
+	if err := r.fetch(ctx, nil); err != nil {
 		return ErrCreate.WithText("fetching created instance").Wrap(err)
 	}
 
@@ -851,71 +862,58 @@ func (r *Instance) waitBusyOperation(ctx context.Context) error {
 	return nil
 }
 
-// See: https://pkg.go.dev/context#AfterFunc
-func waitOnCond(ctx context.Context, cond *sync.Cond, conditionMet func() bool) error {
-	cond.L.Lock()
-	defer cond.L.Unlock()
-
-	stopf := context.AfterFunc(ctx, func() {
-		// We need to acquire cond.L here to be sure that the Broadcast
-		// below won't occur before the call to Wait, which would result
-		// in a missed signal (and deadlock).
-		cond.L.Lock()
-		defer cond.L.Unlock()
-
-		// If multiple goroutines are waiting on cond simultaneously,
-		// we need to make sure we wake up exactly this one.
-		// That means that we need to Broadcast to all of the goroutines,
-		// which will wake them all up.
-		//
-		// If there are N concurrent calls to waitOnCond, each of the goroutines
-		// will spuriously wake up O(N) other goroutines that aren't ready yet,
-		// so this will cause the overall CPU cost to be O(N²).
-		cond.Broadcast()
-	})
-	defer stopf()
-
-	// Since the wakeups are using Broadcast instead of Signal, this call to
-	// Wait may unblock due to some other goroutine's context becoming done,
-	// so to be sure that ctx is actually done we need to check it in a loop.
-	for !conditionMet() {
-		cond.Wait()
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+// healthy reports whether s carries ic-healthd's healthy verdict.
+func healthy(s *InstanceState) bool {
+	// Nil until the first successful fetch, which may never land.
+	if s.IncusInstance == nil {
+		return false
 	}
 
-	return nil
+	return s.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy
 }
 
+// waitForHealthCheck blocks until ic-healthd reports the instance healthy, or
+// until ctx is done. The verdict arrives on the event listener, so the wait
+// itself costs no requests.
+//
+// Every read here is into a state of its own: the wait may be on somebody
+// else's instance (a dependency), and publishing a read taken before the
+// verdict would rewind it for every other waiter. The recheck is a backstop for
+// a verdict lost to a listener reconnect, not the mechanism.
 func (r *Instance) waitForHealthCheck(ctx context.Context) error {
-	err := r.fetch(ctx)
-	state := r.State()
+	state := &InstanceState{}
 
-	if err == nil && state.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy {
+	err := r.fetch(ctx, state)
+	if err == nil && healthy(state) {
 		r.client.LogDebug("Ready", "resource", r)
 
 		return nil
 	}
 
-	err = waitOnCond(
-		ctx,
-		r.updated,
-		func() bool {
-			// Nil until the first successful fetch, which may never land.
-			state := r.State()
-			if state.IncusInstance == nil {
-				return false
+	recheck := time.NewTimer(healthRecheckInterval)
+	defer recheck.Stop()
+
+	for {
+		if healthy(r.State()) {
+			r.client.LogDebug("Ready", "resource", r)
+
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-recheck.C:
+			if err := r.fetch(ctx, state); err == nil && healthy(state) {
+				r.client.LogDebug("Ready", "resource", r)
+
+				return nil
 			}
 
-			return state.IncusInstance.Config[HealthStatusKey] == HealthStatusHealthy
-		},
-	)
-	if err != nil {
-		return err
+			recheck.Reset(healthRecheckInterval)
+		case <-time.After(healthPollInterval):
+		}
 	}
-
-	return nil
 }
 
 // waitForDependencies blocks until all Config.Dependencies reach their required
@@ -987,7 +985,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 		}
 	}
 
-	err := r.fetch(ctx)
+	err := r.fetch(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1031,7 +1029,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 	}
 
 	// The wait may have let a concurrent start finish, re-check.
-	err = r.fetch(ctx)
+	err = r.fetch(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1055,7 +1053,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 		return ErrOperation.WithText("starting an instance").Wrap(err)
 	}
 
-	err = r.fetch(ctx)
+	err = r.fetch(ctx, nil)
 	if err != nil {
 		return ErrOperation.WithText("fetch after create").Wrap(err)
 	}
@@ -1400,7 +1398,7 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 	}
 
 	// The wait may have let a concurrent stop finish, re-check.
-	err = r.fetch(ctx)
+	err = r.fetch(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1430,7 +1428,7 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 		return err
 	}
 
-	return r.fetch(ctx)
+	return r.fetch(ctx, nil)
 }
 
 // SetHealthCheckingStopped writes the user.healthcheck.stopped marker, which
@@ -1443,7 +1441,7 @@ func (r *Instance) SetHealthCheckingStopped(ctx context.Context, stopped bool) e
 }
 
 func (r *Instance) setHealthCheckingStopped(ctx context.Context, stopped bool) error {
-	if err := r.fetch(ctx); err != nil {
+	if err := r.fetch(ctx, nil); err != nil {
 		return err
 	}
 
@@ -1473,7 +1471,7 @@ func (r *Instance) patchConfig(ctx context.Context, config map[string]string) er
 		return err
 	}
 
-	return r.fetch(ctx)
+	return r.fetch(ctx, nil)
 }
 
 // addMissingConfig adds declared config keys the instance does not have yet.
@@ -1570,7 +1568,7 @@ func (r *Instance) Log(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, ActionLog, r, options, err)
 	}
 
-	err = r.fetch(ctx)
+	err = r.fetch(ctx, nil)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionLog, r, options, err)
 	}

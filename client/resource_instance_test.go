@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/internal/testlib"
@@ -283,6 +285,60 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 
 	require.NoError(t, inst.waitForHealthCheck(waitCtx),
 		"the wait must be woken by the listener, which only reaches resources it knows about")
+}
+
+// TestFetchIntoAStateLeavesTheInstanceAlone pins the property the health wait
+// rests on: a fetch handed a state of its own publishes nothing, so a poll
+// cannot rewind a verdict another instance is waiting for.
+//
+// The client is deliberately never opened. Its event listener is the only other
+// thing allowed to replace the published state, and it would race the pointer
+// comparison below.
+func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+	ctx := t.Context()
+
+	gc, err := NewTestClient(t.Context())
+	require.NoError(t, err)
+
+	name := "fetch-isolation-" + strings.ToLower(RandString(12))
+	c, err := createProjectClient(gc, name)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+
+	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
+	require.NoError(t, err)
+	image, ok := imageResource.(*Image)
+	require.True(t, ok)
+
+	instRes, err := c.Resource(KindInstance, "web", &InstanceConfig{
+		Image:      image.Name(),
+		Extensions: map[string]string{HealthStatusKey: shared.HealthStatusStarting},
+	})
+	require.NoError(t, err)
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(image, inst)
+	require.NoError(t, stack.ForAction(ActionEnsure).Run(ctx, ActionEnsure, OptionCreate()))
+
+	require.NoError(t, inst.fetch(ctx, nil))
+	published := inst.State()
+	require.False(t, healthy(published), "it is not healthy before anyone reports")
+
+	conn, err := c.Connection()
+	require.NoError(t, err)
+	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(),
+		map[string]string{HealthStatusKey: HealthStatusHealthy}))
+
+	local := &InstanceState{}
+	require.NoError(t, inst.fetch(ctx, local))
+
+	assert.True(t, healthy(local), "the caller's own state sees the verdict")
+	assert.Same(t, published, inst.State(), "the instance's state was not replaced")
 }
 
 // TestInstanceStoppedLeavesTheStatusAlone pins the single-writer rule: a stop
