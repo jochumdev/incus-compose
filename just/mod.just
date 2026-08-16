@@ -17,12 +17,20 @@ push: pre-commit
     git push
 
 # List every module directory, one per line. The root, plus the nested
-# benchmarks, which `go list -m` does not see from here.
+# benchmarks, which `go list -m` does not see from here. A branch without the
+# benchmarks lists only the root: a directory with no go.mod is not a module.
 [doc("List every module directory, one per line")]
 modules:
-    @echo "{{ justfile_directory() }}"
-    @echo "{{ justfile_directory() }}/benchmarks/coredns/ecs_view"
-    @echo "{{ justfile_directory() }}/benchmarks/coredns/kubernetes"
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    echo "{{ justfile_directory() }}"
+
+    for m in benchmarks/coredns/ecs_view benchmarks/coredns/kubernetes; do
+        if [ -f "{{ justfile_directory() }}/$m/go.mod" ]; then
+            echo "{{ justfile_directory() }}/$m"
+        fi
+    done
 
 # Dependency direction, which module edges used to make visible and no longer
 # do. One module means an upward import is just an import, so it is checked
@@ -44,6 +52,11 @@ modules:
 # A package that does not exist is a failure, not a pass. The rule above used to
 # name coredns/plugin/ecs_view, and when that moved the check went quietly
 # vacuous - which is exactly the thing a check is for.
+#
+# A tree the branch simply does not carry yet is the one exception, and it is
+# announced rather than passed over in silence. The gate is the top directory,
+# so a package moving *within* a tree that is present still fails: only dropping
+# the whole tree skips its rule.
 [doc("Check the dependency direction between packages")]
 boundary:
     #!/usr/bin/env bash
@@ -70,11 +83,26 @@ boundary:
         fi
     }
 
-    check ./ievent/dns/ecs_view \
-        '^github.com/lxc/incus(-compose/(client|iclient|shared|incustrust|internal/testlib|ievent))?(/|$)' \
-        'Incus, iclient or the rest of ievent'
+    # Gated on the tree, not on the package: within an ievent/ that is here, a
+    # moved ecs_view still has to resolve.
+    if [ -d ./ievent ]; then
+        check ./ievent/dns/ecs_view \
+            '^github.com/lxc/incus(-compose/(client|iclient|shared|incustrust|internal/testlib|ievent))?(/|$)' \
+            'Incus, iclient or the rest of ievent'
+    else
+        echo "==> ievent/ is not on this branch, skipping its rule"
+    fi
 
     for dir in ./client/... ./iclient/... ./shared/... ./incustrust/... ./internal/testlib/...; do
+        # The first segment, so a package missing inside a tree that is here
+        # reaches check() and fails there.
+        tree="${dir#./}"
+        tree="${tree%%/*}"
+        if [ ! -d "./$tree" ]; then
+            echo "==> $tree/ is not on this branch, skipping its rule"
+            continue
+        fi
+
         check "$dir" \
             '^github.com/lxc/incus-compose/(coredns|cmd|ievent|benchmarks)(/|$)' \
             'anything that consumes it'
