@@ -65,6 +65,8 @@ jobs:
       INCUS_REMOTE: ${{ matrix.remote }}
       INCUS_COMPOSE_IMAGE_CACHE: incus-compose-tests-cache
       VERSION: "${{ github.sha }}"
+      # testlib builds the CLI with -cover and points the subprocess here.
+      INCUS_COMPOSE_TEST_COVERDIR: ${{ github.workspace }}/reports/covdata
 
       NO_COLOR: 1
       INCUS_COMPOSE_UP_DEPENDENCY_TIMEOUT: "5m"
@@ -105,13 +107,16 @@ jobs:
 
       - name: Test
         run: |
+          mkdir -p "$INCUS_COMPOSE_TEST_COVERDIR"
+
           gotestsum \
             --packages="./..." \
             --junitfile="$REPORTS_DIR/junit.xml" \
             --jsonfile="$REPORTS_DIR/test.json" \
             --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num=10 --jsonfile=$REPORTS_DIR/test.json'" \
             -- -count=1 -parallel "$TEST_PROCS" \
-            -covermode=atomic -coverprofile="$REPORTS_DIR/cover.out" -v 2>&1
+            -cover -covermode=atomic -v \
+            -args -test.gocoverdir="$INCUS_COMPOSE_TEST_COVERDIR" 2>&1
 
       - name: Publish test results
         if: always()
@@ -121,3 +126,17 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/junit.xml
           reporter: java-junit
           fail-on-error: false
+
+      # always(), or a failing suite reports no coverage at all.
+      - name: Publish coverage
+        if: always()
+        run: |
+          go tool covdata textfmt -i="$INCUS_COMPOSE_TEST_COVERDIR" -o "$REPORTS_DIR/cover.out"
+
+          {
+            echo '# Coverage'
+            echo
+            echo '```'
+            just cover "$REPORTS_DIR/cover.out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -65,15 +65,14 @@ cover profile="":
     echo
 
     # A package is "tested" when it ships test files, which is what the old
-    # -coverprofile run measured.
-    tested=$(go list -f '{{ "{{" }} if or .TestGoFiles .XTestGoFiles {{ "}}" }}{{ "{{" }} .ImportPath {{ "}}" }}{{ "{{" }} end {{ "}}" }}' ./... | grep -v '^$')
+    # -coverprofile run measured. Through the environment, not -v: the list has
+    # newlines in it, which POSIX awk rejects in a -v value.
+    export TESTED
+    TESTED=$(go list -f '{{ "{{" }} if or .TestGoFiles .XTestGoFiles {{ "}}" }}{{ "{{" }} .ImportPath {{ "}}" }}{{ "{{" }} end {{ "}}" }}' ./... | grep -v '^$')
 
-    awk -v tested="${tested}" '
-      BEGIN {
-        split(tested, t, "\n")
-        for (i in t) istested[t[i]] = 1
-        printf "%-52s %7s %9s %9s\n", "PACKAGE", "STMTS", "COVERED", "PERCENT"
-      }
+    # Sorted by sort, not in awk: asorti is a gawk extension and the CI runner
+    # has mawk.
+    rows=$(awk '
       NR == 1 { next }
       {
         split($1, at, ":")
@@ -83,18 +82,27 @@ cover profile="":
         if ($3 > 0) covered[pkg] += $2
       }
       END {
-        n = asorti(stmts, order)
-        for (i = 1; i <= n; i++) {
-          pkg = order[i]
-          pct = stmts[pkg] ? 100 * covered[pkg] / stmts[pkg] : 0
-          printf "%-52s %7d %9d %8.1f%%\n", pkg, stmts[pkg], covered[pkg], pct
-          total += stmts[pkg]; totalCovered += covered[pkg]
-          if (istested[pkg]) { tstmt += stmts[pkg]; tcov += covered[pkg] }
-        }
+        for (pkg in stmts) printf "%s %d %d\n", pkg, stmts[pkg], covered[pkg]
+      }
+    ' "${profile}" | sort)
+
+    printf '%-52s %7s %9s %9s\n' PACKAGE STMTS COVERED PERCENT
+
+    echo "${rows}" | awk '
+      BEGIN {
+        split(ENVIRON["TESTED"], t, "\n")
+        for (i in t) istested[t[i]] = 1
+      }
+      {
+        printf "%-52s %7d %9d %8.1f%%\n", $1, $2, $3, $2 ? 100 * $3 / $2 : 0
+        total += $2; totalCovered += $3
+        if (istested[$1]) { tstmt += $2; tcov += $3 }
+      }
+      END {
         printf "\n%-52s %7d %9d %8.1f%%\n", "TESTED", tstmt, tcov, tstmt ? 100 * tcov / tstmt : 0
         printf "%-52s %7d %9d %8.1f%%\n", "TOTAL", total, totalCovered, total ? 100 * totalCovered / total : 0
       }
-    ' "${profile}"
+    '
 
 # Run local unit-tests, incus-facing tests are skipped.
 [env("INCUS_COMPOSE_TEST_LOCAL", "1")]
