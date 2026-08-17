@@ -143,7 +143,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "volume-ensure-")
+			c := newRandomTestClient(t, "volume-ensure-")
 
 			r, err := c.Resource(KindStorageVolume, tt.volume, tt.config)
 			require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestStorageVolumeEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-idempotent-")
+	c := newRandomTestClient(t, "volume-idempotent-")
 
 	r, err := c.Resource(KindStorageVolume, "test-idempotent", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestStorageVolumeEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-retry-")
+	c := newRandomTestClient(t, "volume-retry-")
 
 	r, err := c.Resource(KindStorageVolume, "test-retry", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-shifted-")
+	c := newRandomTestClient(t, "volume-shifted-")
 
 	r, err := c.Resource(KindStorageVolume, "test-shifted", &StorageVolumeConfig{
 		Shifted: true,
@@ -218,7 +218,7 @@ func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-healthd-")
+	c := newRandomTestClient(t, "volume-healthd-")
 
 	ir, err := c.Resource(KindImage, "ghcr.io/lxc/incus-compose/ic-healthd:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -244,7 +244,7 @@ func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-persist-")
+	c := newRandomTestClient(t, "volume-persist-")
 
 	r, err := c.Resource(KindStorageVolume, "test-persist", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func TestStorageVolumeDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "volume-delete-")
+			c := newRandomTestClient(t, "volume-delete-")
 
 			r, err := c.Resource(KindStorageVolume, "test-delete", &StorageVolumeConfig{})
 			require.NoError(t, err)
@@ -420,7 +420,7 @@ func TestStorageVolumeHooks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "volume-hook-")
+			c := newRandomTestClient(t, "volume-hook-")
 			tt.run(t, c)
 		})
 	}
@@ -431,7 +431,7 @@ func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
 	ctx := t.Context()
 
 	// One project, one volume name, so every worker races to create it.
-	c := newRandomTestClient(ctx, t, "volume-race-")
+	c := newRandomTestClient(t, "volume-race-")
 	name := "ic-vol-" + strings.ToLower(RandString(6))
 
 	const workers = 6

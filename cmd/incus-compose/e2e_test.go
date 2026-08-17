@@ -34,9 +34,7 @@ func TestE2EUpNoDeps(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd", "--no-deps", "frontend")
 	require.NoError(t, err)
@@ -71,9 +69,7 @@ func TestE2EConfigOverwritesImageFile(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -99,9 +95,7 @@ func TestE2EEntrypointReplacesImageEntrypoint(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach",
 		"--no-start", "--no-healthd", "--no-deps", "backend1")
@@ -133,9 +127,7 @@ func TestE2EUpDeps(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "frontend")
 	require.NoError(t, err)
@@ -166,9 +158,7 @@ func TestE2EDownNoDeps(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -202,9 +192,7 @@ func TestE2EDownDeps(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -239,9 +227,7 @@ func TestE2EPsDeps(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -277,9 +263,7 @@ func TestE2EStartStopRestartWithDeps(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -326,9 +310,7 @@ func TestE2EUpUp(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -353,9 +335,7 @@ func TestE2EDownDown(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -389,8 +369,13 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 
 	cleaned := false
 	t.Cleanup(func() {
-		if !cleaned {
-			_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if cleaned {
+			return
+		}
+
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
 		}
 	})
 
@@ -427,9 +412,7 @@ func TestE2EUpRecreate(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -454,9 +437,7 @@ func TestE2EUpUpRecreate(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -489,9 +470,7 @@ func TestE2EUpRecreateDown(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -524,9 +503,7 @@ func TestE2ELifecycleSimple(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -588,9 +565,7 @@ func TestE2EUpDownScale(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "scale", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -615,9 +590,7 @@ func TestE2EUpDownDownscale(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "scale", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -642,9 +615,7 @@ func TestE2EUpDownWithScale(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "scale", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -672,9 +643,7 @@ func TestE2EListSnapshots(t *testing.T) {
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -710,9 +679,7 @@ func TestE2EExternalNetwork(t *testing.T) {
 		t.Skipf("No incusbr0: %v", err)
 	}
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -737,9 +704,7 @@ func TestE2EUpDownWithIncusOptions(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-incus-options", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -764,9 +729,7 @@ func TestE2EUpDownWithProjectOptions(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-project-options", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -791,9 +754,7 @@ func TestE2EUpDownWithSecrets(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-secrets", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -818,9 +779,7 @@ func TestE2EUpDownWithSecretsVerifyFiles(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-secrets", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -859,9 +818,7 @@ func TestE2EUpDownWithConfigs(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-configs", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -886,9 +843,7 @@ func TestE2EUpDownWithConfigsVerifyFiles(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-configs", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -927,9 +882,7 @@ func TestE2EDownImages(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -962,9 +915,7 @@ func TestE2EUpDownWithVolume(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-volume", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -992,9 +943,7 @@ func TestE2EUpReconcilesToReplicas(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "downscale", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	// Baseline: deploy.replicas=3.
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")

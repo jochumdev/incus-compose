@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"maps"
 	"os"
@@ -28,9 +27,7 @@ func TestE2ECommandReplacesImageCmd(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-command", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -63,9 +60,7 @@ func TestE2EImageCarriesTheOCISplit(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-command", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull")
 	require.NoError(t, err)
@@ -106,10 +101,8 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	seed := t.Name() + "Seed"
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, seed, "", nil, "-f", compose, "down", "--project")
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, seed, "-f", compose, "down", "--project")
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	// pull is PullAlways, so this leaves a current entry to age by hand.
 	_, err := testlib.RunCompose(ctx, t, seed, "", nil, "-f", compose, "pull")

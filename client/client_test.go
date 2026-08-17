@@ -17,11 +17,35 @@ func TestMain(m *testing.M) {
 	os.Exit(testlib.Main(m))
 }
 
+// testContext returns a context outliving the test, unlike t.Context() which is
+// canceled before t.Cleanup runs and leaves teardown without a connection.
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	return ctx
+}
+
+// deleteProjectOnCleanup deletes the project on teardown and fails the test if Incus refuses.
+func deleteProjectOnCleanup(t *testing.T, gc *GlobalClient, name string) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		err := gc.DeleteProject(name, true)
+		if err != nil {
+			t.Errorf("deleting project %s: %v", name, err)
+		}
+	})
+}
+
 // newRandomTestClient creates a GlobalClient, a fresh project-scoped Client,
 // and registers t.Cleanup to delete the project on teardown.
-func newRandomTestClient(_ context.Context, t *testing.T, prefix string) *Client {
+func newRandomTestClient(t *testing.T, prefix string) *Client {
 	t.Helper()
-	gc, err := NewTestClient(t.Context())
+
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := prefix + strings.ToLower(RandString(12))
 
@@ -31,10 +55,15 @@ func newRandomTestClient(_ context.Context, t *testing.T, prefix string) *Client
 	err = c.Open()
 	require.NoError(t, err)
 
+	deleteProjectOnCleanup(t, gc, name)
+
 	t.Cleanup(func() {
-		_ = c.Done()
-		_ = gc.DeleteProject(name, true)
+		err := c.Done()
+		if err != nil {
+			t.Errorf("closing client for project %s: %v", name, err)
+		}
 	})
+
 	return c
 }
 
@@ -141,7 +170,7 @@ func TestClientConnection_IsConnected(t *testing.T) {
 func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	ctx := t.Context()
+	ctx := testContext(t)
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
 
@@ -150,7 +179,7 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	require.Equal(t, "default", gInfo.Project)
 
 	name := "client-gcdef-" + strings.ToLower(RandString(8))
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
 	require.NoError(t, err)
@@ -183,11 +212,10 @@ func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 func TestClientProject_EnsureWithCreate(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	ctx := t.Context()
-	gc, err := NewTestClient(ctx)
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := "client-ensure-" + strings.ToLower(RandString(8))
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
 	require.NoError(t, err)
@@ -209,11 +237,10 @@ func TestClientProject_EnsureWithoutCreate_Fails(t *testing.T) {
 func TestClientProject_NameIsPreserved(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	ctx := t.Context()
-	gc, err := NewTestClient(ctx)
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := "client-name-" + strings.ToLower(RandString(8))
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
 	require.NoError(t, err)
@@ -223,14 +250,13 @@ func TestClientProject_NameIsPreserved(t *testing.T) {
 func TestClientProject_NameIsSanitized(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	ctx := t.Context()
-	gc, err := NewTestClient(ctx)
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 
 	name := "Test Project_123"
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	require.Equal(t, name, project.Project())
 	require.Equal(t, "test-project-123", project.IncusProject())
@@ -239,11 +265,10 @@ func TestClientProject_NameIsSanitized(t *testing.T) {
 func TestClientProject_EnsureIdempotent(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	ctx := t.Context()
-	gc, err := NewTestClient(ctx)
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := "client-idem-" + strings.ToLower(RandString(8))
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	project1, err := gc.EnsureProject(name, EnsureProjectWithCreate())
 	require.NoError(t, err)
@@ -264,6 +289,24 @@ func TestClientProject_DeleteSucceeds(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, gc.DeleteProject(name, true))
+}
+
+func TestClientProject_HelperCleanupDeletesProject(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	gc, err := NewTestClient(t.Context())
+	require.NoError(t, err)
+
+	var name string
+
+	t.Run("project created by the helper", func(t *testing.T) {
+		name = newRandomTestClient(t, "cleanup-leak-").project
+		require.NotEmpty(t, name)
+	})
+
+	_, err = gc.EnsureProject(name)
+	require.ErrorIs(t, err, ErrNotFound, "project %s survived the helper's cleanup", name)
 }
 
 func TestClientProject_DeleteNonExistent_NoError(t *testing.T) {

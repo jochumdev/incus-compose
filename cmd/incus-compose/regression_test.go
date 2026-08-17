@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,9 +19,7 @@ func TestNoDanglingNetworksAfterDown(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -54,9 +51,7 @@ func TestE2EStartStopIdempotent(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -97,9 +92,7 @@ func TestE2ENoImageCache(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--image-cache", "")
 	require.NoError(t, err)

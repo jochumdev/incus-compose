@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -23,9 +22,7 @@ func TestE2ENATProxy(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-ports", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -73,9 +70,7 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 	})
 	compose := filepath.Join(dir, "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -128,9 +123,7 @@ networks:
 	})
 	compose := filepath.Join(dir, "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)

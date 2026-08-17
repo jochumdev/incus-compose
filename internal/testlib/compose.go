@@ -25,6 +25,18 @@ func KeepTestData() bool {
 	return keep
 }
 
+// CleanupCompose runs incus-compose on teardown and fails the test when it errors.
+func CleanupCompose(t *testing.T, project string, args ...string) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		_, err := RunCompose(context.Background(), t, project, "", nil, args...)
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", project, err)
+		}
+	})
+}
+
 // RunCompose runs incus-compose as a subprocess. An empty dir leaves
 // --project-directory off, and a non-empty env implies --os-env.
 func RunCompose(ctx context.Context, t *testing.T, project, dir string, env []string, args ...string) (string, error) {

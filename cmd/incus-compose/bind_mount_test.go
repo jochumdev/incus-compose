@@ -28,9 +28,7 @@ func TestBindMounts(t *testing.T) {
 
 	skipNotSameHost(t, gc)
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -81,9 +79,7 @@ func TestSeededBindMounts(t *testing.T) {
 		t.Skip(err.Error())
 	}
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -116,9 +112,7 @@ func TestBindMountNoShift(t *testing.T) {
 
 	skipNotSameHost(t, gc)
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)

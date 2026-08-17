@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -151,9 +150,7 @@ func TestNoHealthdSkipsHealthdInstance(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-restart", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd")
 	require.NoError(t, err)
@@ -183,9 +180,7 @@ func TestNoHealthdWhenNotNeeded(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)

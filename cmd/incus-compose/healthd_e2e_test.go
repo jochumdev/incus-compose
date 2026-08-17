@@ -61,9 +61,7 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", healthdScopeCompose(t), "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
 	require.NoError(t, err)
@@ -132,7 +130,11 @@ services:
 	t.Cleanup(func() {
 		// Before the project, or the daemon still holds a NIC on hnet.
 		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-P", noProject, "healthd", "down", "--force")
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
 	})
 
 	// The first project to create the daemon supplies its settings, so this only
@@ -164,9 +166,7 @@ func TestE2EHealthdProjectScope(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", healthdScopeCompose(t), "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach", "--healthd-scope", "project")
 	require.NoError(t, err)
@@ -192,10 +192,8 @@ func TestE2EHealthdCoexistence(t *testing.T) {
 	globalPN := t.Name() + "-global"
 	projectPN := t.Name() + "-project"
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, globalPN, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-		_, _ = testlib.RunCompose(context.Background(), t, projectPN, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-	})
+	testlib.CleanupCompose(t, globalPN, "-f", healthdScopeCompose(t), "down", "--project")
+	testlib.CleanupCompose(t, projectPN, "-f", healthdScopeCompose(t), "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, globalPN, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
 	require.NoError(t, err)
@@ -306,10 +304,8 @@ func TestE2EHealthdDownNeedsForce(t *testing.T) {
 	one := t.Name() + "-one"
 	two := t.Name() + "-two"
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, one, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-		_, _ = testlib.RunCompose(context.Background(), t, two, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-	})
+	testlib.CleanupCompose(t, one, "-f", healthdScopeCompose(t), "down", "--project")
+	testlib.CleanupCompose(t, two, "-f", healthdScopeCompose(t), "down", "--project")
 
 	for _, pn := range []string{one, two} {
 		_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach")
@@ -345,9 +341,7 @@ func TestE2EHealthdMigratesToGlobal(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", healthdScopeCompose(t), "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", healthdScopeCompose(t), "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "up", "--detach", "--healthd-scope", "project")
 	require.NoError(t, err)

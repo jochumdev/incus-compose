@@ -139,7 +139,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "ensure-addmissing-")
+	c := newRandomTestClient(t, "ensure-addmissing-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "patch-config-")
+	c := newRandomTestClient(t, "patch-config-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "clone-events-")
+	c := newRandomTestClient(t, "clone-events-")
 
 	// A phase of restart: its own hooks and its own resources.
 	rc := c.Clone()
@@ -304,14 +304,14 @@ func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
 
-	gc, err := NewTestClient(t.Context())
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 
 	name := "fetch-isolation-" + strings.ToLower(RandString(12))
 	c, err := createProjectClient(gc, name)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -352,7 +352,7 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "stopped-status-")
+	c := newRandomTestClient(t, "stopped-status-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -405,7 +405,7 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "nohealthd-status-")
+	c := newRandomTestClient(t, "nohealthd-status-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)

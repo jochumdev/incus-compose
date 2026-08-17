@@ -217,7 +217,7 @@ func TestImageEnsure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "image-ensure-")
+			c := newRandomTestClient(t, "image-ensure-")
 
 			r, err := c.Resource(KindImage, tt.image, &ImageConfig{})
 			require.NoError(t, err)
@@ -255,7 +255,7 @@ func TestImageEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-idempotent-")
+	c := newRandomTestClient(t, "image-idempotent-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -271,7 +271,7 @@ func TestImageEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-retry-")
+	c := newRandomTestClient(t, "image-retry-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestImageEnsure_ExistingImage_NewResource(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-existing-")
+	c := newRandomTestClient(t, "image-existing-")
 
 	r1, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -311,7 +311,7 @@ func TestImageEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-persist-")
+	c := newRandomTestClient(t, "image-persist-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -352,7 +352,7 @@ func TestImageDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "image-delete-")
+			c := newRandomTestClient(t, "image-delete-")
 
 			r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
 			require.NoError(t, err)
@@ -376,7 +376,7 @@ func TestImageDelete_NotEnsured_NoError(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-delne-")
+	c := newRandomTestClient(t, "image-delne-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -392,7 +392,7 @@ func TestImageProperties(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-props-")
+	c := newRandomTestClient(t, "image-props-")
 
 	r, err := c.Resource(KindImage, "ghcr.io/lxc/incus-compose/ic-healthd:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -411,7 +411,7 @@ func TestImageFromCache(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-from-cache-")
+	c := newRandomTestClient(t, "image-from-cache-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/alpine:3.21", &ImageConfig{})
 	require.NoError(t, err)
@@ -434,7 +434,7 @@ func TestImagePullNever_StoreHit(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-pull-never-hit-")
+	c := newRandomTestClient(t, "image-pull-never-hit-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/alpine:3.21", &ImageConfig{})
 	require.NoError(t, err)
@@ -455,7 +455,7 @@ func TestImagePullNever_StoreMiss(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-pull-never-miss-")
+	c := newRandomTestClient(t, "image-pull-never-miss-")
 
 	// A name the shared test cache cannot already hold; never is expected to
 	// fail without contacting the registry at all.
@@ -473,14 +473,14 @@ func TestImageBuild_StoreHitSkipsBuilder(t *testing.T) {
 	ctx := t.Context()
 
 	// Seed the cache under the alias the build would produce.
-	seed := newRandomTestClient(ctx, t, "image-build-seed-")
+	seed := newRandomTestClient(t, "image-build-seed-")
 	r, err := seed.Resource(KindImage, "docker.io/library/alpine:3.20", &ImageConfig{})
 	require.NoError(t, err)
 	require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate()))
 
 	// Another project wanting the same alias must copy from the cache. The
 	// context does not exist, so invoking the builder would fail.
-	c := newRandomTestClient(ctx, t, "image-build-cachehit-")
+	c := newRandomTestClient(t, "image-build-cachehit-")
 	b, err := c.Resource(KindImage, "docker.io/library/alpine:3.20", &ImageConfig{
 		Build: &BuildConfig{Context: "/nonexistent-build-context"},
 	})
@@ -509,8 +509,8 @@ func TestImageLockStore_SameAliasSerializes(t *testing.T) {
 	ctx := t.Context()
 
 	name := "docker.io/library/ic-lock-" + strings.ToLower(RandString(8)) + ":latest"
-	a := lockableImage(t, newRandomTestClient(ctx, t, "image-lock-same-a-"), name)
-	b := lockableImage(t, newRandomTestClient(ctx, t, "image-lock-same-b-"), name)
+	a := lockableImage(t, newRandomTestClient(t, "image-lock-same-a-"), name)
+	b := lockableImage(t, newRandomTestClient(t, "image-lock-same-b-"), name)
 
 	release, err := a.lockStore(ctx)
 	require.NoError(t, err)
@@ -549,8 +549,8 @@ func TestImageLockStore_DifferentAliasesDoNotBlock(t *testing.T) {
 	ctx := t.Context()
 
 	suffix := strings.ToLower(RandString(8))
-	a := lockableImage(t, newRandomTestClient(ctx, t, "image-lock-diff-a-"), "docker.io/library/ic-locka-"+suffix+":latest")
-	b := lockableImage(t, newRandomTestClient(ctx, t, "image-lock-diff-b-"), "docker.io/library/ic-lockb-"+suffix+":latest")
+	a := lockableImage(t, newRandomTestClient(t, "image-lock-diff-a-"), "docker.io/library/ic-locka-"+suffix+":latest")
+	b := lockableImage(t, newRandomTestClient(t, "image-lock-diff-b-"), "docker.io/library/ic-lockb-"+suffix+":latest")
 
 	release, err := a.lockStore(ctx)
 	require.NoError(t, err)
@@ -580,7 +580,7 @@ func TestImageEnsure_ConcurrentSameImage(t *testing.T) {
 	const workers = 4
 	images := make([]*Image, workers)
 	for i := range images {
-		c := newRandomTestClient(ctx, t, "image-concurrent-same-")
+		c := newRandomTestClient(t, "image-concurrent-same-")
 		r, err := c.Resource(KindImage, "docker.io/library/alpine:3.21", &ImageConfig{})
 		require.NoError(t, err)
 
@@ -621,7 +621,7 @@ func TestImageEnsure_ConcurrentDifferentImages(t *testing.T) {
 
 	images := make([]*Image, len(names))
 	for i, name := range names {
-		c := newRandomTestClient(ctx, t, "image-concurrent-diff-")
+		c := newRandomTestClient(t, "image-concurrent-diff-")
 		r, err := c.Resource(KindImage, name, &ImageConfig{})
 		require.NoError(t, err)
 
@@ -656,7 +656,7 @@ func TestImageEnsure_ConcurrentDifferentImages(t *testing.T) {
 func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-cache-pruned-")
+	c := newRandomTestClient(t, "image-cache-pruned-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/busybox:1.33", &ImageConfig{})
 	require.NoError(t, err)
@@ -691,7 +691,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 func TestImagePullNever_NoCacheStoreMiss(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-never-nocache-")
+	c := newRandomTestClient(t, "image-never-nocache-")
 	c.imageCache = nil
 
 	r, err := c.Resource(KindImage, "docker.io/library/alpine:3.21", &ImageConfig{})
@@ -705,7 +705,7 @@ func TestImagePullNever_NoCacheStoreMiss(t *testing.T) {
 func TestImageCreateDirect_NoSource(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-nosource-")
+	c := newRandomTestClient(t, "image-nosource-")
 	c.imageCache = nil
 
 	img := lockableImage(t, c, "docker.io/library/alpine:3.21")
@@ -718,7 +718,7 @@ func TestImageCreateDirect_NoSource(t *testing.T) {
 func TestImageLockStore_NoCacheIsNoop(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-lock-nocache-")
+	c := newRandomTestClient(t, "image-lock-nocache-")
 	c.imageCache = nil
 
 	img := lockableImage(t, c, "docker.io/library/alpine:3.21")
@@ -736,9 +736,9 @@ func TestImageLockStore_CustomVolumeIsSeparate(t *testing.T) {
 
 	name := "docker.io/library/ic-lockvol-" + strings.ToLower(RandString(8)) + ":latest"
 
-	def := lockableImage(t, newRandomTestClient(ctx, t, "image-lockvol-def-"), name)
+	def := lockableImage(t, newRandomTestClient(t, "image-lockvol-def-"), name)
 
-	other, err := newRandomTestClient(ctx, t, "image-lockvol-alt-").Resource(KindImage, name, &ImageConfig{
+	other, err := newRandomTestClient(t, "image-lockvol-alt-").Resource(KindImage, name, &ImageConfig{
 		LockVolume: "ic-lock-" + strings.ToLower(RandString(6)),
 	})
 	require.NoError(t, err)
@@ -782,7 +782,7 @@ func TestImageLockStore_ConcurrentVolumeCreate(t *testing.T) {
 	const workers = 6
 	images := make([]*Image, workers)
 	for i := range images {
-		c := newRandomTestClient(ctx, t, "image-lockvol-race-")
+		c := newRandomTestClient(t, "image-lockvol-race-")
 		r, err := c.Resource(KindImage, fmt.Sprintf("docker.io/library/ic-race%d-%s:latest", i, suffix), &ImageConfig{
 			LockVolume: volume,
 		})
@@ -824,7 +824,7 @@ func TestImageLockStore_ConcurrentVolumeCreate(t *testing.T) {
 func TestImageBuild_NeverErrors(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-build-never-")
+	c := newRandomTestClient(t, "image-build-never-")
 
 	r, err := c.Resource(KindImage, "localhost/ic-build-never-"+strings.ToLower(RandString(8))+":latest", &ImageConfig{
 		Build: &BuildConfig{Context: "/nonexistent-build-context"},
@@ -839,7 +839,7 @@ func TestImageBuild_NeverErrors(t *testing.T) {
 func TestImageBuild_WithoutCreateDoesNotBuild(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-build-nocreate-")
+	c := newRandomTestClient(t, "image-build-nocreate-")
 
 	// The context does not exist, so a build attempt would fail differently.
 	r, err := c.Resource(KindImage, "localhost/ic-build-nocreate-"+strings.ToLower(RandString(8))+":latest", &ImageConfig{
@@ -857,14 +857,14 @@ func TestImageBuild_ForceIgnoresStoreHit(t *testing.T) {
 	ctx := t.Context()
 
 	// Seed the cache under the alias a build would produce.
-	seed := newRandomTestClient(ctx, t, "image-build-force-seed-")
+	seed := newRandomTestClient(t, "image-build-force-seed-")
 	s, err := seed.Resource(KindImage, "docker.io/library/alpine:3.20", &ImageConfig{})
 	require.NoError(t, err)
 	require.NoError(t, RunAction(ctx, s, ActionEnsure, OptionCreate()))
 
 	// BuildForce must reach the builder despite the store hit, and the
 	// context does not exist, so it has to fail.
-	c := newRandomTestClient(ctx, t, "image-build-force-")
+	c := newRandomTestClient(t, "image-build-force-")
 	b, err := c.Resource(KindImage, "docker.io/library/alpine:3.20", &ImageConfig{
 		Build: &BuildConfig{Context: "/nonexistent-build-context"},
 	})
@@ -879,7 +879,7 @@ func TestImageNoCache(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "image-no-cache-")
+	c := newRandomTestClient(t, "image-no-cache-")
 	c.imageCache = nil
 
 	r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
@@ -891,7 +891,7 @@ func TestImageNoCache(t *testing.T) {
 func TestImagePullDeletes(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "image-pull-delete-")
+	c := newRandomTestClient(t, "image-pull-delete-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/alpine:3.22", &ImageConfig{})
 	require.NoError(t, err)
@@ -1030,7 +1030,7 @@ func TestImageHooks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "image-hook-")
+			c := newRandomTestClient(t, "image-hook-")
 			tt.run(t, c)
 		})
 	}
