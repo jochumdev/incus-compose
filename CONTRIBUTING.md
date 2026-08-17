@@ -6,19 +6,35 @@ This project is destined for the **lxc** org. The org-wide contributing
 policy ([lxc/incus CONTRIBUTING](https://github.com/lxc/incus/blob/main/CONTRIBUTING.md)) applies in full,
 including:
 
-- **License**: Apache 2.0, no copyright assignment.
-- **DCO**: Every commit must carry a `Signed-off-by` line (`git commit -s`).
+- **License**: Apache 2.0, no copyright assignment. Contributions cannot include
+  code licensed under the GPL, AGPL or LGPL.
+- **DCO**: Every commit that lands carries a `Signed-off-by` line
+  (`git commit -s`), and only a human may sign it. Work done in a maintainer's
+  worktree is committed without any trailer; the maintainer signs it on the
+  rebase.
 - **AI tooling**: See the org policy. Contributors must fully own their
   work. AI tools cannot be credited. See also [AGENTS.md](AGENTS.md).
 
 ## Philosophy
 
-**KISS** - Keep It Simple, Stupid. As well as "boring" code. These are the guiding principles for all work.
+**KISS** - Keep It Simple, Stupid - and **boring** code. These are the guiding
+principles for all work, and the two most common reasons a change is sent back.
 
-- Prefer shallow package structure over deep nesting
-- Direct code over abstractions
-- Working software over perfect architecture
-- Simple solutions over clever ones
+**KISS** is about the solution: solve the problem in front of you, at the size it
+actually has. Not the general case, not the one you expect next quarter. A
+shallow package structure, direct code, working software over perfect
+architecture.
+
+**Boring** is about the reader: the next person should be able to guess how it
+works before reading it. A plain loop over a clever pipeline, the standard
+library over a dependency, the obvious name over the precise one, the pattern
+already used three times in this repo over a better one used zero times. Code is
+read far more often than it is written, and "boring" is what makes a diff cheap
+to review at 23:00.
+
+Neither is an excuse for a broken design. When they collide with correctness,
+correctness wins - but say so, rather than quietly building the clever thing.
+
 - No non-ASCII characters in code and docs
 
 ## Working with Go code
@@ -27,7 +43,12 @@ Follow the [Go proverbs](https://go-proverbs.github.io/).
 
 ## Architecture and design rules
 
-Its core design principles are documented in [docs/architecture.md](docs/architecture.md).
+Its core design principles are documented in
+[docs/root/architecture/index.md](docs/root/architecture/index.md).
+
+Read the documentation in your own checkout, not the published site: `docs/` is
+a submodule, and a feature branch may carry a version of it that the site does
+not have yet.
 
 Before contributing, you **must** read and understand this document.
 It defines non-negotiable boundaries, including:
@@ -44,15 +65,17 @@ feature completeness or test coverage.
 
 ```
 incus-compose/
-├── cmd/incus-compose/    # CLI entry point
-|-- cmd/ic-healthd/       # Sidecar
-├── client/               # High-level Incus client wrapper
-├── iclient/              # Incus API client, a fork of the upstream one
-├── shared/               # Code both binaries use
-|-- examples/             # Example projects
-├── project/              # Compose project loading and service translation
-├── docs/                 # User-facing documentation
-└── test/                 # Tests and fixtures
+  cmd/incus-compose/    # CLI entry point
+  cmd/ic-healthd/       # Sidecar
+  client/               # High-level Incus client wrapper
+  iclient/              # Incus API client, a fork of the upstream one
+  shared/               # Code both binaries use
+  internal/             # Helpers no consumer may import
+  project/              # Compose project loading and service translation
+  examples/             # Example projects
+  docs/                 # User-facing documentation (submodule)
+  test/                 # Tests and fixtures
+  just/                 # justfile modules
 ```
 
 **Package Guidelines**:
@@ -63,27 +86,44 @@ incus-compose/
 - `iclient/` - The Incus REST API, forked from `lxc/incus/client` because that
   one cannot be used from several goroutines. Everything reaches Incus through
   it; nothing else may import the upstream client
-- `shared/` - Code both binaries use; changing it or `iclient/` means the
-  sidecar image needs rebuilding (see [AGENTS.md](AGENTS.md))
+- `shared/` - Code both binaries use
+- `internal/` - Helpers that must stay ours, such as `internal/testlib`
 - `examples/` - Example projects ready to use with incus-compose
 - `project/` - Compose-spec loading via compose-go, service-to-instance translation
 - Root package - No code at root level (all in packages)
 
-**Don't create**:
-
-- Deep nesting like `pkg/application/container/`
-- Abstraction layers "for future flexibility"
+**Don't create**: deep nesting like `pkg/application/container/`, or abstraction
+layers "for future flexibility".
 
 ## Build and Test Commands
 
-See [testing on docs.incus-compose.org](https://docs.incus-compose.org/architecture/testing) for the complete command reference and testing patterns.
-
-Quick start:
+Everything runs through `just`; use it instead of raw `go`. `just --list` shows
+all of them, and
+[docs/root/architecture/testing.md](docs/root/architecture/testing.md) documents
+each in full, along with fixtures, coverage and the environment they need.
 
 ```bash
-just --list       # Show all available commands
-just pre-commit   # Run before committing
+just build                  # Dev binary, and the sidecar image it is stamped with
+just run <args>             # go run ./cmd/incus-compose against the .env remote
+just incus <args>           # incus against the nested dev environment
+
+just test-local [pattern]   # Unit only, no Incus needed
+just test [pattern]         # Unit + integration. What CI runs
+just test-e2e [pattern]     # Adds the slow full-CLI tests
+just test-log [-p REGEX]    # Plain text of the newest run's log
+just cover                  # Per-package and total coverage
+
+just fix [path]             # golangci-lint --fix, scoped to a package
+just pre-commit             # tidy, boundary, lint. Run before committing
 ```
+
+Two that cost a round trip when missed:
+
+- The package pattern comes **first**, `go test` flags after it.
+  `just test-local -count=1` reads `-count=1` as the pattern and fails with
+  `no Go files`.
+- `just build` rebuilds the sidecar image. A change under `cmd/ic-healthd/`,
+  `shared/` or `iclient/` reaches the running sidecar no other way.
 
 ## Code Style
 
@@ -118,10 +158,16 @@ noisy block reduced to one named line.
 
 ### Comments
 
-- All exported functions and types need doc comments ending with a period
-- No misleading comments - if code is self-explanatory, don't comment
-- Comments are code: keep them as short as what they explain, and delete them
-  when the code already says it
+- Every exported function and type gets a doc comment: **one line**, ending
+  with a period.
+- A second line needs a damn good reason - a trap the caller cannot infer from
+  the signature. Anything longer belongs in `docs/`, the issue, or the commit
+  message.
+- Delete comments that restate the code. A self-explanatory line gets no
+  comment at all; that is the common case, not the exception.
+- Never explain previous behaviour. That is what `git log` is for.
+- Comments are not safeguards. An API is concurrency-safe because it is
+  mutex-free or confined to one goroutine, never because a comment says so.
 
 ### Use of `any`
 
@@ -161,12 +207,16 @@ if err != nil {
 ```go
 var errs error
 for _, item := range items {
-    if err := operation(item); err != nil {
+    err := operation(item)
+    if err != nil {
         errs = errors.Join(errs, err)
     }
 }
 return errs
 ```
+
+Note the two lines: we do not use the define-and-test one-line `if` form
+anywhere, including in examples.
 
 **Use sentinel errors**:
 
@@ -232,9 +282,14 @@ Ensure".
 
 ## Testing
 
-For comprehensive testing documentation including patterns, fixtures, and best practices, see [testing on docs.incus-compose.org](https://docs.incus-compose.org/architecture/testing).
+Tiers, fixtures, coverage, and how to drive the CLI from a test are documented in
+[docs/root/architecture/testing.md](docs/root/architecture/testing.md). Read it
+before writing a test.
 
-Tests are categorized as unit tests (using mocks) or integration tests (using real Incus instances).
+One policy rather than a technique, so it lives here: **we do not mock.** A fake
+`incus.InstanceServer` encodes a guess about what the daemon returns, and a test
+that passes against the guess proves nothing. Anything needing Incus state gets
+it from a real one. Adding a mock is a maintainer's call - ask first.
 
 ## Docker Compose Compatibility
 
