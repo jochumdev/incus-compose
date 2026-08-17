@@ -1089,14 +1089,132 @@ func (r *Instance) PushFiles(ctx context.Context, sftpConn *sftp.Client) error {
 		defer r.client.WarnError(sftpConn.Close, "Failed to close a sFTP connection")
 	}
 
+	// A volume mounted over the target hides anything written to the rootfs
+	// underneath it, so those files go into the volume instead.
+	volumes := map[string]*sftp.Client{}
+
+	defer func() {
+		for _, conn := range volumes {
+			r.client.WarnError(conn.Close, "Failed to close a volume sFTP connection")
+		}
+	}()
+
 	for _, file := range r.Config.Files {
-		err := r.pushFile(sftpConn, file)
+		conn := sftpConn
+
+		device, target := r.volumeTarget(file.Target)
+		if device != "" {
+			var err error
+
+			conn, err = r.volumeSFTP(ctx, volumes, device)
+			if err != nil {
+				return err
+			}
+
+			file.Target = target
+		}
+
+		err := r.pushFile(conn, file)
 		if err != nil {
 			return ErrCreate.WithText("pushing file " + file.Target).Wrap(err)
 		}
 	}
 
 	return nil
+}
+
+// volumeTarget names the device whose volume holds target, and where in it.
+// An empty device means the file belongs in the instance's own filesystem.
+func (r *Instance) volumeTarget(target string) (string, string) {
+	var (
+		device string
+		mount  string
+	)
+
+	for _, dev := range r.Config.Devices {
+		at := dev.Config.Disk.Path
+		if dev.Config.DeviceType == InstanceDeviceTypeTmpfs {
+			at = dev.Config.Tmpfs.Path
+		}
+
+		if !coversPath(at, target) || len(at) <= len(mount) {
+			continue
+		}
+
+		device, mount = dev.Name, at
+	}
+
+	for name, dev := range r.Config.ExtraDevices {
+		if dev["type"] != "disk" || !coversPath(dev["path"], target) || len(dev["path"]) <= len(mount) {
+			continue
+		}
+
+		device, mount = name, dev["path"]
+	}
+
+	if device == "" {
+		return "", target
+	}
+
+	// Only a custom volume of ours has somewhere to write before the start.
+	dev, ok := r.deviceByName(device)
+	if !ok || dev.Config.Disk.StorageVolumeConfig == nil {
+		r.client.LogWarn("A file is hidden by what is mounted over it",
+			"resource", r, "target", target, "device", device)
+
+		return "", target
+	}
+
+	return device, path.Join("/", strings.TrimPrefix(target, mount))
+}
+
+// coversPath reports whether target sits at or below mount.
+func coversPath(mount string, target string) bool {
+	if mount == "" {
+		return false
+	}
+
+	mount = path.Clean(mount)
+
+	return target == mount || strings.HasPrefix(target, strings.TrimSuffix(mount, "/")+"/")
+}
+
+// deviceByName finds one of the instance's declared devices.
+func (r *Instance) deviceByName(name string) (InstanceDevice, bool) {
+	for _, dev := range r.Config.Devices {
+		if dev.Name == name {
+			return dev, true
+		}
+	}
+
+	return InstanceDevice{}, false
+}
+
+// volumeSFTP connects to a device's volume, reusing a connection already open.
+func (r *Instance) volumeSFTP(ctx context.Context, open map[string]*sftp.Client, device string) (*sftp.Client, error) {
+	sc, ok := open[device]
+	if ok {
+		return sc, nil
+	}
+
+	dev, ok := r.deviceByName(device)
+	if !ok {
+		return nil, ErrNotFound.WithText("device " + device)
+	}
+
+	conn, err := r.client.Connection()
+	if err != nil {
+		return nil, err
+	}
+
+	sc, err = conn.GetStoragePoolVolumeFileSFTP(ctx, dev.Config.Disk.StorageVolumeConfig.Pool, "custom", dev.Config.Disk.Source)
+	if err != nil {
+		return nil, ErrCreate.WithText("connecting to volume SFTP for " + device).Wrap(err)
+	}
+
+	open[device] = sc
+
+	return sc, nil
 }
 
 // pushFile writes a single InstanceFile over an established SFTP connection,

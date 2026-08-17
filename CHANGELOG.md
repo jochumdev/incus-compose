@@ -38,6 +38,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Fixed
 
+- A config or secret whose target sits inside a volume is now written into that
+  volume. It used to be written into the instance's filesystem, where the mount
+  hid it, so the container started with the image's file or nothing at all. (by
+  @jochumdev)
+
 - `up` could hang until the start timeout on a service that had already been
   reported healthy, and then fail. Waiting for a container's IP refreshed the
   instance state as it polled, so a reading taken before ic-healthd reported

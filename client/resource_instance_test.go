@@ -432,3 +432,82 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	require.Equal(t, shared.HealthStatusUnknown, got.Config[HealthStatusKey])
 	require.Empty(t, got.Config[HealthStoppedKey], "there is no daemon to hold back")
 }
+
+// TestInstanceFileUnderAVolume pins that a file targeted inside a volume is
+// written into the volume, not into the rootfs the mount then hides.
+func TestInstanceFileUnderAVolume(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "file-in-volume-")
+
+	imgRes, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
+	require.NoError(t, err)
+
+	volRes, err := c.Resource(KindStorageVolume, "conf", &StorageVolumeConfig{
+		Shifted:       true,
+		ImageResource: imgRes,
+	})
+	require.NoError(t, err)
+
+	vol, ok := volRes.(*StorageVolume)
+	require.True(t, ok)
+
+	instRes, err := c.Resource(KindInstance, "web", &InstanceConfig{
+		Image:      imgRes.Name(),
+		Resources:  []Resource{imgRes, volRes},
+		Extensions: map[string]string{"oci.entrypoint": "sleep 300"},
+		Devices: []InstanceDevice{{
+			Name: "imgvol-etc-nginx-conf-d",
+			Config: InstanceDeviceConfig{
+				DeviceType: InstanceDeviceTypeDisk,
+				Disk: InstanceDeviceDiskConfig{
+					StorageVolumeConfig: &vol.Config,
+					Source:              vol.IncusName(),
+					Path:                "/etc/nginx/conf.d",
+					Shift:               true,
+				},
+			},
+		}},
+		Files: []InstanceFile{{
+			Target:    "/etc/nginx/conf.d/site.conf",
+			Content:   NewReaderFromBytes([]byte("server { listen 8080; }\n")),
+			UID:       -1,
+			GID:       -1,
+			Mode:      0o644,
+			Overwrite: true,
+		}},
+	})
+	require.NoError(t, err)
+
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(imgRes, volRes, instRes)
+	require.NoError(t, stack.ForAction(ActionEnsure).Run(ctx, ActionEnsure, OptionCreate()))
+	require.NoError(t, RunAction(ctx, inst, ActionStart, OptionNoHealthd()))
+
+	// The volume holds it under the mount point's path.
+	vc, err := vol.SFTP(ctx)
+	require.NoError(t, err)
+
+	defer func() { _ = vc.Close() }()
+
+	inVolume, err := vc.Lstat("/site.conf")
+	require.NoError(t, err, "the file must be in the volume, not in the rootfs the volume hides")
+	assert.Equal(t, int64(24), inVolume.Size())
+
+	// And a running instance sees it where the compose file asked for it.
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	ic, err := conn.GetInstanceFileSFTP(ctx, inst.IncusName())
+	require.NoError(t, err)
+
+	defer func() { _ = ic.Close() }()
+
+	_, err = ic.Lstat("/etc/nginx/conf.d/site.conf")
+	require.NoError(t, err, "the running instance must see the file at its target")
+}
