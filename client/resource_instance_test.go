@@ -457,7 +457,7 @@ func TestInstanceFileUnderAVolume(t *testing.T) {
 	instRes, err := c.Resource(KindInstance, "web", &InstanceConfig{
 		Image:      imgRes.Name(),
 		Resources:  []Resource{imgRes, volRes},
-		Extensions: map[string]string{"oci.entrypoint": "sleep 300"},
+		Extensions: map[string]string{"oci.entrypoint": "sh"},
 		Devices: []InstanceDevice{{
 			Name: "imgvol-etc-nginx-conf-d",
 			Config: InstanceDeviceConfig{
