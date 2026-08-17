@@ -26,6 +26,12 @@ for correct semver ordering. Headings below preserve each release's announced fo
 - **library**: `Client.Resources()` returns the resources a client holds, so a
   caller can act on ones it did not declare itself. (by @jochumdev)
 
+- **library**: `StorageVolumeConfig.Prefetch` fills a volume on first creation
+  with what its image holds at that path, the way docker seeds an empty volume
+  from the image. `StorageVolume.Created()` now reads from
+  `StorageVolumeState`, so it follows a fetch instead of staying set.
+  (by @jochumdev)
+
 ### Changed
 
 - **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -
