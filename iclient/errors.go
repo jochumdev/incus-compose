@@ -23,6 +23,10 @@ var (
 	// ErrInstanceBusy is returned when another operation holds the instance's
 	// lock. Wait it out with Connection.WaitInstanceBusy.
 	ErrInstanceBusy = errors.New("instance is busy")
+
+	// ErrRegistryProtocol is returned by NewRepository for a remote that is
+	// not an OCI registry.
+	ErrRegistryProtocol = errors.New("remote is not an OCI registry")
 )
 
 // incusBusyMessage is how incusd words the instance operation lock, in
