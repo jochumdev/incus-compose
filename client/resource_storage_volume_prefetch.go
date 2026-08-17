@@ -9,6 +9,7 @@ import (
 
 	"github.com/avast/retry-go/v5"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/units"
 	"github.com/pkg/sftp"
 
 	"github.com/lxc/incus-compose/iclient"
@@ -109,11 +110,46 @@ func (r *StorageVolume) prefetch(ctx context.Context) error {
 		return err
 	}
 
-	return r.prefetchDir(src, dst, r.Config.Prefetch, "/")
+	progress := &prefetchProgress{volume: r}
+
+	return r.prefetchDir(src, dst, r.Config.Prefetch, "/", progress)
+}
+
+// prefetchProgress reports what a copy has moved so far. There is no total to
+// count against: the size of a path inside an image is only knowable by walking
+// it, which is the copy itself.
+type prefetchProgress struct {
+	volume *StorageVolume
+	files  int
+	bytes  int64
+	last   time.Time
+}
+
+// add records one copied file and reports it, at most a few times a second.
+func (p *prefetchProgress) add(size int64) {
+	p.files++
+	p.bytes += size
+
+	if time.Since(p.last) < 200*time.Millisecond {
+		return
+	}
+
+	p.last = time.Now()
+
+	files := "files"
+	if p.files == 1 {
+		files = "file"
+	}
+
+	p.volume.client.globalClient.emitProgress(ActionEnsure, p.volume, Options{}, Progress{
+		Percent: -1,
+		Text: fmt.Sprintf("Prefetching %s: %d %s, %s", p.volume.Config.Prefetch, p.files, files,
+			units.GetByteSizeString(p.bytes, 2)),
+	})
 }
 
 // prefetchDir copies one directory's contents between two SFTP endpoints.
-func (r *StorageVolume) prefetchDir(src *sftp.Client, dst *sftp.Client, from string, to string) error {
+func (r *StorageVolume) prefetchDir(src *sftp.Client, dst *sftp.Client, from string, to string, progress *prefetchProgress) error {
 	entries, err := src.ReadDir(from)
 	if err != nil {
 		return err
@@ -135,7 +171,7 @@ func (r *StorageVolume) prefetchDir(src *sftp.Client, dst *sftp.Client, from str
 				return err
 			}
 
-			err = r.prefetchDir(src, dst, source, target)
+			err = r.prefetchDir(src, dst, source, target, progress)
 			if err != nil {
 				return err
 			}
@@ -154,6 +190,8 @@ func (r *StorageVolume) prefetchDir(src *sftp.Client, dst *sftp.Client, from str
 		if err != nil {
 			return err
 		}
+
+		progress.add(info.Size())
 	}
 
 	return nil
