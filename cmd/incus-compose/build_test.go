@@ -263,7 +263,8 @@ func TestBuildCommandRejectsMultiplePlatforms(t *testing.T) {
 	})
 	compose := filepath.Join(dir, "compose.yaml")
 
-	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+	// down reads the same rejected compose file, so take the project directly.
+	deleteProjectOnCleanup(t, pn)
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "build")
 	require.Error(t, err)

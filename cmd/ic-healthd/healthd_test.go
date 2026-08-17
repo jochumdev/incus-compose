@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -52,8 +53,9 @@ func testProject(t *testing.T, prefix string) *client.Client {
 			t.Errorf("closing client for project %s: %v", name, err)
 		}
 
+		// A test that renames its project leaves nothing behind under this one.
 		err = gc.DeleteProject(name, true)
-		if err != nil {
+		if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 			t.Errorf("deleting project %s: %v", name, err)
 		}
 	})
