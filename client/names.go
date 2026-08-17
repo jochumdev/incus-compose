@@ -19,7 +19,7 @@ func SanitizeProjectName(name string) string {
 // SanitizeIncusName converts a string to a valid Incus instance name.
 // Converts to lowercase, replaces special chars and underscores with hyphens.
 // Names exceeding maxLength are replaced with a 32-char hex hash for DNS
-// compatibility, so -1 means the Incus limit and 0 hashes every name.
+// compatibility; -1 means the Incus limit.
 func SanitizeIncusName(name string, maxLength int) string {
 	if maxLength == -1 {
 		maxLength = MaxIncusNameLen

@@ -39,9 +39,6 @@ type StorageVolumeConfig struct {
 	// HostPath, when set, seeds the volume with the local directory contents on first creation.
 	HostPath string
 
-	// AlwaysHash names the volume after a hash of its name, however short it is.
-	AlwaysHash bool
-
 	// Prefetch, when set, fills the volume on first creation with what
 	// ImageResource holds at that path. Needs ImageResource.
 	Prefetch string
@@ -112,12 +109,7 @@ func newStorageVolume(c *Client, name string, configGetter Config) (*StorageVolu
 		Config:       *config,
 	}
 
-	maxLength := MaxIncusNameLen - 4
-	if config.AlwaysHash {
-		maxLength = 0
-	}
-
-	vol.incusName = "vol-" + SanitizeIncusName(name, maxLength)
+	vol.incusName = "vol-" + SanitizeIncusName(name, MaxIncusNameLen-4)
 
 	// Every accessor dereferences this, so it must never be nil.
 	vol.state.Store(&StorageVolumeState{})

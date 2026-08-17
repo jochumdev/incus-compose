@@ -56,22 +56,6 @@ func TestStorageVolumeIncusName_PrefixedWithProject(t *testing.T) {
 	require.Equal(t, "vol-mydata", vol.IncusName())
 }
 
-func TestStorageVolumeIncusName_AlwaysHash(t *testing.T) {
-	t.Parallel()
-	c := NewOfflineClient(t.Context(), "volume-test")
-
-	r, err := c.Resource(KindStorageVolume, "auto-web-etc-nginx-conf-d", &StorageVolumeConfig{AlwaysHash: true})
-	require.NoError(t, err)
-
-	vol, ok := r.(*StorageVolume)
-	require.True(t, ok)
-
-	require.Equal(t, "auto-web-etc-nginx-conf-d", vol.Name())
-	require.Equal(t, "vol-"+SanitizeIncusName("auto-web-etc-nginx-conf-d", 0), vol.IncusName())
-	require.Len(t, vol.IncusName(), len("vol-")+32, "a hashed name is the 32 hex chars, whatever the name was")
-	require.NotContains(t, vol.IncusName(), "nginx", "a name short enough to survive sanitizing must still be hashed")
-}
-
 func TestStorageVolumeConfig_DefaultPool(t *testing.T) {
 	t.Parallel()
 	c := NewOfflineClient(t.Context(), "volume-test")

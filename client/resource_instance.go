@@ -494,7 +494,7 @@ func (r *Instance) ensure(ctx context.Context, opts ...Option) (bool, error) {
 		for _, dev := range r.prefetchDevices() {
 			_, adoptErr := r.client.Resource(KindStorageVolume,
 				prefetchVolumeName(r.Config.ServiceName, dev["path"]),
-				&StorageVolumeConfig{Pool: dev["pool"], AlwaysHash: true})
+				&StorageVolumeConfig{Pool: dev["pool"]})
 			if adoptErr != nil {
 				return false, r.client.hookAfter(ctx, ActionEnsure, r, options, adoptErr)
 			}
