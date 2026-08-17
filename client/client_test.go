@@ -158,6 +158,27 @@ func TestSanitizeProjectName(t *testing.T) {
 // Integration Tests
 // ----------------------------------------------------------------------------
 
+func TestClientResources(t *testing.T) {
+	t.Parallel()
+	c := NewOfflineClient(t.Context(), "resources-test")
+
+	vol, err := c.Resource(KindStorageVolume, "data", &StorageVolumeConfig{})
+	require.NoError(t, err)
+
+	held := c.Resources()
+	require.Contains(t, held, vol)
+
+	clone := c.Clone()
+
+	_, err = clone.Resource(KindStorageVolume, "clone-only", &StorageVolumeConfig{})
+	require.NoError(t, err)
+
+	require.Len(t, c.Resources(), len(held), "a clone's resources are its own")
+
+	held[0] = nil
+	require.NotNil(t, c.Resources()[0], "the snapshot is a copy, not the store's slice")
+}
+
 func TestClientConnection_IsConnected(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)

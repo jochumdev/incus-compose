@@ -23,6 +23,9 @@ for correct semver ordering. Headings below preserve each release's announced fo
   its name however short the name is, so a generated volume cannot collide with
   a declared one. (by @jochumdev)
 
+- **library**: `Client.Resources()` returns the resources a client holds, so a
+  caller can act on ones it did not declare itself. (by @jochumdev)
+
 ### Changed
 
 - **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -

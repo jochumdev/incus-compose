@@ -289,6 +289,14 @@ func (s *ResourceStore) all() []Resource {
 	return s.resources
 }
 
+// snapshot returns the resources held right now, as a copy.
+func (s *ResourceStore) snapshot() []Resource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.resources)
+}
+
 // Range runs a function on each resource with an active lock.
 func (s *ResourceStore) Range(f func(r Resource)) {
 	s.mu.Lock()
