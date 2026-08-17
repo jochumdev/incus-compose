@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -112,8 +113,31 @@ type imageSource struct {
 	certificate string
 	project     string
 
+	// username and password are a registry's, and reach incusd inside the
+	// server URL because ImageSource carries no field of their own.
+	username string
+	password string
+
 	// conn is set for a native incus remote only; anything else incusd resolves itself.
 	conn *iclient.Connection
+}
+
+// serverURL is the address with the registry login put back in, the only way
+// incusd can be handed one. incusd logs this URL, so build it here and nowhere
+// else.
+func (s *imageSource) serverURL() string {
+	if s.username == "" && s.password == "" {
+		return s.server
+	}
+
+	parsed, err := url.Parse(s.server)
+	if err != nil {
+		return s.server
+	}
+
+	parsed.User = url.UserPassword(s.username, s.password)
+
+	return parsed.String()
 }
 
 // ImageState is what the last fetch read back from Incus.
@@ -385,6 +409,8 @@ func (r *Image) resolveSource() (*imageSource, error) {
 		protocol:    info.Protocol,
 		certificate: info.ServerCert,
 		project:     info.Project,
+		username:    info.Username,
+		password:    info.Password,
 	}
 
 	if info.Protocol != "incus" {
@@ -405,7 +431,7 @@ func (r *Image) pullRequest(fingerprint string) incusApi.ImagesPost {
 		Aliases: []incusApi.ImageAlias{{Name: r.incusName}},
 		Source: &incusApi.ImagesPostSource{
 			ImageSource: incusApi.ImageSource{
-				Server:      r.source.server,
+				Server:      r.source.serverURL(),
 				Protocol:    r.source.protocol,
 				Certificate: r.source.certificate,
 			},

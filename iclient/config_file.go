@@ -112,6 +112,8 @@ func ReadConfig(path string) (*Config, error) {
 		c.DefaultRemote = ConfigDefaultConfig().DefaultRemote
 	}
 
+	c.prefillCreds()
+
 	return c, nil
 }
 

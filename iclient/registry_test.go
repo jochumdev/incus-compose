@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -94,15 +93,6 @@ func TestNewRepositoryReference(t *testing.T) {
 			repository: "myorg/myapp",
 			reference:  "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		},
-		{
-			name:       "userinfo stays out of the reference",
-			addr:       "https://user:pass@registry.example.com",
-			image:      "myorg/myapp:v1.0",
-			registry:   "registry.example.com",
-			host:       "registry.example.com",
-			repository: "myorg/myapp",
-			reference:  "v1.0",
-		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -182,13 +172,15 @@ func TestNewRepositoryRejectsBadImage(t *testing.T) {
 func TestNewRepositoryCredentials(t *testing.T) {
 	t.Parallel()
 
-	t.Run("userinfo becomes the registry credential", func(t *testing.T) {
+	t.Run("the resolved login becomes the registry credential", func(t *testing.T) {
 		t.Parallel()
 
 		repo, err := NewRepository(&ConfigRemoteInfo{
 			Name:     "reg",
-			Addrs:    []string{"https://user:s3cret@registry.example.com"},
+			Addrs:    []string{"https://registry.example.com"},
 			Protocol: "oci",
+			Username: "user",
+			Password: "s3cret",
 		}, "myorg/myapp:v1.0")
 		require.NoError(t, err)
 
@@ -209,8 +201,10 @@ func TestNewRepositoryCredentials(t *testing.T) {
 
 		repo, err := NewRepository(&ConfigRemoteInfo{
 			Name:     "docker.io",
-			Addrs:    []string{"https://user:s3cret@docker.io"},
+			Addrs:    []string{"https://docker.io"},
 			Protocol: "oci",
+			Username: "user",
+			Password: "s3cret",
 		}, "library/redis:alpine")
 		require.NoError(t, err)
 
@@ -222,7 +216,22 @@ func TestNewRepositoryCredentials(t *testing.T) {
 		assert.Equal(t, "user", cred.Username)
 	})
 
-	t.Run("no userinfo leaves the registry anonymous", func(t *testing.T) {
+	// A password in Addrs would reach the logs and our own error strings, so it
+	// is refused rather than quietly ignored.
+	t.Run("an address carrying credentials is refused", func(t *testing.T) {
+		t.Parallel()
+
+		repo, err := NewRepository(&ConfigRemoteInfo{
+			Name:     "reg",
+			Addrs:    []string{"https://user:s3cret@registry.example.com"},
+			Protocol: "oci",
+		}, "myorg/myapp:v1.0")
+		require.ErrorIs(t, err, ErrRegistryAddrCredentials)
+		assert.Nil(t, repo)
+		assert.NotContains(t, err.Error(), "s3cret")
+	})
+
+	t.Run("no login leaves the registry anonymous", func(t *testing.T) {
 		t.Parallel()
 
 		repo, err := NewRepository(&ConfigRemoteInfo{
@@ -358,15 +367,12 @@ func TestNewRepositoryFetchesAuthenticated(t *testing.T) {
 
 	server := fakeRegistry(t, testManifest, "Basic dXNlcjpzM2NyZXQ=")
 
-	addr, err := url.Parse(server.URL)
-	require.NoError(t, err)
-
-	addr.User = url.UserPassword("user", "s3cret")
-
 	repo, err := NewRepository(&ConfigRemoteInfo{
 		Name:     "reg",
-		Addrs:    []string{addr.String()},
+		Addrs:    []string{server.URL},
 		Protocol: "oci",
+		Username: "user",
+		Password: "s3cret",
 	}, "library/redis:alpine")
 	require.NoError(t, err)
 

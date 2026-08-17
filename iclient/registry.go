@@ -22,9 +22,10 @@ const registryResponseHeaderTimeout = 30 * time.Second
 // e.g. "library/redis:alpine".
 //
 // The registry is the remote's own address, so a mirror stands in for what it
-// mirrors. Credentials come from the address' userinfo, where Incus puts what
-// a remote's credentials helper returned; the proxy environment applies as it
-// does to a Connection.
+// mirrors, and the proxy environment applies as it does to a Connection.
+// Credentials are info's Username and Password, which RemoteInfos fills from
+// the remote's credentials helper; an address still carrying its own is
+// refused rather than silently reached anonymously.
 func NewRepository(info *ConfigRemoteInfo, image string) (*remote.Repository, error) {
 	if info.Protocol != "oci" {
 		return nil, fmt.Errorf("%q: %w", info.Name, ErrRegistryProtocol)
@@ -34,12 +35,17 @@ func NewRepository(info *ConfigRemoteInfo, image string) (*remote.Repository, er
 		return nil, fmt.Errorf("%q: %w", info.Name, ErrConnectionNoAddress)
 	}
 
+	// The address is never echoed back: a hand-built info may still hold a
+	// password in it, which is what the next check is about.
 	addr, err := url.Parse(info.Addrs[0])
 	if err != nil {
-		return nil, fmt.Errorf("%q: parsing the registry address %q: %w", info.Name, info.Addrs[0], err)
+		return nil, fmt.Errorf("%q: parsing the registry address: %w", info.Name, err)
 	}
 
-	// Host drops the scheme and any userinfo, which a reference may not carry.
+	if addr.User != nil {
+		return nil, fmt.Errorf("%q: %w", info.Name, ErrRegistryAddrCredentials)
+	}
+
 	ref, err := registry.ParseReference(addr.Host + "/" + image)
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w", info.Name, err)
@@ -66,13 +72,11 @@ func NewRepository(info *ConfigRemoteInfo, image string) (*remote.Repository, er
 		client.SetUserAgent(info.UserAgent)
 	}
 
-	if addr.User != nil {
-		password, _ := addr.User.Password()
-
+	if info.Username != "" || info.Password != "" {
 		// Keyed on Host: auth.Client maps docker.io to registry-1.docker.io first.
 		client.Credential = auth.StaticCredential(ref.Host(), auth.Credential{
-			Username: addr.User.Username(),
-			Password: password,
+			Username: info.Username,
+			Password: info.Password,
 		})
 	}
 

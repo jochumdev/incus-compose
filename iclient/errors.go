@@ -27,6 +27,13 @@ var (
 	// ErrRegistryProtocol is returned by NewRepository for a remote that is
 	// not an OCI registry.
 	ErrRegistryProtocol = errors.New("remote is not an OCI registry")
+
+	// ErrRegistryAddrCredentials is returned by NewRepository for an address
+	// carrying credentials, which belong in Username and Password.
+	ErrRegistryAddrCredentials = errors.New("registry address carries credentials")
+
+	// ErrCredHelper is returned when a remote's credentials helper fails.
+	ErrCredHelper = errors.New("credentials helper failed")
 )
 
 // incusBusyMessage is how incusd words the instance operation lock, in
