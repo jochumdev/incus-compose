@@ -15,6 +15,10 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 - `healthd status` prints the shared daemon's health status key. (by @jochumdev)
 
+- An external network can now name `<project>:<network>` to attach to a
+  managed network owned by another compose project, instead of only a plain
+  network name. (by @jochumdev)
+
 ### Changed
 
 - **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -

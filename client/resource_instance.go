@@ -1663,13 +1663,6 @@ func (t *logOutput) Write(p []byte) (int, error) {
 }
 
 // resolveEntrypoint builds oci.entrypoint from a compose entrypoint and command.
-// Incus splits the value back with shellquote.Split, so Join is its inverse.
-//
-// A non-nil entrypoint replaces the image's argv outright: the compose spec
-// discards the image's default command in that case, so nothing from the image
-// is needed. With no entrypoint the command can only be appended to the image
-// entrypoint, because Incus reports it with the image command already merged in
-// and never exposes the two separately.
 func resolveEntrypoint(imageEntrypoint string, entrypoint, command []string) string {
 	if entrypoint != nil {
 		return shellquote.Join(slices.Concat(entrypoint, command)...)
@@ -1677,6 +1670,10 @@ func resolveEntrypoint(imageEntrypoint string, entrypoint, command []string) str
 
 	if len(command) == 0 {
 		return ""
+	}
+
+	if imageEntrypoint == "" {
+		return shellquote.Join(command...)
 	}
 
 	return imageEntrypoint + " " + shellquote.Join(command...)

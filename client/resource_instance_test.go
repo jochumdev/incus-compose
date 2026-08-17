@@ -69,26 +69,31 @@ func TestSanitizeInstanceName(t *testing.T) {
 	}
 }
 
-// TestResolveEntrypoint covers the compose entrypoint/command combinations. A
-// non-nil entrypoint replaces the image argv; an unset one falls back to
-// appending the command to the image entrypoint.
+// TestResolveEntrypoint covers the compose entrypoint/command combinations.
 func TestResolveEntrypoint(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		entrypoint []string
-		command    []string
-		want       string
+		name            string
+		imageEntrypoint string
+		entrypoint      []string
+		command         []string
+		want            string
 	}{
 		{
 			name: "neither set leaves the image alone",
 			want: "",
 		},
 		{
-			name:    "command alone appends to the image entrypoint",
-			command: []string{"httpd", "-f"},
-			want:    "caddy httpd -f",
+			name:            "command alone keeps the image entrypoint and replaces its command",
+			imageEntrypoint: "caddy",
+			command:         []string{"httpd", "-f"},
+			want:            "caddy httpd -f",
+		},
+		{
+			name:    "command alone against an image with no entrypoint is the command",
+			command: []string{"redis-server", "--appendonly", "yes"},
+			want:    "redis-server --appendonly yes",
 		},
 		{
 			name:       "entrypoint alone replaces the image argv",
@@ -123,7 +128,7 @@ func TestResolveEntrypoint(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			require.Equal(t, tt.want, resolveEntrypoint("caddy", tt.entrypoint, tt.command))
+			require.Equal(t, tt.want, resolveEntrypoint(tt.imageEntrypoint, tt.entrypoint, tt.command))
 		})
 	}
 }

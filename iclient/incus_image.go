@@ -177,14 +177,32 @@ func (c *Connection) DeleteImage(ctx context.Context, fingerprint string) (<-cha
 	return c.asyncOperation(ctx, http.MethodDelete, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, "")
 }
 
-// CreateImageSecret mints a one-time token for fetching a non-public image.
+// imageSecret mints the one-time token that fetching a non-public image needs.
 //
-// This is a token operation: it never reaches a terminal state. Read the first
-// value, whose Metadata carries the secret, and cancel the context.
-func (c *Connection) CreateImageSecret(ctx context.Context, fingerprint string) (<-chan api.Operation, error) {
+// A token operation never reaches a terminal state, so following it would
+// subscribe to events for something that never reports: the response to the
+// request already carries the secret.
+func (c *Connection) imageSecret(ctx context.Context, fingerprint string) (string, error) {
 	path := incusImagesPath + "/" + url.PathEscape(fingerprint) + "/secret"
 
-	return c.asyncOperation(ctx, http.MethodPost, path, nil, "")
+	resp, _, err := c.do(ctx, http.MethodPost, path, nil, nil, "")
+	if err != nil {
+		return "", fmt.Errorf("minting a secret for %q: %w", fingerprint, err)
+	}
+
+	op := api.Operation{}
+
+	err = resp.MetadataAsStruct(&op)
+	if err != nil {
+		return "", fmt.Errorf("minting a secret for %q: decoding the operation: %w", fingerprint, err)
+	}
+
+	secret, ok := op.Metadata["secret"].(string)
+	if !ok {
+		return "", fmt.Errorf("minting a secret for %q: no secret in the operation metadata", fingerprint)
+	}
+
+	return secret, nil
 }
 
 // CopyImage copies an image from another incus connection into this one.
@@ -236,27 +254,10 @@ func (c *Connection) CopyImage(ctx context.Context, source *Connection, fingerpr
 
 	// A private image is only fetchable with a token.
 	if !image.Public {
-		// Its own context, since a token operation never terminates.
-		secretCtx, release := context.WithCancel(ctx)
-		defer release()
-
-		updates, err := source.CreateImageSecret(secretCtx, fingerprint)
+		post.Source.Secret, err = source.imageSecret(ctx, fingerprint)
 		if err != nil {
 			return nil, err
 		}
-
-		// The first value carries the token; ranging on would wait for it to expire.
-		op, ok := <-updates
-		if !ok {
-			return nil, fmt.Errorf("minting a secret for %q: the operation reported nothing", fingerprint)
-		}
-
-		secret, ok := op.Metadata["secret"].(string)
-		if !ok {
-			return nil, fmt.Errorf("minting a secret for %q: no secret in the operation metadata", fingerprint)
-		}
-
-		post.Source.Secret = secret
 	}
 
 	return c.CreateImage(ctx, post, nil)

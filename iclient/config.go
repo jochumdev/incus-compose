@@ -94,6 +94,11 @@ type Config struct {
 
 	// UserAgent is sent with every request.
 	UserAgent string `yaml:"-"`
+
+	// creds memoises what each remote's credentials helper answered, so a run
+	// resolving one registry for a dozen images spawns the helper once. Every
+	// remote gets an entry up front, so this map is only ever read.
+	creds map[string]*credEntry
 }
 
 // ConfigLocalRemote is the unix socket remote, which cannot be removed.
@@ -119,9 +124,21 @@ var ConfigDefaultRemotes = map[string]ConfigRemote{
 
 // ConfigDefaultConfig returns the configuration used when no file exists.
 func ConfigDefaultConfig() *Config {
-	return &Config{
+	c := &Config{
 		Remotes:       maps.Clone(ConfigDefaultRemotes),
 		DefaultRemote: "local",
+	}
+	c.prefillCreds()
+
+	return c
+}
+
+// prefillCreds gives every remote its credential entry, so resolving one later
+// only reads the map and needs no lock of its own.
+func (c *Config) prefillCreds() {
+	c.creds = make(map[string]*credEntry, len(c.Remotes))
+	for name := range c.Remotes {
+		c.creds[name] = &credEntry{}
 	}
 }
 

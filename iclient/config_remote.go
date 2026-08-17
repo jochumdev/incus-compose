@@ -20,6 +20,12 @@ type ConfigRemoteInfo struct {
 	// Project is the remote's own, unless ProjectOverride is set.
 	Project string
 
+	// Username and Password reach an "oci" registry, from its credentials
+	// helper or else from its address. They are deliberately not left in
+	// Addrs, which is logged and formatted into errors.
+	Username string
+	Password string
+
 	Public    bool
 	KeepAlive int
 	UserAgent string
@@ -71,6 +77,13 @@ func (c *Config) RemoteInfos(remote string) (*ConfigRemoteInfo, error) {
 
 	if len(info.Addrs) == 0 {
 		return nil, fmt.Errorf("%q: remote has no address", remote)
+	}
+
+	if r.Protocol == "oci" {
+		err := c.applyCredentials(remote, r, info)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// A unix socket carries no TLS; only a private incus remote has a client certificate.

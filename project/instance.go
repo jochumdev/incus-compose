@@ -466,7 +466,33 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		// Whatever we set before, `x-incus` overrides it.
 		maps.Copy(extensions, userExtensions)
 
-		rNetwork, err := c.Resource(client.KindNetwork, name, netConfig)
+		// An external `<project>:<network>` names a managed network of another
+		// compose project, whose Incus name only that project's client derives.
+		netClient := c
+		netName := name
+
+		if netConfig.External && strings.Contains(netConfig.OverrideName, ":") {
+			owner, network, _ := strings.Cut(netConfig.OverrideName, ":")
+			if owner == "" || network == "" || strings.Contains(network, ":") {
+				errs = errors.Join(
+					errs,
+					fmt.Errorf("network %q: %q must be `<project>:<network>` or a plain network name", name, netConfig.OverrideName),
+				)
+				continue
+			}
+
+			owned, err := c.Global().EnsureProject(owner)
+			if err != nil {
+				errs = errors.Join(errs, fmt.Errorf("network %q: %w", name, err))
+				continue
+			}
+
+			netClient = owned
+			netName = network
+			netConfig.OverrideName = ""
+		}
+
+		rNetwork, err := netClient.Resource(client.KindNetwork, netName, netConfig)
 		if err != nil {
 			errs = errors.Join(errs, err)
 			continue
