@@ -1,0 +1,5 @@
+services:
+  # memcached carries ENTRYPOINT ["docker-entrypoint.sh"] and CMD ["memcached"],
+  cache:
+    image: docker.io/library/memcached:1.6.38-alpine
+    command: sh

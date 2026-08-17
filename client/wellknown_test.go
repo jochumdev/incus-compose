@@ -29,8 +29,8 @@ func TestWellKnownRegistryResolves(t *testing.T) {
 	source, err := img.resolveSource()
 	require.NoError(t, err)
 
-	require.Equal(t, "https://ghcr.io", source.server)
-	require.Equal(t, "oci", source.protocol)
+	require.Equal(t, []string{"https://ghcr.io"}, source.info.Addrs)
+	require.Equal(t, "oci", source.info.Protocol)
 	require.Nil(t, source.conn, "a registry is pointed at, never dialed")
 }
 
@@ -53,6 +53,6 @@ func TestWellKnownRegistryConfiguredWins(t *testing.T) {
 	source, err := img.resolveSource()
 	require.NoError(t, err)
 
-	require.Equal(t, "https://custom.example.com", source.server)
-	require.Equal(t, "oci", source.protocol)
+	require.Equal(t, []string{"https://custom.example.com"}, source.info.Addrs)
+	require.Equal(t, "oci", source.info.Protocol)
 }

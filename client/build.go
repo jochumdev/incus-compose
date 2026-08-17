@@ -17,6 +17,7 @@ import (
 	"time"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	rspecs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -128,24 +129,24 @@ func buildDetectBuilder(preferredBuilder string) (string, error) {
 // buildRootfs runs the container builder and returns both the rootfs tar and
 // the OCI runtime config.json bytes. The rootfs is a ReadCloser that deletes
 // its temp file on Close. stdout/stderr are forwarded.
-func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfig, stdout io.Writer, stderr io.Writer) (io.ReadCloser, []byte, error) {
+func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfig, stdout io.Writer, stderr io.Writer) (io.ReadCloser, []byte, *ocispec.ImageConfig, error) {
 	isPodman := strings.HasSuffix(builder, "podman") || strings.HasSuffix(builder, "buildah")
 	tmpTag := fmt.Sprintf("ic-compose-build-%x", time.Now().UnixNano())
 
 	rootfsTmp, err := os.CreateTemp("", "incus-compose-rootfs-*.tar")
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating temp file: %w", err)
+		return nil, nil, nil, fmt.Errorf("creating temp file: %w", err)
 	}
 	rootfsPath := rootfsTmp.Name()
 	err = rootfsTmp.Close()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	buildCfg, cleanup, err := buildConfigWithInlineDockerfile(cfg)
 	if err != nil {
 		_ = os.Remove(rootfsPath)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer cleanup()
 
@@ -157,7 +158,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(rootfsPath)
-		return nil, nil, fmt.Errorf("building container image: %w", err)
+		return nil, nil, nil, fmt.Errorf("building container image: %w", err)
 	}
 
 	defer func() {
@@ -176,7 +177,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 	out, err := inspect.Output()
 	if err != nil {
 		_ = os.Remove(rootfsPath)
-		return nil, nil, fmt.Errorf("inspecting built image: %w", err)
+		return nil, nil, nil, fmt.Errorf("inspecting built image: %w", err)
 	}
 
 	// buildah nests the OCI image config differently from podman/docker
@@ -191,7 +192,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 		var inspected map[string]any
 		if err := json.Unmarshal(out, &inspected); err != nil {
 			_ = os.Remove(rootfsPath)
-			return nil, nil, fmt.Errorf("parsing buildah inspect output: %w", err)
+			return nil, nil, nil, fmt.Errorf("parsing buildah inspect output: %w", err)
 		}
 		ociv1, _ := inspected["OCIv1"].(map[string]any)
 		imgCfg, _ = ociv1["config"].(map[string]any)
@@ -200,7 +201,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 		var inspected []map[string]any
 		if err := json.Unmarshal(out, &inspected); err != nil || len(inspected) == 0 {
 			_ = os.Remove(rootfsPath)
-			return nil, nil, fmt.Errorf("parsing %s inspect output: %w", builder, err)
+			return nil, nil, nil, fmt.Errorf("parsing %s inspect output: %w", builder, err)
 		}
 		imgCfg, _ = inspected[0]["Config"].(map[string]any)
 	}
@@ -225,8 +226,10 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 	// Only numeric uid[:gid] resolves; a named USER can't be resolved
 	// without the rootfs' /etc/passwd and falls back to root, matching
 	// the numeric-only restriction on the compose `user:` override.
+	user, _ := imgCfg["User"].(string)
+
 	var uid, gid uint64
-	if user, _ := imgCfg["User"].(string); user != "" {
+	if user != "" {
 		split := strings.SplitN(user, ":", 2)
 		uid, _ = strconv.ParseUint(split[0], 10, 32)
 		if len(split) > 1 {
@@ -242,16 +245,34 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 	home, err := rootfsHome(rootfsPath, uid)
 	if err != nil {
 		_ = os.Remove(rootfsPath)
-		return nil, nil, fmt.Errorf("reading /etc/passwd from the built rootfs: %w", err)
+		return nil, nil, nil, fmt.Errorf("reading /etc/passwd from the built rootfs: %w", err)
 	}
 	if home != "" {
 		env = putEnv(env, "HOME="+home, false)
 	}
 
+	// Every builder spells VOLUME as an object with empty values, not a list.
+	rawVolumes, _ := imgCfg["Volumes"].(map[string]any)
+	volumes := make(map[string]struct{}, len(rawVolumes))
+
+	for path := range rawVolumes {
+		volumes[path] = struct{}{}
+	}
+
+	// The runtime spec has one argv, so the split is kept alongside it rather
+	// than read back out of Args, which cannot say where the entrypoint ended.
+	config := &ocispec.ImageConfig{
+		User:       user,
+		Entrypoint: toStrings(imgCfg["Entrypoint"]),
+		Cmd:        toStrings(imgCfg["Cmd"]),
+		WorkingDir: cwd,
+		Volumes:    volumes,
+	}
+
 	configJSON, err := json.Marshal(rspecs.Spec{
 		Version: rspecs.Version,
 		Process: &rspecs.Process{
-			Args: append(toStrings(imgCfg["Entrypoint"]), toStrings(imgCfg["Cmd"])...),
+			Args: slices.Concat(config.Entrypoint, config.Cmd),
 			Env:  env,
 			Cwd:  cwd,
 			User: rspecs.User{UID: uint32(uid), GID: uint32(gid)},
@@ -259,14 +280,14 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 	})
 	if err != nil {
 		_ = os.Remove(rootfsPath)
-		return nil, nil, fmt.Errorf("marshaling config.json: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshaling config.json: %w", err)
 	}
 
 	f, err := os.Open(rootfsPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("opening rootfs: %w", err)
+		return nil, nil, nil, fmt.Errorf("opening rootfs: %w", err)
 	}
-	return &tempFile{File: f, path: rootfsPath}, configJSON, nil
+	return &tempFile{File: f, path: rootfsPath}, configJSON, config, nil
 }
 
 // ociDefaultEnv is what umoci seeds a runtime spec with, so a built image gets the environment.* keys a pulled one does.

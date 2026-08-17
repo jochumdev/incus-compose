@@ -5,9 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -106,17 +104,11 @@ type Image struct {
 	state atomic.Pointer[ImageState]
 }
 
-// imageSource is where incusd fetches an image from.
+// imageSource is where incusd fetches an image from. A registry that is not a
+// configured remote gets an info synthesized from its well-known address, so
+// every source is described the same way.
 type imageSource struct {
-	server      string
-	protocol    string
-	certificate string
-	project     string
-
-	// username and password are a registry's, and reach incusd inside the
-	// server URL because ImageSource carries no field of their own.
-	username string
-	password string
+	info *iclient.ConfigRemoteInfo
 
 	// conn is set for a native incus remote only; anything else incusd resolves itself.
 	conn *iclient.Connection
@@ -126,16 +118,18 @@ type imageSource struct {
 // incusd can be handed one. incusd logs this URL, so build it here and nowhere
 // else.
 func (s *imageSource) serverURL() string {
-	if s.username == "" && s.password == "" {
-		return s.server
+	addr := s.info.Addrs[0]
+
+	if s.info.Username == "" && s.info.Password == "" {
+		return addr
 	}
 
-	parsed, err := url.Parse(s.server)
+	parsed, err := url.Parse(addr)
 	if err != nil {
-		return s.server
+		return addr
 	}
 
-	parsed.User = url.UserPassword(s.username, s.password)
+	parsed.User = url.UserPassword(s.info.Username, s.info.Password)
 
 	return parsed.String()
 }
@@ -150,7 +144,9 @@ type ImageState struct {
 	UID        uint64
 	GID        uint64
 	Entrypoint string
+	Cmd        string
 	Cwd        string
+	Volumes    []string
 
 	// Size is the total image size in bytes as reported by the source server,
 	// resolved best-effort before a download. 0 when unknown.
@@ -378,7 +374,7 @@ func (r *Image) setupCacheAndSource() error {
 			r.client.LogWarn("Failed to get an image server for", "resource", r, "error", err)
 		} else {
 			r.source = source
-			r.nativeIncus = source.protocol == "incus"
+			r.nativeIncus = source.info.Protocol == "incus"
 		}
 	}
 
@@ -396,7 +392,13 @@ func (r *Image) resolveSource() (*imageSource, error) {
 			return nil, ErrImageSource.WithText("no remote named " + r.remote)
 		}
 
-		return &imageSource{server: url, protocol: "oci"}, nil
+		// Nowhere to configure a credentials helper, so this one is anonymous.
+		return &imageSource{info: &iclient.ConfigRemoteInfo{
+			Name:     r.remote,
+			Addrs:    []string{url},
+			Protocol: "oci",
+			Public:   true,
+		}}, nil
 	}
 
 	info, err := config.RemoteInfos(r.remote)
@@ -404,14 +406,7 @@ func (r *Image) resolveSource() (*imageSource, error) {
 		return nil, err
 	}
 
-	source := &imageSource{
-		server:      info.Addrs[0],
-		protocol:    info.Protocol,
-		certificate: info.ServerCert,
-		project:     info.Project,
-		username:    info.Username,
-		password:    info.Password,
-	}
+	source := &imageSource{info: info}
 
 	if info.Protocol != "incus" {
 		return source, nil
@@ -432,13 +427,13 @@ func (r *Image) pullRequest(fingerprint string) incusApi.ImagesPost {
 		Source: &incusApi.ImagesPostSource{
 			ImageSource: incusApi.ImageSource{
 				Server:      r.source.serverURL(),
-				Protocol:    r.source.protocol,
-				Certificate: r.source.certificate,
+				Protocol:    r.source.info.Protocol,
+				Certificate: r.source.info.ServerCert,
 			},
 			Type:        "image",
 			Mode:        "pull",
 			Fingerprint: fingerprint,
-			Project:     r.source.project,
+			Project:     r.source.info.Project,
 		},
 	}
 }
@@ -483,7 +478,7 @@ func (r *Image) get(ctx context.Context) error {
 	img, _, err := conn.GetImage(ctx, alias.Target, nil)
 	if err == nil {
 		next.Size = img.Size
-		readOCIConfigFromProperties(next, img.Properties)
+		ociReadProperties(next, img.Properties)
 	}
 
 	r.state.Store(next)
@@ -599,7 +594,7 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 	}
 
 	// Extract oci informations with a temporary instance.
-	err = extractAndStoreOCIConfig(ctx, r.client, r.cache.incus, cacheAlias.Target)
+	err = r.ociStoreConfig(ctx, r.cache.incus, cacheAlias.Target, nil)
 	if err != nil {
 		return nil, ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 	}
@@ -617,7 +612,7 @@ func (r *Image) copyToProject(ctx context.Context, args Options, cacheAlias *inc
 
 	r.updateState(func(s *ImageState) {
 		s.Size = img.Size
-		readOCIConfigFromProperties(s, img.Properties)
+		ociReadProperties(s, img.Properties)
 	})
 
 	conn, err := r.client.Connection()
@@ -722,6 +717,13 @@ func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageA
 
 	cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
 	if err == nil {
+		// An entry cached before the split still concatenates entrypoint and
+		// command, so reading the config again upgrades it where it lies.
+		err = r.ociStoreConfig(ctx, r.cache.incus, cacheAlias.Target, nil)
+		if err != nil {
+			return nil, err
+		}
+
 		return cacheAlias, nil
 	}
 
@@ -738,7 +740,7 @@ func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageA
 		}
 
 		// Extract oci informations with a temporary instance.
-		err = extractAndStoreOCIConfig(ctx, r.client, r.cache.incus, cacheAlias.Target)
+		err = r.ociStoreConfig(ctx, r.cache.incus, cacheAlias.Target, nil)
 		if err != nil {
 			return nil, ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 		}
@@ -788,128 +790,12 @@ func (r *Image) createDirect(ctx context.Context, args Options) error {
 	}
 
 	// Extract oci informations with a temporary instance.
-	err = extractAndStoreOCIConfig(ctx, r.client, conn, targetAlias.Target)
+	err = r.ociStoreConfig(ctx, conn, targetAlias.Target, nil)
 	if err != nil {
 		return ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 	}
 
 	return r.get(ctx)
-}
-
-// extractAndStoreOCIConfig creates a temporary stopped container from this image,
-// reads oci.uid/oci.gid/oci.entrypoint/oci.cwd from its config, stores them as
-// image properties, then deletes the container.
-func extractAndStoreOCIConfig(ctx context.Context, c *Client, server *iclient.Connection, fingerprint string) error {
-	pool := c.Config().DefaultStoragePool
-
-	img, _, err := server.GetImage(ctx, fingerprint, nil)
-	if err != nil {
-		return err
-	}
-
-	// Check if already extracted
-	if _, ok := img.Properties["oci.uid"]; ok {
-		return nil
-	}
-
-	tempName := "ic-uid-" + SanitizeIncusName(RandString(16), MaxIncusNameLen-7)
-
-	req := incusApi.InstancesPost{
-		Name: tempName,
-		Type: incusApi.InstanceTypeContainer,
-		Source: incusApi.InstanceSource{
-			Type:        "image",
-			Fingerprint: fingerprint,
-		},
-		InstancePut: incusApi.InstancePut{
-			Devices: map[string]map[string]string{
-				"root": {
-					"type": "disk",
-					"path": "/",
-					"pool": pool,
-				},
-			},
-		},
-	}
-
-	// Create
-	op, err := server.CreateInstance(ctx, req)
-	if err == nil {
-		// Execute create, ignore error.
-		_, err = iclient.WaitOperation(ctx, op)
-		if err == nil {
-			defer func() {
-				deleteOp, err := server.DeleteInstance(context.WithoutCancel(ctx), tempName)
-				if err == nil {
-					_, _ = iclient.WaitOperation(context.WithoutCancel(ctx), deleteOp)
-				}
-			}()
-		} else {
-			c.LogWarn("Failed to create a temp instance for an image (1)", "fingerprint", fingerprint[16:], "error", err)
-		}
-	} else {
-		c.LogWarn("Failed to create a temp instance for an image (2)", "fingerprint", fingerprint[16:], "error", err)
-	}
-
-	// fetch
-	instance, _, err := server.GetInstance(ctx, tempName, nil)
-	if err != nil {
-		return err
-	}
-
-	uid, gid, err := extractUIDGID(&instance.Instance)
-	if err != nil {
-		return fmt.Errorf("extracting uid/gid: %w", err)
-	}
-
-	entrypoint := instance.Config["oci.entrypoint"]
-	cwd := instance.Config["oci.cwd"]
-
-	if uid == 0 && gid == 0 && entrypoint == "" && cwd == "" {
-		return nil
-	}
-
-	img, eTag, err := server.GetImage(ctx, fingerprint, nil)
-	if err != nil {
-		return fmt.Errorf("getting image for property update: %w", err)
-	}
-
-	props := maps.Clone(img.Properties)
-	if props == nil {
-		props = make(map[string]string)
-	}
-	props["oci.uid"] = strconv.FormatUint(uid, 10)
-	props["oci.gid"] = strconv.FormatUint(gid, 10)
-	props["oci.entrypoint"] = entrypoint
-	props["oci.cwd"] = cwd
-
-	if err := server.UpdateImage(ctx, fingerprint, incusApi.ImagePut{
-		AutoUpdate: img.AutoUpdate,
-		Properties: props,
-		Public:     img.Public,
-		ExpiresAt:  img.ExpiresAt,
-		Profiles:   img.Profiles,
-	}, eTag); err != nil {
-		return fmt.Errorf("storing OCI config as image properties: %w", err)
-	}
-
-	return nil
-}
-
-// readOCIConfigFromProperties reads oci.* values from image properties into s.
-func readOCIConfigFromProperties(s *ImageState, props map[string]string) {
-	if uidStr, ok := props["oci.uid"]; ok {
-		if uid64, err := strconv.ParseUint(uidStr, 10, 32); err == nil {
-			s.UID = uid64
-		}
-	}
-	if gidStr, ok := props["oci.gid"]; ok {
-		if gid64, err := strconv.ParseUint(gidStr, 10, 32); err == nil {
-			s.GID = gid64
-		}
-	}
-	s.Entrypoint = props["oci.entrypoint"]
-	s.Cwd = props["oci.cwd"]
 }
 
 // ensureBuild handles the Ensure lifecycle for locally-built images. It does not
@@ -997,7 +883,7 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 		return ErrCreate.WithText("no container builder").Wrap(err)
 	}
 
-	rootfs, configJSON, err := buildRootfs(ctx, r.client, builder, &buildCfg, c.Global().Stdout(), c.Global().Stderr())
+	rootfs, configJSON, ociCfg, err := buildRootfs(ctx, r.client, builder, &buildCfg, c.Global().Stdout(), c.Global().Stderr())
 	if err != nil {
 		return ErrCreate.WithText("building container image").Wrap(err)
 	}
@@ -1043,7 +929,9 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 		return ErrCreate.WithText("fetching alias after build").Wrap(err)
 	}
 
-	err = extractAndStoreOCIConfig(ctx, r.client, target, built.Target)
+	// The builder already said what the entrypoint and command are, so a built
+	// image needs no registry to read its own config back from.
+	err = r.ociStoreConfig(ctx, target, built.Target, ociCfg)
 	if err != nil {
 		return err
 	}

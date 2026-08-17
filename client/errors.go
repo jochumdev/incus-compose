@@ -181,6 +181,10 @@ var (
 	// ErrImageSource indicates an image source error.
 	ErrImageSource = NewError("image source error")
 
+	// ErrNoPlatform indicates a multi-arch image carries no manifest for the
+	// server's architecture.
+	ErrNoPlatform = NewError("image has no manifest for the architecture")
+
 	// ErrDeviceConflict indicates a device name conflict.
 	ErrDeviceConflict = NewError("device conflict")
 
