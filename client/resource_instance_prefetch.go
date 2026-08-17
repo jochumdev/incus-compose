@@ -12,10 +12,9 @@ import (
 // the instances spell their own labels.
 const PrefetchVolumeServiceKey = "user.label.incus-compose.service"
 
-// prefetchVolumeDevice is the device name a path's own volume is attached as.
-func prefetchVolumeDevice(at string) string {
-	return "imgvol-" + slug.Make(at)
-}
+// prefetchDevicePrefix names the devices a path's own volume is attached as,
+// and is what finds them again on an instance nobody here created.
+const prefetchDevicePrefix = "imgvol-"
 
 // prefetchVolumeName is what a declared path's volume is called, which is
 // derived rather than stored so an instance can be read back without its image.
@@ -70,7 +69,7 @@ func (r *Instance) prefetchVolumes(ctx context.Context, image *Image, uid uint64
 		}
 
 		r.Config.Devices = append(r.Config.Devices, InstanceDevice{
-			Name: prefetchVolumeDevice(at),
+			Name: prefetchDevicePrefix + slug.Make(at),
 			Config: InstanceDeviceConfig{
 				DeviceType: InstanceDeviceTypeDisk,
 				Disk: InstanceDeviceDiskConfig{
@@ -123,7 +122,7 @@ func (r *Instance) prefetchDevices() []map[string]string {
 	found := []map[string]string{}
 
 	for name, dev := range info.Devices {
-		if !strings.HasPrefix(name, "imgvol-") || dev["type"] != "disk" || dev["path"] == "" || dev["source"] == "" {
+		if !strings.HasPrefix(name, prefetchDevicePrefix) || dev["type"] != "disk" || dev["path"] == "" || dev["source"] == "" {
 			continue
 		}
 
