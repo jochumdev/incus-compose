@@ -135,17 +135,18 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	}
 
 	instCfg := &client.InstanceConfig{
-		ServiceName:  service.Name,
-		Image:        image.Name(),
-		Resources:    slices.Clone(resources),
-		Extensions:   config,
-		Devices:      devices,
-		Files:        files,
-		Dependencies: instanceDependencyWaits(p, service, options),
-		Entrypoint:   service.Entrypoint,
-		Command:      service.Command,
-		UID:          uid,
-		GID:          gid,
+		ServiceName:   service.Name,
+		NoAutoVolumes: options.noAutoVolumes,
+		Image:         image.Name(),
+		Resources:     slices.Clone(resources),
+		Extensions:    config,
+		Devices:       devices,
+		Files:         files,
+		Dependencies:  instanceDependencyWaits(p, service, options),
+		Entrypoint:    service.Entrypoint,
+		Command:       service.Command,
+		UID:           uid,
+		GID:           gid,
 	}
 
 	ir, err := c.Resource(client.KindInstance, instanceName, instCfg)
@@ -677,12 +678,20 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 				pool = c.Config().DefaultStoragePool
 			}
 
+			// Docker fills an empty volume from the image at its target, unless
+			// the compose file says nocopy.
+			prefetch := cVol.Target
+			if cVol.Volume != nil && cVol.Volume.NoCopy {
+				prefetch = ""
+			}
+
 			volConfig := &client.StorageVolumeConfig{
 				Shifted:       shifted,
 				ImageResource: image,
 				UID:           uid,
 				GID:           gid,
 				Pool:          pool,
+				Prefetch:      prefetch,
 				Extensions:    extensions,
 			}
 

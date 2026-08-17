@@ -166,6 +166,10 @@ type XICProject struct {
 	Backup  client.BackupConfig `mapstructure:"backup"`
 	Healthd XICHealthd
 	XIncus  map[string]string
+
+	// NoAutoVolumes is x-incus-compose.auto-volumes: false, which leaves the
+	// paths an image declares as volumes to Incus.
+	NoAutoVolumes bool
 }
 
 // XICHealthd is the x-incus-compose.healthd block.
@@ -215,7 +219,11 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 
 	if p.Extensions != nil {
 		var ext struct {
-			Backup  client.BackupConfig `mapstructure:"backup"`
+			Backup client.BackupConfig `mapstructure:"backup"`
+
+			// A pointer: absent means on, which a bool cannot say.
+			AutoVolumes *bool `mapstructure:"auto-volumes"`
+
 			Healthd struct {
 				Incus          string         `mapstructure:"incus"`
 				Network        string         `mapstructure:"network"`
@@ -246,6 +254,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.Healthd.Workers = ext.Healthd.Workers
 			p.ClientConfig.Healthd.RestartWorkers = ext.Healthd.RestartWorkers
 			p.ClientConfig.Backup = ext.Backup
+			p.ClientConfig.NoAutoVolumes = ext.AutoVolumes != nil && !*ext.AutoVolumes
 
 			for k, v := range ext.Healthd.XIncus {
 				p.ClientConfig.Healthd.XIncus[k] = fmt.Sprint(v)
@@ -298,6 +307,9 @@ func (p *Project) InstanceNames() []string {
 type ResourcesOptions struct {
 	Scale map[string]int // service name -> replica count override
 	marks map[string]string
+
+	// noAutoVolumes carries x-incus-compose.auto-volumes: false to the instances.
+	noAutoVolumes bool
 }
 
 // ResourcesOption is a functional option for ToStack.
@@ -323,6 +335,7 @@ func (p *Project) Resources(c *client.Client, opts ...ResourcesOption) (map[stri
 	}
 
 	options.marks = p.InstanceMarks
+	options.noAutoVolumes = p.ClientConfig.NoAutoVolumes
 
 	result := map[string][]client.Resource{}
 

@@ -22,6 +22,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
   tmpfs at the same target still wins, and `x-incus-compose.auto-volumes: false`
   turns it off for a project. (by @jochumdev)
 
+- A named volume now starts from what the image ships at its target, as docker
+  fills an empty volume from the image. A volume mounted over a directory the
+  image populated - `conf:/etc/nginx/conf.d`, say - is no longer empty on the
+  first run. `volume: {nocopy: true}` keeps it empty. (by @jochumdev)
+
 - An external network can now name `<project>:<network>` to attach to a
   managed network owned by another compose project, instead of only a plain
   network name. (by @jochumdev)
