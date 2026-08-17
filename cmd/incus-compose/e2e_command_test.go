@@ -91,6 +91,7 @@ func TestE2EImageCarriesTheOCISplit(t *testing.T) {
 // TestE2EUpgradesAnAgedCacheEntry pins that upgrading incus-compose over an
 // existing cache stays seamless.
 func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
+	t.Parallel()
 	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
