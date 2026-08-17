@@ -69,8 +69,8 @@ type ImageCopyArgs struct {
 
 // GetImageArgs narrows an image read. A nil one is the zero value.
 type GetImageArgs struct {
-	// Secret reads an image the server has not made public, using the token
-	// from CreateImageSecret.
+	// Secret reads an image the server has not made public, using a token
+	// minted from its /secret endpoint.
 	Secret string
 }
 
