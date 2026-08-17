@@ -31,10 +31,6 @@ for correct semver ordering. Headings below preserve each release's announced fo
   managed network owned by another compose project, instead of only a plain
   network name. (by @jochumdev)
 
-- **library**: `StorageVolumeConfig.AlwaysHash` names a volume after a hash of
-  its name however short the name is, so a generated volume cannot collide with
-  a declared one. (by @jochumdev)
-
 - **library**: `Client.Resources()` returns the resources a client holds, so a
   caller can act on ones it did not declare itself. (by @jochumdev)
 

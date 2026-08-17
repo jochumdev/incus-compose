@@ -151,10 +151,10 @@ says it - a mutex in a struct with one lock is `mu`.
 
 ### Helpers
 
-Avoid single-purpose helpers. A function with one caller is usually better
-inlined: the indirection costs the reader a jump and hides the flow. The
-exception is when extracting it makes the caller _much_ easier to read - a
-noisy block reduced to one named line.
+Every helper is a jump, and every jump is a frame the reader has to hold while
+reading the caller. Extract only what the reader never has to open: if
+understanding the caller means going into the helper, inline it. A function
+with one caller almost never passes that test.
 
 ### Comments
 

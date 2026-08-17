@@ -32,7 +32,7 @@ Licensing is in [CONTRIBUTING.md](CONTRIBUTING.md). What is specific to you:
 
 - Comments are one line. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full rule; the short version is that every exported symbol gets one, a self-explanatory line gets none, and a second line needs a reason you can name.
 - Commit messages are kept as short and to the point as possible, no need to summarize the whole issue. Keep the conventional `<type>(<scope>): <description>` format from CONTRIBUTING.md.
-- Do not use `go vet`, `gci` or any of those diagnostics tools, use gopls.
+- Do not use `go vet`, `gci` or any of those diagnostics tools, use `just fix`.
 - You don't need to capture tests on your own use `just test-log` to get the last log.
 - We don't use the define and test one line `if` syntax, instead splitting definition and testing across two lines:
 
@@ -66,44 +66,24 @@ rules do not apply here. Follow this repo's own rules in
 - Removing user-visible output or an exported symbol is its own announced change, never folded into a cleanup.
 - Run long commands (test suites, builds, `up`) in the foreground; several agents share one host, see `AGENTS.local.md`.
 - Never chain edit -> test -> restore in one shell invocation. Interrupted or denied mid-chain the edit lands and the restore never runs; keep each step separately reversible.
+- A test instance that has to stay up runs `oci.entrypoint: sh`. It needs no `sleep`, and the test does not wait for one.
 - Before changing behaviour that contradicts the upstream docs, check them (`~/vendor/go/incus/doc/`). If we deviate anyway, record why in the code - the next reader will otherwise "fix" it back.
 
-## Navigation and gopls
+## Navigation
 
-**Navigate with `rg`.** Measured in this repo: `rg` beats `grep`, and both beat
-gopls for finding and counting. Use it to locate a symbol, list its call sites,
-or sweep a package - and do not ask first. `work/` is gitignored, so both tools
-skip it silently.
+**Navigate with `rg`.** Measured in this repo: `rg` beats `grep` for finding and
+counting. Use it to locate a symbol, list its call sites, or sweep a package -
+and do not ask first. `work/` is gitignored, so it is skipped silently.
 
-Reach for gopls where the type checker is the point: it knows what a symbol
-_is_, not what its name looks like.
-
-| Tool                   | Use it for                                                                   |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `go_diagnostics`       | build and analysis errors, **with fix diffs**. After every edit.             |
-| `go_symbol_references` | every use of a symbol. Before changing its signature or deleting it.         |
-| `go_rename_symbol`     | rename across the workspace                                                  |
-| `go_package_api`       | the public API of a package, ours or a dependency - beats reading its source |
-| `go_file_context`      | what a file uses from the rest of its package                                |
-| `go_search`            | a symbol by fuzzy name, when `rg` has not found it                           |
-| `go_vulncheck`         | after touching `go.mod`                                                      |
-| `go_workspace`         | module layout, once per session                                              |
+Renaming a symbol is `sed` over `git ls-files '*.go'` with word boundaries, and
+`just lint <path>` afterwards to catch what it missed.
 
 ### After every Go edit
 
-```
-go_diagnostics({"files": ["/abs/path/to/edited.go"]})
-```
-
-It returns each error with a suggested patch. Apply the patch rather than
-working the change out yourself, then call it again to confirm. It is
-workspace-wide, so it also catches what an edit broke in a file you did not
-touch - and it is faster than `just fix`, which cannot report a missing import
-at all (the typecheck fails before the formatters run).
-
-**This is how you fix a missing import.** The diff it hands back names the right
-module, because gopls resolves against the module graph. Do not reconstruct the
-import path by hand and do not reach for `goimports`.
+`just fix <path>`. It reports a broken import as `typecheck`, so a package that
+lints clean also compiles. Scope it: whole-tree and single-package runs cost the
+same few seconds here, and a whole-tree run from one worktree can hand a stale
+answer to the next.
 
 ## Changing ic-healthd
 
