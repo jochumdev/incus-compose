@@ -1,0 +1,8 @@
+services:
+  store:
+    image: ghcr.io/isso-comments/isso:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256M

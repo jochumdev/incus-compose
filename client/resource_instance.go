@@ -103,6 +103,10 @@ type InstanceConfig struct {
 	// Command overrides the image command (compose `command:`).
 	Command []string
 
+	// NoAutoVolumes leaves the paths the image declares as volumes to Incus,
+	// instead of giving each one a volume of the service's own.
+	NoAutoVolumes bool
+
 	// UID if not 0 use that value else use the user id from the image.
 	UID uint64
 	// GID if not 0 use that value else use the user id from the image.
@@ -486,6 +490,16 @@ func (r *Instance) ensure(ctx context.Context, opts ...Option) (bool, error) {
 			return false, r.client.hookAfter(ctx, ActionEnsure, r, options, addErr)
 		}
 
+		// The volumes it carries outlive the run that made them.
+		for _, dev := range r.prefetchDevices() {
+			_, adoptErr := r.client.Resource(KindStorageVolume,
+				prefetchVolumeName(r.Config.ServiceName, dev["path"]),
+				&StorageVolumeConfig{Pool: dev["pool"], AlwaysHash: true})
+			if adoptErr != nil {
+				return false, r.client.hookAfter(ctx, ActionEnsure, r, options, adoptErr)
+			}
+		}
+
 		err = r.ensured()
 		err = r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 
@@ -591,6 +605,11 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 
 	// Store the image name
 	config["user.image_alias"] = image.IncusName()
+
+	err = r.prefetchVolumes(ctx, image, uid, gid)
+	if err != nil {
+		return err
+	}
 
 	// Build devices map after volumes are resolved.
 	devices, err := r.buildDevices()
@@ -1662,6 +1681,17 @@ func (r *Instance) Delete(ctx context.Context, opts ...Option) error {
 
 		r.client.resources.Remove(r)
 		return err
+	}
+
+	// Replicas share one volume, so every delete but the last finds it in use.
+	if options.Volumes {
+		for _, dev := range r.prefetchDevices() {
+			err := conn.DeleteStoragePoolVolume(ctx, dev["pool"], "custom", dev["source"])
+			if err != nil && !errors.Is(err, iclient.ErrVolumeInUse) {
+				r.client.LogWarn("Failed to delete a volume the instance brought up",
+					"resource", r, "volume", dev["source"], "error", err)
+			}
+		}
 	}
 
 	r.clearState()

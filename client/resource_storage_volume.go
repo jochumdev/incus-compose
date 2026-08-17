@@ -15,6 +15,8 @@ import (
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/lxc/incus/v7/shared/util"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // StorageVolumeConfig configures storage volume creation.
@@ -443,6 +445,11 @@ func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
 	}
 
 	err = conn.DeleteStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName)
+	if errors.Is(err, iclient.ErrVolumeInUse) {
+		// Replicas share one volume, so every instance but the last says this.
+		err = ErrVolumeInUse.WithResource(r).Wrap(err)
+	}
+
 	err = r.client.hookAfter(ctx, ActionDelete, r, options, err)
 
 	r.clearState()

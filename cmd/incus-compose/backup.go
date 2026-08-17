@@ -188,11 +188,16 @@ func newBackupCreateCommand() *cli.Command {
 
 			c.LogDebug("Ensure", "resources", stack.All())
 
+			before := c.Resources()
+
 			err = stack.ForAction(client.ActionEnsure).Run(ctx, client.ActionEnsure)
 			if err != nil {
 				c.LogError("Ensuring resources", "error", err)
 				return errLogged.Wrap(err)
 			}
+
+			// Volumes an instance carries are named by the instance, not the compose file.
+			stack.Add(discoveredResources(before, c.Resources(), nil)...)
 
 			ensuredFilter := func(r client.Resource) bool { return r.IsEnsured() }
 

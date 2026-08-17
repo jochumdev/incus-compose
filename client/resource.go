@@ -33,6 +33,9 @@ type Options struct {
 	// Force deletion/stop even if resource is in use.
 	Force bool
 
+	// Volumes takes an instance's own volumes with it (for ActionDelete).
+	Volumes bool
+
 	// Timeout for actions (0 = default).
 	Timeout time.Duration
 
@@ -84,6 +87,13 @@ func OptionCreate() Option {
 func OptionForce() Option {
 	return func(o *Options) {
 		o.Force = true
+	}
+}
+
+// OptionVolumes deletes an instance's own volumes along with it.
+func OptionVolumes() Option {
+	return func(o *Options) {
+		o.Volumes = true
 	}
 }
 

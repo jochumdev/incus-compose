@@ -511,3 +511,70 @@ func TestInstanceFileUnderAVolume(t *testing.T) {
 	_, err = ic.Lstat("/etc/nginx/conf.d/site.conf")
 	require.NoError(t, err, "the running instance must see the file at its target")
 }
+
+// TestInstancePrefetchVolumes pins that a path the image declares as a volume
+// gets one of its own, prefetched, and that a declared mount wins over it.
+func TestInstancePrefetchVolumes(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "prefetch-volumes-")
+
+	// isso declares /config and /db, and keeps a database in the second.
+	imgRes, err := c.Resource(KindImage, "ghcr.io/isso-comments/isso:latest", &ImageConfig{})
+	require.NoError(t, err)
+
+	declared, err := c.Resource(KindStorageVolume, "mine", &StorageVolumeConfig{})
+	require.NoError(t, err)
+
+	instRes, err := c.Resource(KindInstance, "isso", &InstanceConfig{
+		ServiceName: "isso",
+		Image:       imgRes.Name(),
+		Resources:   []Resource{imgRes, declared},
+		Extensions:  map[string]string{"oci.entrypoint": "sh"},
+		Devices: []InstanceDevice{{
+			Name: "vol-mine",
+			Config: InstanceDeviceConfig{
+				DeviceType: InstanceDeviceTypeDisk,
+				Disk: InstanceDeviceDiskConfig{
+					StorageVolumeConfig: &StorageVolumeConfig{Pool: c.Config().DefaultStoragePool},
+					Source:              declared.IncusName(),
+					Path:                "/config",
+				},
+			},
+		}},
+	})
+	require.NoError(t, err)
+
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(imgRes, declared, instRes)
+	require.NoError(t, stack.ForAction(ActionEnsure).Run(ctx, ActionEnsure, OptionCreate()))
+
+	require.Equal(t, []string{"/config", "/db"}, imgRes.(*Image).State().Volumes)
+
+	devices := inst.State().IncusInstance.Devices
+	require.Contains(t, devices, "imgvol-db", "the image declares /db and nothing else mounts there")
+	assert.Equal(t, "/db", devices["imgvol-db"]["path"])
+	assert.NotContains(t, devices, "imgvol-config", "a declared mount at the same target wins")
+
+	// The volume it points at is one this client holds and can act on.
+	auto, err := c.Resource(KindStorageVolume, prefetchVolumeName("isso", "/db"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, devices["imgvol-db"]["source"], auto.IncusName())
+
+	// A second client, which never created any of it, finds the same volume
+	// through the instance alone - what down and backup rely on.
+	other := c.Clone()
+
+	adopted, err := other.Resource(KindInstance, "isso", &InstanceConfig{ServiceName: "isso"})
+	require.NoError(t, err)
+	require.NoError(t, RunAction(ctx, adopted, ActionEnsure))
+
+	found, err := other.Resource(KindStorageVolume, prefetchVolumeName("isso", "/db"), nil)
+	require.NoError(t, err, "an instance must name its own volumes without its image")
+	assert.Equal(t, auto.IncusName(), found.IncusName())
+}

@@ -15,6 +15,13 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 - `healthd status` prints the shared daemon's health status key. (by @jochumdev)
 
+- Every path an image declares as a `VOLUME` now gets a storage volume of the
+  service's own, filled from what the image ships there. Until now Incus mounted
+  a tmpfs over those paths, so anything written to them was lost on restart -
+  an `isso` container kept its database there. Declaring a volume, a bind or a
+  tmpfs at the same target still wins, and `x-incus-compose.auto-volumes: false`
+  turns it off for a project. (by @jochumdev)
+
 - An external network can now name `<project>:<network>` to attach to a
   managed network owned by another compose project, instead of only a plain
   network name. (by @jochumdev)

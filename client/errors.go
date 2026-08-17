@@ -191,6 +191,10 @@ var (
 	// ErrVolumeMismatch indicates volume configuration mismatch.
 	ErrVolumeMismatch = NewError("volume configuration mismatch")
 
+	// ErrVolumeInUse indicates a volume that still has users, which for one
+	// several instances share is every delete but the last.
+	ErrVolumeInUse = NewError("volume still in use")
+
 	// ErrCreate indicates a resource creation error.
 	ErrCreate = NewError("create failed")
 
