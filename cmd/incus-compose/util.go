@@ -19,6 +19,27 @@ type filterResourcesArgs struct {
 	ExcludeKinds []client.Kind
 }
 
+// discoveredResources returns after minus before, minus the excluded kinds.
+func discoveredResources(before []client.Resource, after []client.Resource, exclude []client.Kind) []client.Resource {
+	held := make(map[client.Resource]struct{}, len(before))
+	for _, r := range before {
+		held[r] = struct{}{}
+	}
+
+	found := []client.Resource{}
+
+	for _, r := range after {
+		_, ok := held[r]
+		if ok || slices.Contains(exclude, r.Kind()) {
+			continue
+		}
+
+		found = append(found, r)
+	}
+
+	return found
+}
+
 func filterResources(p *project.Project, in map[string][]client.Resource, args filterResourcesArgs) map[string][]client.Resource {
 	result := map[string][]client.Resource{}
 

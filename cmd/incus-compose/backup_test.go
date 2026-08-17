@@ -182,7 +182,11 @@ func TestE2EBackupCreate(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -225,7 +229,11 @@ func TestE2EBackupCreateLive(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -266,7 +274,11 @@ func TestE2EBackupCreateNamed(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -297,7 +309,11 @@ func TestE2EBackupCreateIncremental(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -360,7 +376,11 @@ volumes:
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "--project-directory", projectDir, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "--project-directory", projectDir, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -399,7 +419,11 @@ func TestE2EBackupCreateNoVolumes(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -442,7 +466,11 @@ volumes:
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "--project-directory", projectDir, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "--project-directory", projectDir, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -477,7 +505,11 @@ func TestE2EBackupCreateParallel(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 
@@ -526,7 +558,11 @@ func TestE2EBackupCreateDataIntegrity(t *testing.T) {
 	pn := t.Name()
 
 	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		_, err := testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
+		if err != nil {
+			t.Errorf("cleaning up project %s: %v", pn, err)
+		}
+
 		deleteBackupProject(context.Background(), t, pn)
 	})
 

@@ -33,6 +33,9 @@ type Options struct {
 	// Force deletion/stop even if resource is in use.
 	Force bool
 
+	// Volumes takes an instance's own volumes with it (for ActionDelete).
+	Volumes bool
+
 	// Timeout for actions (0 = default).
 	Timeout time.Duration
 
@@ -84,6 +87,13 @@ func OptionCreate() Option {
 func OptionForce() Option {
 	return func(o *Options) {
 		o.Force = true
+	}
+}
+
+// OptionVolumes deletes an instance's own volumes along with it.
+func OptionVolumes() Option {
+	return func(o *Options) {
+		o.Volumes = true
 	}
 }
 
@@ -287,6 +297,14 @@ type ResourceStore struct {
 // all returns all resources.
 func (s *ResourceStore) all() []Resource {
 	return s.resources
+}
+
+// snapshot returns the resources held right now, as a copy.
+func (s *ResourceStore) snapshot() []Resource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.resources)
 }
 
 // Range runs a function on each resource with an active lock.

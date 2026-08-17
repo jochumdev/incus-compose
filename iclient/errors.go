@@ -24,6 +24,10 @@ var (
 	// lock. Wait it out with Connection.WaitInstanceBusy.
 	ErrInstanceBusy = errors.New("instance is busy")
 
+	// ErrVolumeInUse is returned when a storage volume still has a user, which
+	// for a volume several instances share is every instance but the last.
+	ErrVolumeInUse = errors.New("storage volume is still in use")
+
 	// ErrRegistryProtocol is returned by NewRepository for a remote that is
 	// not an OCI registry.
 	ErrRegistryProtocol = errors.New("remote is not an OCI registry")
@@ -40,8 +44,17 @@ var (
 // internal/server/instance/operationlock. There is no status code for it.
 const incusBusyMessage = "Instance is busy"
 
-// busyError adds ErrInstanceBusy to err when message reports the lock.
+// incusVolumeInUseMessage is how incusd refuses to delete a volume with users,
+// in cmd/incusd/storage_volumes.go. There is no status code for it either.
+const incusVolumeInUseMessage = "storage volume is still in use"
+
+// busyError adds ErrInstanceBusy or ErrVolumeInUse to err when the message
+// reports one of the two locks incusd words rather than gives a code to.
 func busyError(err error, message string) error {
+	if strings.Contains(message, incusVolumeInUseMessage) {
+		return fmt.Errorf("%w: %w", ErrVolumeInUse, err)
+	}
+
 	if !strings.Contains(message, incusBusyMessage) {
 		return err
 	}

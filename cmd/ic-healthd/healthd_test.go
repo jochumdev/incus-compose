@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -25,7 +27,11 @@ const testImage = "docker.io/library/busybox:glibc"
 func testProject(t *testing.T, prefix string) *client.Client {
 	t.Helper()
 
-	gc, err := client.NewTestClient(t.Context())
+	// Not t.Context(): it is canceled before t.Cleanup runs, so the teardown delete would never reach Incus.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	gc, err := client.NewTestClient(ctx)
 	require.NoError(t, err)
 	require.NoError(t, gc.Connect())
 
@@ -42,8 +48,16 @@ func testProject(t *testing.T, prefix string) *client.Client {
 	fmt.Fprintf(t.Output(), "incus project: %s\n", name)
 
 	t.Cleanup(func() {
-		_ = c.Done()
-		_ = gc.DeleteProject(name, true)
+		err := c.Done()
+		if err != nil {
+			t.Errorf("closing client for project %s: %v", name, err)
+		}
+
+		// A test that renames its project leaves nothing behind under this one.
+		err = gc.DeleteProject(name, true)
+		if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
+			t.Errorf("deleting project %s: %v", name, err)
+		}
 	})
 
 	return c

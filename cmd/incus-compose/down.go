@@ -40,6 +40,9 @@ func down(ctx context.Context, p *project.Project, c *client.Client, args downAr
 	c.IgnoreError(client.ActionDelete, client.ErrNotEnsured)
 	c.IgnoreError(client.ActionDelete, client.ErrNotFound)
 
+	// Replicas of a service share one volume, so all but the last delete says this.
+	c.IgnoreError(client.ActionDelete, client.ErrVolumeInUse)
+
 	if !args.Debug {
 		progress := newProgressRenderer(args.Writer, noColor, isatty.IsTerminal(os.Stdout.Fd()))
 		progress.Start(c)
@@ -108,6 +111,11 @@ func down(ctx context.Context, p *project.Project, c *client.Client, args downAr
 	runOpts := []client.Option{
 		client.OptionForce(),
 		client.OptionTimeout(args.Timeout),
+	}
+
+	// An instance brings its own volumes up, so it takes them down as well.
+	if args.Volumes || args.Project {
+		runOpts = append(runOpts, client.OptionVolumes())
 	}
 
 	if !p.ClientConfig.Healthd.External || args.NoHealthd {

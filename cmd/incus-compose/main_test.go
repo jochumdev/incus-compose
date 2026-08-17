@@ -339,9 +339,7 @@ func TestUpDownUpSimple(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -375,9 +373,7 @@ func TestNormalLifecycle(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "two-services", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []e2eTest{
 		{
@@ -423,9 +419,7 @@ func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
 	networks := plannedNetworkNames(ctx, t, pn, compose)
 	require.NotEmpty(t, networks)
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -475,12 +469,8 @@ func TestDNSCnameAliasAcrossProjects(t *testing.T) {
 	// dns2's compose.yaml hardcodes x-incus-compose.network: dns-default, so
 	// the dns project must be named literally "dns" for the names to line up.
 	// Cleanups run LIFO, so dns2 (registered second) is torn down before dns.
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, "dns", "", nil, "-f", composeDNS, "down", "--project")
-	})
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, "dns2", "", nil, "-f", composeDNS2, "down", "--project")
-	})
+	testlib.CleanupCompose(t, "dns", "-f", composeDNS, "down", "--project")
+	testlib.CleanupCompose(t, "dns2", "-f", composeDNS2, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, "dns", "", nil, "-f", composeDNS, "up", "--detach")
 	require.NoError(t, err)

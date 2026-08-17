@@ -39,7 +39,7 @@ func lockTestSFTP(t *testing.T, vol *StorageVolume) *sftp.Client {
 func TestStorageVolumeLock_NotEnsured(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-notensured-")
+	c := newRandomTestClient(t, "volume-lock-notensured-")
 
 	r, err := c.Resource(KindStorageVolume, "unensured", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestStorageVolumeLock_NotEnsured(t *testing.T) {
 func TestStorageVolumeLock_AcquireExcludesAndUnlockRemoves(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-")
+	c := newRandomTestClient(t, "volume-lock-")
 	vol := ensuredLockTestVolume(t, c, "locked-vol")
 
 	sc := lockTestSFTP(t, vol)
@@ -79,7 +79,7 @@ func TestStorageVolumeLock_AcquireExcludesAndUnlockRemoves(t *testing.T) {
 func TestStorageVolumeLock_NestedNameCreatesParents(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-nested-")
+	c := newRandomTestClient(t, "volume-lock-nested-")
 	vol := ensuredLockTestVolume(t, c, "nested-vol")
 
 	sc := lockTestSFTP(t, vol)
@@ -108,7 +108,7 @@ func TestStorageVolumeLock_NestedNameCreatesParents(t *testing.T) {
 func TestStorageVolumeLock_MultipleLocksInOneVolume(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-multi-")
+	c := newRandomTestClient(t, "volume-lock-multi-")
 	vol := ensuredLockTestVolume(t, c, "multi-vol")
 
 	sc := lockTestSFTP(t, vol)
@@ -148,7 +148,7 @@ func TestStorageVolumeLock_MultipleLocksInOneVolume(t *testing.T) {
 func TestStorageVolumeLock_ConcurrentDistinctLocks(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-concurrent-")
+	c := newRandomTestClient(t, "volume-lock-concurrent-")
 	vol := ensuredLockTestVolume(t, c, "concurrent-vol")
 
 	names := []string{
@@ -207,7 +207,7 @@ func TestStorageVolumeLock_ConcurrentDistinctLocks(t *testing.T) {
 func TestStorageVolumeLock_BlocksUntilContextDone(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-block-")
+	c := newRandomTestClient(t, "volume-lock-block-")
 	vol := ensuredLockTestVolume(t, c, "blocked-vol")
 
 	sc := lockTestSFTP(t, vol)
@@ -234,7 +234,7 @@ func TestStorageVolumeLock_BlocksUntilContextDone(t *testing.T) {
 func TestStorageVolumeLock_StaleTakeoverAfterCrash(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-stale-")
+	c := newRandomTestClient(t, "volume-lock-stale-")
 	vol := ensuredLockTestVolume(t, c, "stale-vol")
 
 	stale := 300 * time.Millisecond
@@ -263,7 +263,7 @@ func TestStorageVolumeLock_StaleTakeoverAfterCrash(t *testing.T) {
 func TestStorageVolumeLock_HeartbeatPreventsStaleTakeover(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-heartbeat-")
+	c := newRandomTestClient(t, "volume-lock-heartbeat-")
 	vol := ensuredLockTestVolume(t, c, "heartbeat-vol")
 
 	// A generous stale window so a real heartbeat round trip has headroom against
@@ -290,7 +290,7 @@ func TestStorageVolumeLock_HeartbeatPreventsStaleTakeover(t *testing.T) {
 func TestStorageVolumeLock_UnlockDeletesOnlyOwnLock(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t.Context(), t, "volume-lock-owner-")
+	c := newRandomTestClient(t, "volume-lock-owner-")
 	vol := ensuredLockTestVolume(t, c, "owner-vol")
 
 	scA := lockTestSFTP(t, vol)

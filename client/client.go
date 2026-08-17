@@ -265,6 +265,12 @@ func (c *Client) IsConnected() bool {
 // 	return idx != -1
 // }
 
+// Resources returns the resources this client holds right now, clones excluded.
+// The slice is a copy; the resources in it are the live ones.
+func (c *Client) Resources() []Resource {
+	return c.resources.snapshot()
+}
+
 // Resource returns an existing resource or creates a new one. You might use a nil config for lookups.
 func (c *Client) Resource(kind Kind, name string, config Config) (Resource, error) {
 	if config == nil {

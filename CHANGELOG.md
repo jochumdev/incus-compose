@@ -15,9 +15,30 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 - `healthd status` prints the shared daemon's health status key. (by @jochumdev)
 
+- Every path an image declares as a `VOLUME` now gets a storage volume of the
+  service's own, filled from what the image ships there. Until now Incus mounted
+  a tmpfs over those paths, so anything written to them was lost on restart -
+  an `isso` container kept its database there. Declaring a volume, a bind or a
+  tmpfs at the same target still wins, and `x-incus-compose.auto-volumes: false`
+  turns it off for a project. (by @jochumdev)
+
+- A named volume now starts from what the image ships at its target, as docker
+  fills an empty volume from the image. A volume mounted over a directory the
+  image populated - `conf:/etc/nginx/conf.d`, say - is no longer empty on the
+  first run. `volume: {nocopy: true}` keeps it empty. (by @jochumdev)
+
 - An external network can now name `<project>:<network>` to attach to a
   managed network owned by another compose project, instead of only a plain
   network name. (by @jochumdev)
+
+- **library**: `Client.Resources()` returns the resources a client holds, so a
+  caller can act on ones it did not declare itself. (by @jochumdev)
+
+- **library**: `StorageVolumeConfig.Prefetch` fills a volume on first creation
+  with what its image holds at that path, the way docker seeds an empty volume
+  from the image. `StorageVolume.Created()` now reads from
+  `StorageVolumeState`, so it follows a fetch instead of staying set.
+  (by @jochumdev)
 
 ### Changed
 
@@ -30,6 +51,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
   likely cause and a command to check it. (by @jochumdev)
 
 ### Fixed
+
+- A config or secret whose target sits inside a volume is now written into that
+  volume. It used to be written into the instance's filesystem, where the mount
+  hid it, so the container started with the image's file or nothing at all. (by
+  @jochumdev)
 
 - `up` could hang until the start timeout on a service that had already been
   reported healthy, and then fail. Waiting for a container's IP refreshed the

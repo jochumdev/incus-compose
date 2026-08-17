@@ -139,7 +139,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "ensure-addmissing-")
+	c := newRandomTestClient(t, "ensure-addmissing-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "patch-config-")
+	c := newRandomTestClient(t, "patch-config-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "clone-events-")
+	c := newRandomTestClient(t, "clone-events-")
 
 	// A phase of restart: its own hooks and its own resources.
 	rc := c.Clone()
@@ -304,14 +304,14 @@ func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
 	testlib.SkipLocal(t)
 	ctx := t.Context()
 
-	gc, err := NewTestClient(t.Context())
+	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 
 	name := "fetch-isolation-" + strings.ToLower(RandString(12))
 	c, err := createProjectClient(gc, name)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { _ = gc.DeleteProject(name, true) })
+	deleteProjectOnCleanup(t, gc, name)
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -352,7 +352,7 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "stopped-status-")
+	c := newRandomTestClient(t, "stopped-status-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -405,7 +405,7 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "nohealthd-status-")
+	c := newRandomTestClient(t, "nohealthd-status-")
 
 	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
 	require.NoError(t, err)
@@ -431,4 +431,150 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, shared.HealthStatusUnknown, got.Config[HealthStatusKey])
 	require.Empty(t, got.Config[HealthStoppedKey], "there is no daemon to hold back")
+}
+
+// TestInstanceFileUnderAVolume pins that a file targeted inside a volume is
+// written into the volume, not into the rootfs the mount then hides.
+func TestInstanceFileUnderAVolume(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "file-in-volume-")
+
+	imgRes, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
+	require.NoError(t, err)
+
+	volRes, err := c.Resource(KindStorageVolume, "conf", &StorageVolumeConfig{
+		Shifted:       true,
+		ImageResource: imgRes,
+	})
+	require.NoError(t, err)
+
+	vol, ok := volRes.(*StorageVolume)
+	require.True(t, ok)
+
+	instRes, err := c.Resource(KindInstance, "web", &InstanceConfig{
+		Image:      imgRes.Name(),
+		Resources:  []Resource{imgRes, volRes},
+		Extensions: map[string]string{"oci.entrypoint": "sh"},
+		Devices: []InstanceDevice{{
+			Name: "imgvol-etc-nginx-conf-d",
+			Config: InstanceDeviceConfig{
+				DeviceType: InstanceDeviceTypeDisk,
+				Disk: InstanceDeviceDiskConfig{
+					StorageVolumeConfig: &vol.Config,
+					Source:              vol.IncusName(),
+					Path:                "/etc/nginx/conf.d",
+					Shift:               true,
+				},
+			},
+		}},
+		Files: []InstanceFile{{
+			Target:    "/etc/nginx/conf.d/site.conf",
+			Content:   NewReaderFromBytes([]byte("server { listen 8080; }\n")),
+			UID:       -1,
+			GID:       -1,
+			Mode:      0o644,
+			Overwrite: true,
+		}},
+	})
+	require.NoError(t, err)
+
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(imgRes, volRes, instRes)
+	require.NoError(t, stack.ForAction(ActionEnsure).Run(ctx, ActionEnsure, OptionCreate()))
+	require.NoError(t, RunAction(ctx, inst, ActionStart, OptionNoHealthd()))
+
+	// The volume holds it under the mount point's path.
+	vc, err := vol.SFTP(ctx)
+	require.NoError(t, err)
+
+	defer func() { _ = vc.Close() }()
+
+	inVolume, err := vc.Lstat("/site.conf")
+	require.NoError(t, err, "the file must be in the volume, not in the rootfs the volume hides")
+	assert.Equal(t, int64(24), inVolume.Size())
+
+	// And a running instance sees it where the compose file asked for it.
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	ic, err := conn.GetInstanceFileSFTP(ctx, inst.IncusName())
+	require.NoError(t, err)
+
+	defer func() { _ = ic.Close() }()
+
+	_, err = ic.Lstat("/etc/nginx/conf.d/site.conf")
+	require.NoError(t, err, "the running instance must see the file at its target")
+}
+
+// TestInstancePrefetchVolumes pins that a path the image declares as a volume
+// gets one of its own, prefetched, and that a declared mount wins over it.
+func TestInstancePrefetchVolumes(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "prefetch-volumes-")
+
+	// isso declares /config and /db, and keeps a database in the second.
+	imgRes, err := c.Resource(KindImage, "ghcr.io/isso-comments/isso:latest", &ImageConfig{})
+	require.NoError(t, err)
+
+	declared, err := c.Resource(KindStorageVolume, "mine", &StorageVolumeConfig{})
+	require.NoError(t, err)
+
+	instRes, err := c.Resource(KindInstance, "isso", &InstanceConfig{
+		ServiceName: "isso",
+		Image:       imgRes.Name(),
+		Resources:   []Resource{imgRes, declared},
+		Extensions:  map[string]string{"oci.entrypoint": "sh"},
+		Devices: []InstanceDevice{{
+			Name: "vol-mine",
+			Config: InstanceDeviceConfig{
+				DeviceType: InstanceDeviceTypeDisk,
+				Disk: InstanceDeviceDiskConfig{
+					StorageVolumeConfig: &StorageVolumeConfig{Pool: c.Config().DefaultStoragePool},
+					Source:              declared.IncusName(),
+					Path:                "/config",
+				},
+			},
+		}},
+	})
+	require.NoError(t, err)
+
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(imgRes, declared, instRes)
+	require.NoError(t, stack.ForAction(ActionEnsure).Run(ctx, ActionEnsure, OptionCreate()))
+
+	require.Equal(t, []string{"/config", "/db"}, imgRes.(*Image).State().Volumes)
+
+	devices := inst.State().IncusInstance.Devices
+	require.Contains(t, devices, "imgvol-db", "the image declares /db and nothing else mounts there")
+	assert.Equal(t, "/db", devices["imgvol-db"]["path"])
+	assert.NotContains(t, devices, "imgvol-config", "a declared mount at the same target wins")
+
+	// The volume it points at is one this client holds and can act on.
+	auto, err := c.Resource(KindStorageVolume, prefetchVolumeName("isso", "/db"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, devices["imgvol-db"]["source"], auto.IncusName())
+
+	// A second client, which never created any of it, finds the same volume
+	// through the instance alone - what down and backup rely on.
+	other := c.Clone()
+
+	adopted, err := other.Resource(KindInstance, "isso", &InstanceConfig{ServiceName: "isso"})
+	require.NoError(t, err)
+	require.NoError(t, RunAction(ctx, adopted, ActionEnsure))
+
+	found, err := other.Resource(KindStorageVolume, prefetchVolumeName("isso", "/db"), nil)
+	require.NoError(t, err, "an instance must name its own volumes without its image")
+	assert.Equal(t, auto.IncusName(), found.IncusName())
 }

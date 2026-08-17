@@ -56,9 +56,7 @@ func TestE2EPull(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	tests := []struct {
 		name string
@@ -101,9 +99,7 @@ func TestE2EPullWithDeps(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "postgres-redis", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	// Pulling just "api" copies its own image, not its dependencies.
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "api")
@@ -141,9 +137,7 @@ func TestE2EPullInvalidImage(t *testing.T) {
 	})
 	compose := filepath.Join(dir, "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull")
 	require.Error(t, err)
@@ -160,9 +154,7 @@ func TestE2EPullIgnoreBuildable(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-build", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	// --ignore-buildable skips images with a build config, leaving nothing to pull.
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--ignore-buildable")

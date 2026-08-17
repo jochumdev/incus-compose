@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -24,9 +23,7 @@ func TestExecSelectsCorrectInstance(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "proxy", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -63,9 +60,7 @@ func TestE2EExecRunsAsInstanceUser(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-user", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project", "--volumes")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project", "--volumes")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)

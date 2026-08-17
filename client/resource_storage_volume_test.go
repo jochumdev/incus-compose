@@ -2,10 +2,12 @@ package client
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/internal/testlib"
@@ -143,7 +145,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "volume-ensure-")
+			c := newRandomTestClient(t, "volume-ensure-")
 
 			r, err := c.Resource(KindStorageVolume, tt.volume, tt.config)
 			require.NoError(t, err)
@@ -167,7 +169,7 @@ func TestStorageVolumeEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-idempotent-")
+	c := newRandomTestClient(t, "volume-idempotent-")
 
 	r, err := c.Resource(KindStorageVolume, "test-idempotent", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -183,7 +185,7 @@ func TestStorageVolumeEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-retry-")
+	c := newRandomTestClient(t, "volume-retry-")
 
 	r, err := c.Resource(KindStorageVolume, "test-retry", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -201,7 +203,7 @@ func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-shifted-")
+	c := newRandomTestClient(t, "volume-shifted-")
 
 	r, err := c.Resource(KindStorageVolume, "test-shifted", &StorageVolumeConfig{
 		Shifted: true,
@@ -218,7 +220,7 @@ func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-healthd-")
+	c := newRandomTestClient(t, "volume-healthd-")
 
 	ir, err := c.Resource(KindImage, "ghcr.io/lxc/incus-compose/ic-healthd:latest", &ImageConfig{})
 	require.NoError(t, err)
@@ -244,7 +246,7 @@ func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "volume-persist-")
+	c := newRandomTestClient(t, "volume-persist-")
 
 	r, err := c.Resource(KindStorageVolume, "test-persist", &StorageVolumeConfig{})
 	require.NoError(t, err)
@@ -285,7 +287,7 @@ func TestStorageVolumeDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "volume-delete-")
+			c := newRandomTestClient(t, "volume-delete-")
 
 			r, err := c.Resource(KindStorageVolume, "test-delete", &StorageVolumeConfig{})
 			require.NoError(t, err)
@@ -420,7 +422,7 @@ func TestStorageVolumeHooks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "volume-hook-")
+			c := newRandomTestClient(t, "volume-hook-")
 			tt.run(t, c)
 		})
 	}
@@ -431,7 +433,7 @@ func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
 	ctx := t.Context()
 
 	// One project, one volume name, so every worker races to create it.
-	c := newRandomTestClient(ctx, t, "volume-race-")
+	c := newRandomTestClient(t, "volume-race-")
 	name := "ic-vol-" + strings.ToLower(RandString(6))
 
 	const workers = 6
@@ -464,4 +466,90 @@ func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
 		require.NoError(t, err, i)
 		require.True(t, vols[i].IsEnsured(), i)
 	}
+}
+
+// TestStorageVolumePrefetch fills a volume from the image's content at the
+// path it will be mounted over, which is what docker does for an empty volume.
+func TestStorageVolumePrefetch(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "volume-prefetch-")
+
+	imgRes, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
+	require.NoError(t, err)
+	require.NoError(t, RunAction(ctx, imgRes, ActionEnsure, OptionCreate()))
+
+	volRes, err := c.Resource(KindStorageVolume, "conf", &StorageVolumeConfig{
+		Shifted:       true,
+		ImageResource: imgRes,
+		Prefetch:      "/etc/nginx/conf.d",
+	})
+	require.NoError(t, err)
+	require.NoError(t, RunAction(ctx, volRes, ActionEnsure, OptionCreate()))
+
+	vol, ok := volRes.(*StorageVolume)
+	require.True(t, ok)
+	require.True(t, vol.Created())
+
+	sc, err := vol.SFTP(ctx)
+	require.NoError(t, err)
+
+	defer func() { _ = sc.Close() }()
+
+	f, err := sc.Open("/default.conf")
+	require.NoError(t, err, "the image ships /etc/nginx/conf.d/default.conf, so the volume must have it")
+
+	defer func() { _ = f.Close() }()
+
+	content, err := io.ReadAll(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "server", "the file must arrive with its contents")
+
+	// No temp instance is left behind.
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	names, err := conn.GetInstanceNames(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, names, "the instance the prefetch read the image from must be gone")
+
+	// A second ensure fetches, so nothing is created and nothing is copied again.
+	require.NoError(t, RunAction(ctx, volRes, ActionEnsure, OptionCreate()))
+	assert.False(t, vol.Created(), "an ensure that fetched must not report a creation")
+}
+
+// TestStorageVolumePrefetchMissingPath pins that an image without the path
+// leaves an empty volume rather than an error.
+func TestStorageVolumePrefetchMissingPath(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "volume-prefetch-missing-")
+
+	imgRes, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
+	require.NoError(t, err)
+	require.NoError(t, RunAction(ctx, imgRes, ActionEnsure, OptionCreate()))
+
+	volRes, err := c.Resource(KindStorageVolume, "data", &StorageVolumeConfig{
+		ImageResource: imgRes,
+		Prefetch:      "/var/lib/nothing-here",
+	})
+	require.NoError(t, err)
+	require.NoError(t, RunAction(ctx, volRes, ActionEnsure, OptionCreate()))
+
+	vol, ok := volRes.(*StorageVolume)
+	require.True(t, ok)
+	require.True(t, vol.IsEnsured(), "a path the image lacks is not a failure")
+
+	sc, err := vol.SFTP(ctx)
+	require.NoError(t, err)
+
+	defer func() { _ = sc.Close() }()
+
+	entries, err := sc.ReadDir("/")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }

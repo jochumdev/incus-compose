@@ -1384,3 +1384,43 @@ func TestInstanceVolumeDevices(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// TestVolumePrefetchTarget pins that a declared volume starts from what the
+// image ships at its target, unless the compose file says nocopy.
+func TestVolumePrefetchTarget(t *testing.T) {
+	t.Parallel()
+
+	prefetchOf := func(t *testing.T, vol types.ServiceVolumeConfig, name string) string {
+		t.Helper()
+
+		// A client of its own: Resource() memoises by name, so a shared one
+		// would hand the second case the first case's volume.
+		c := client.NewOfflineClient(t.Context(), "prefetch-target-"+name)
+
+		p := &types.Project{Volumes: types.Volumes{"conf": {}}}
+		service := types.ServiceConfig{Name: name, Volumes: []types.ServiceVolumeConfig{vol}}
+
+		image, err := c.Resource(client.KindImage, "docker.io/nginx:alpine", &client.ImageConfig{})
+		require.NoError(t, err)
+
+		_, _, resources, err := instanceVolumeDevices(c, p, service, image, 0, 0)
+		require.NoError(t, err)
+		require.Len(t, resources, 1)
+
+		vr, ok := resources[0].(*client.StorageVolume)
+		require.True(t, ok)
+
+		return vr.Config.Prefetch
+	}
+
+	assert.Equal(t, "/etc/nginx/conf.d", prefetchOf(t,
+		types.ServiceVolumeConfig{Type: "volume", Source: "conf", Target: "/etc/nginx/conf.d"}, "web"))
+
+	assert.Empty(t, prefetchOf(t,
+		types.ServiceVolumeConfig{
+			Type:   "volume",
+			Source: "conf",
+			Target: "/etc/nginx/conf.d",
+			Volume: &types.ServiceVolumeVolume{NoCopy: true},
+		}, "nocopy"), "nocopy means the volume starts empty")
+}

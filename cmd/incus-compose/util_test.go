@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"net/http"
 	"sort"
 	"testing"
 
 	"github.com/compose-spec/compose-go/v2/types"
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/project"
@@ -231,4 +235,52 @@ func TestFilterResources(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDiscoveredResources pins what an ensure pass adds to a stack.
+func TestDiscoveredResources(t *testing.T) {
+	t.Parallel()
+	c := client.NewOfflineClient(t.Context(), "discovered-test")
+
+	kept, err := c.Resource(client.KindStorageVolume, "declared", &client.StorageVolumeConfig{})
+	require.NoError(t, err)
+
+	before := c.Resources()
+
+	found, err := c.Resource(client.KindStorageVolume, "auto-web-db", &client.StorageVolumeConfig{})
+	require.NoError(t, err)
+
+	image, err := c.Resource(client.KindImage, "docker.io/nginx:alpine", &client.ImageConfig{})
+	require.NoError(t, err)
+
+	got := discoveredResources(before, c.Resources(), []client.Kind{client.KindImage})
+	require.Equal(t, []client.Resource{found}, got, "only what the pass added, and not an excluded kind")
+	require.NotContains(t, got, kept)
+	require.NotContains(t, got, image)
+
+	require.Empty(t, discoveredResources(c.Resources(), c.Resources(), nil))
+}
+
+// deleteProjectOnCleanup removes an Incus project on teardown, for a test whose
+// compose file down cannot read.
+func deleteProjectOnCleanup(t *testing.T, project string) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		gc, err := client.NewTestClient(context.Background())
+		if err == nil {
+			err = gc.Connect()
+		}
+
+		if err != nil {
+			t.Errorf("connecting to delete project %s: %v", project, err)
+
+			return
+		}
+
+		err = gc.DeleteProject(project, true)
+		if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
+			t.Errorf("deleting project %s: %v", project, err)
+		}
+	})
 }

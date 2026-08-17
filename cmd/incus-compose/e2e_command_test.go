@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"maps"
 	"os"
@@ -28,9 +27,7 @@ func TestE2ECommandReplacesImageCmd(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-command", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
@@ -63,9 +60,7 @@ func TestE2EImageCarriesTheOCISplit(t *testing.T) {
 	pn := t.Name()
 	compose := testlib.Fixture(t, "with-command", "compose.yaml")
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull")
 	require.NoError(t, err)
@@ -106,10 +101,8 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	seed := t.Name() + "Seed"
 	pn := t.Name()
 
-	t.Cleanup(func() {
-		_, _ = testlib.RunCompose(context.Background(), t, seed, "", nil, "-f", compose, "down", "--project")
-		_, _ = testlib.RunCompose(context.Background(), t, pn, "", nil, "-f", compose, "down", "--project")
-	})
+	testlib.CleanupCompose(t, seed, "-f", compose, "down", "--project")
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	// pull is PullAlways, so this leaves a current entry to age by hand.
 	_, err := testlib.RunCompose(ctx, t, seed, "", nil, "-f", compose, "pull")
@@ -161,4 +154,60 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "docker-entrypoint.sh", img.Properties["oci.entrypoint"])
 	assert.Equal(t, "memcached", img.Properties["oci.cmd"])
+}
+
+// TestE2EPrefetchVolumes pins that a path an image declares as a volume gets a
+// real one, and that down --volumes takes it with the project.
+func TestE2EPrefetchVolumes(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
+
+	ctx := t.Context()
+	pn := t.Name()
+	compose := testlib.Fixture(t, "prefetch-volumes", "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--no-start")
+	require.NoError(t, err)
+
+	devices, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "incus", "config", "show", "store-1")
+	require.NoError(t, err)
+	assert.Contains(t, devices, "imgvol-config", "isso declares /config")
+	assert.Contains(t, devices, "imgvol-db", "isso declares /db")
+
+	volumes := func() []string {
+		t.Helper()
+
+		out, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose,
+			"incus", "storage", "volume", "list", "default", "--format=csv", "-c", "n")
+		require.NoError(t, err)
+
+		names := []string{}
+
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if strings.HasPrefix(line, "vol-") {
+				names = append(names, line)
+			}
+		}
+
+		return names
+	}
+
+	require.Len(t, volumes(), 2, "one volume per declared path, and nothing else")
+
+	// Plain down keeps them, as docker keeps its anonymous volumes.
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "down")
+	require.NoError(t, err)
+	assert.Len(t, volumes(), 2, "down without --volumes must keep them")
+
+	// The names are derived, so coming back up adopts them instead of adding more.
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--no-start")
+	require.NoError(t, err)
+	assert.Len(t, volumes(), 2, "a recreated instance must reuse the volumes it left behind")
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "down", "--volumes")
+	require.NoError(t, err)
+	assert.Empty(t, volumes(), "an instance takes its own volumes down with it")
 }

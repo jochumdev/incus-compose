@@ -15,6 +15,8 @@ import (
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/lxc/incus/v7/shared/util"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // StorageVolumeConfig configures storage volume creation.
@@ -37,6 +39,10 @@ type StorageVolumeConfig struct {
 	// HostPath, when set, seeds the volume with the local directory contents on first creation.
 	HostPath string
 
+	// Prefetch, when set, fills the volume on first creation with what
+	// ImageResource holds at that path. Needs ImageResource.
+	Prefetch string
+
 	// Extensions contains additional volume configuration options.
 	Extensions map[string]string
 }
@@ -53,7 +59,6 @@ type StorageVolume struct {
 
 	client    *Client
 	incusName string
-	created   bool
 	Config    StorageVolumeConfig
 
 	// mu serializes the actions; every image in a batch shares the lock volume.
@@ -69,6 +74,9 @@ type StorageVolumeState struct {
 	// IncusVolume is nil until the volume is ensured.
 	IncusVolume *incusApi.StorageVolume
 	ETag        string
+
+	// Created reports whether that volume is one this run made.
+	Created bool
 }
 
 // newStorageVolume returns an existing StorageVolume resource or creates a new one.
@@ -137,7 +145,7 @@ func (r *StorageVolume) clearState() {
 
 // Created returns true if the volume was created during the last Ensure call.
 func (r *StorageVolume) Created() bool {
-	return r.created
+	return r.State().Created
 }
 
 // Ensure retrieves an existing storage volume or creates a new one if Create option is set.
@@ -308,12 +316,28 @@ func (r *StorageVolume) create(ctx context.Context) error {
 		return ErrCreate.WithText("fetching created volume").Wrap(err)
 	}
 
-	r.state.Store(&StorageVolumeState{IncusVolume: &volume.StorageVolume, ETag: eTag})
-	r.created = true
+	r.state.Store(&StorageVolumeState{IncusVolume: &volume.StorageVolume, ETag: eTag, Created: true})
 
 	if r.Config.HostPath != "" {
-		if err := r.pushDirectoryContent(ctx); err != nil {
+		err := r.pushDirectoryContent(ctx)
+		if err != nil {
 			return ErrCreate.WithText("seeding volume from " + r.Config.HostPath).Wrap(err)
+		}
+
+		return nil
+	}
+
+	if r.Config.Prefetch != "" {
+		err := r.prefetch(ctx)
+		if err != nil {
+			// A half filled volume is worse than none, and it is ours to drop.
+			r.client.WarnError(func() error {
+				return conn.DeleteStoragePoolVolume(context.WithoutCancel(ctx), r.Config.Pool, "custom", r.incusName)
+			}, "Failed to remove a volume its prefetch left behind")
+
+			r.clearState()
+
+			return ErrCreate.WithText("prefetching " + r.Config.Prefetch + " from the image").Wrap(err)
 		}
 	}
 
@@ -413,6 +437,11 @@ func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
 	}
 
 	err = conn.DeleteStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName)
+	if errors.Is(err, iclient.ErrVolumeInUse) {
+		// Replicas share one volume, so every instance but the last says this.
+		err = ErrVolumeInUse.WithResource(r).Wrap(err)
+	}
+
 	err = r.client.hookAfter(ctx, ActionDelete, r, options, err)
 
 	r.clearState()

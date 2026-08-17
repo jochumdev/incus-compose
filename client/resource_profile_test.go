@@ -111,7 +111,7 @@ func TestProfileEnsure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "profile-ensure-")
+			c := newRandomTestClient(t, "profile-ensure-")
 
 			r, err := c.Resource(KindProfile, tt.profile, tt.config)
 			require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestProfileEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "profile-idempotent-")
+	c := newRandomTestClient(t, "profile-idempotent-")
 
 	r, err := c.Resource(KindProfile, "test-idempotent", &ProfileConfig{})
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestProfileEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "profile-retry-")
+	c := newRandomTestClient(t, "profile-retry-")
 
 	r, err := c.Resource(KindProfile, "test-retry", &ProfileConfig{})
 	require.NoError(t, err)
@@ -169,7 +169,7 @@ func TestProfileEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
 	ctx := t.Context()
-	c := newRandomTestClient(ctx, t, "profile-persist-")
+	c := newRandomTestClient(t, "profile-persist-")
 
 	r, err := c.Resource(KindProfile, "test-persist", &ProfileConfig{})
 	require.NoError(t, err)
@@ -210,7 +210,7 @@ func TestProfileDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "profile-delete-")
+			c := newRandomTestClient(t, "profile-delete-")
 
 			r, err := c.Resource(KindProfile, "test-delete", &ProfileConfig{})
 			require.NoError(t, err)
@@ -379,7 +379,7 @@ func TestProfileHooks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newRandomTestClient(ctx, t, "profile-hook-")
+			c := newRandomTestClient(t, "profile-hook-")
 			tt.run(t, c)
 		})
 	}
@@ -390,7 +390,7 @@ func TestProfileEnsure_ConcurrentCreate(t *testing.T) {
 	ctx := t.Context()
 
 	// One project, so every worker races for the same profile.
-	c := newRandomTestClient(ctx, t, "profile-race-")
+	c := newRandomTestClient(t, "profile-race-")
 	name := "ic-prof-" + strings.ToLower(RandString(6))
 
 	const workers = 6

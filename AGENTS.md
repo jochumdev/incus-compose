@@ -3,35 +3,36 @@
 AI-specific and meta rules for working in this repository.
 
 This project is destined for the **lxc** org, so the org-wide agent rules below
-(adapted from `lxc/incus` `AGENTS.md`) apply and take precedence.
+(adapted from `lxc/incus` `AGENTS.md`) apply.
 
 To get an idea about the project read [README.md](README.md).
 
 ## Rule hierarchy
 
-1. The org rules in this file (Legal, Formatting) - non-negotiable.
-2. [CONTRIBUTING.md](CONTRIBUTING.md) - canonical coding, architecture, testing,
+1. [CONTRIBUTING.md](CONTRIBUTING.md) - canonical coding, architecture, testing,
    and workflow rules; recursively read the docs it references.
+2. This file - AI-specific rules, and the org's Legal and Formatting rules.
 3. `AGENTS.local.md` - personal collaboration notes (untracked, local only).
 
-Resolve conflicts upward: org rules beat CONTRIBUTING.md, which beats local notes.
+Resolve conflicts upward: CONTRIBUTING.md beats this file, which beats local
+notes. The Legal section is the one exception - it is non-negotiable and
+CONTRIBUTING.md agrees with it.
+
 Do not restate or reinterpret project rules locally. Everything not fixed here is
 discussable - always ask before guessing.
 
 ## Legal
 
-- All contributions to this repository must be compatible with the Apache 2.0 license.
-- Specifically (but not limited to), contributions cannot include code licensed under the terms of the GPL, AGPL or LGPL licenses.
+Licensing is in [CONTRIBUTING.md](CONTRIBUTING.md). What is specific to you:
+
 - Only human beings are allowed to sign the Developer Certificate of Ownership (DCO / Signed-off-by).
 - Only human beings can ever be credited within commit messages.
 
 ## Formatting
 
-- Code comments should be no longer than one line, unless they are required to cover complex unintuitive logic.
-- Never explain previous behaviour in comments.
-- Comments are not safeguards, they are informal. An API is safe to use from several goroutines because it is mutex-free or confined to one, never because a comment says it is.
-- Commit messages should similarly be kept as short and to the point as possible, no need to summarize the whole issue. Keep the conventional `<type>(<scope>): <description>` format from CONTRIBUTING.md.
-- Do not use `go vet`, `gci` or any of those diagnostics tools, use gopls.
+- Comments are one line. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full rule; the short version is that every exported symbol gets one, a self-explanatory line gets none, and a second line needs a reason you can name.
+- Commit messages are kept as short and to the point as possible, no need to summarize the whole issue. Keep the conventional `<type>(<scope>): <description>` format from CONTRIBUTING.md.
+- Do not use `go vet`, `gci` or any of those diagnostics tools, use `just fix`.
 - You don't need to capture tests on your own use `just test-log` to get the last log.
 - We don't use the define and test one line `if` syntax, instead splitting definition and testing across two lines:
 
@@ -50,56 +51,39 @@ discussable - always ask before guessing.
 
 ## Testing
 
-This project's testing model differs from the org default, so the org
-testing rules do not apply here. Follow this repo's own rules in
+This project's testing model differs from the org default, so the org testing
+rules do not apply here. Follow this repo's own rules in
 [CONTRIBUTING.md](CONTRIBUTING.md) and
-[docs/architecture/testing.md](docs/architecture/testing.md). Use `just`
-commands instead of raw `go` (see `just --list`).
+[docs/root/architecture/testing.md](docs/root/architecture/testing.md).
 
 ## Working in this repo
 
 - Check existing patterns in the codebase before creating new ones.
-- In most cases we do not enforce security by comments, we enforce by code and architecture.
+- `go build` and `go run` are denied, so `just` is your only compiler. `just run <args>` builds from the tree and runs it, which is what you want; it costs seconds, so run the thing rather than reasoning about it. `just build` recreates the sidecar and rewrites `.env`, so it destroys the state you are debugging - reach for it only when you mean to.
 - Think through framework/library behavior before coding.
-- Keep code direct - no unnecessary intermediate variables; use `_` for unused parameters.
+- Keep code direct - no unnecessary intermediate variables.
 - If cycling (same approach, no progress), stop and ask.
 - Removing user-visible output or an exported symbol is its own announced change, never folded into a cleanup.
 - Run long commands (test suites, builds, `up`) in the foreground; several agents share one host, see `AGENTS.local.md`.
 - Never chain edit -> test -> restore in one shell invocation. Interrupted or denied mid-chain the edit lands and the restore never runs; keep each step separately reversible.
+- A test instance that has to stay up runs `oci.entrypoint: sh`. It needs no `sleep`, and the test does not wait for one.
 - Before changing behaviour that contradicts the upstream docs, check them (`~/vendor/go/incus/doc/`). If we deviate anyway, record why in the code - the next reader will otherwise "fix" it back.
 
-## gopls
+## Navigation
 
-Reach for the gopls MCP tools before grep. They answer from the type checker, so
-they know what a symbol _is_, not what its name looks like. Underusing them is
-the most common way an agent wastes a turn here.
+**Navigate with `rg`.** Measured in this repo: `rg` beats `grep` for finding and
+counting. Use it to locate a symbol, list its call sites, or sweep a package -
+and do not ask first. `work/` is gitignored, so it is skipped silently.
 
-| Tool                   | Use it for                                                                       |
-| ---------------------- | -------------------------------------------------------------------------------- |
-| `go_diagnostics`       | build and analysis errors, **with fix diffs**. After every edit.                 |
-| `go_search`            | find a symbol by fuzzy name, when you do not know where it lives                 |
-| `go_file_context`      | what a file uses from the rest of its package. After reading one the first time. |
-| `go_package_api`       | the public API of a package, ours or a dependency - beats reading its source     |
-| `go_symbol_references` | every use of a symbol. Before changing its signature or deleting it.             |
-| `go_rename_symbol`     | rename across the workspace                                                      |
-| `go_vulncheck`         | after touching `go.mod`                                                          |
-| `go_workspace`         | module layout, once per session                                                  |
+Renaming a symbol is `sed` over `git ls-files '*.go'` with word boundaries, and
+`just lint <path>` afterwards to catch what it missed.
 
 ### After every Go edit
 
-```
-go_diagnostics({"files": ["/abs/path/to/edited.go"]})
-```
-
-It returns each error with a suggested patch. Apply the patch rather than
-working the change out yourself, then call it again to confirm. It is
-workspace-wide, so it also catches what an edit broke in a file you did not
-touch - and it is faster than `just fix`, which cannot report a missing import
-at all (the typecheck fails before the formatters run).
-
-**This is how you fix a missing import.** The diff it hands back names the right
-module, because gopls resolves against the module graph. Do not reconstruct the
-import path by hand and do not reach for `goimports`.
+`just fix <path>`. It reports a broken import as `typecheck`, so a package that
+lints clean also compiles. Scope it: whole-tree and single-package runs cost the
+same few seconds here, and a whole-tree run from one worktree can hand a stale
+answer to the next.
 
 ## Changing ic-healthd
 
