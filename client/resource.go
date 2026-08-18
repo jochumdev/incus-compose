@@ -213,6 +213,9 @@ func SupportsAction(r Resource, action Action) bool {
 	case ActionBackup:
 		_, ok := r.(BackupAble)
 		return ok
+	case ActionRestore:
+		_, ok := r.(RestoreAble)
+		return ok
 	default:
 		return false
 	}
@@ -252,6 +255,12 @@ func RunAction(ctx context.Context, r Resource, action Action, opts ...Option) e
 			return e.Backup(ctx, opts...)
 		}
 		return ErrUnsupportedAction.WithAction(ActionBackup).WithResource(r)
+	case ActionRestore:
+		e, ok := r.(RestoreAble)
+		if ok {
+			return e.Restore(ctx, opts...)
+		}
+		return ErrUnsupportedAction.WithAction(ActionRestore).WithResource(r)
 	default:
 		return ErrUnsupportedAction.WithAction(action).WithResource(r)
 	}

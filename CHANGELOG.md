@@ -15,6 +15,15 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 - `healthd status` prints the shared daemon's health status key. (by @jochumdev)
 
+- `backup` copies a project's named volumes into a separate `<project>-backup`
+  Incus project and keeps per-run restore points on them, where `down`,
+  `down --volumes` and `down --project` cannot reach them. `backup create` takes
+  a run, `list` shows them with their size, `verify` checks a run's restore
+  points are still there and reports volumes the project has gained or lost
+  since, `restore` puts a run back, and `delete --keep-last N` prunes. Configure
+  the pool it uses with `x-incus-compose.backup.pool` - a separate disk is what
+  makes a backup worth having. (by @ishaan-jindal and @jochumdev)
+
 - Every path an image declares as a `VOLUME` now gets a storage volume of the
   service's own, filled from what the image ships there. Until now Incus mounted
   a tmpfs over those paths, so anything written to them was lost on restart -

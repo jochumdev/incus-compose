@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/lxc/incus/v7/shared/units"
 	"github.com/urfave/cli/v3"
 	"go.yaml.in/yaml/v4"
 
@@ -35,11 +35,7 @@ func newBackupListCommand() *cli.Command {
 				},
 				Sources: cli.EnvVars("INCUS_COMPOSE_BACKUP_LIST_FORMAT"),
 			},
-			&cli.StringFlag{
-				Name:    "pool",
-				Usage:   "Storage pool for backup volumes (overrides x-incus-compose.backup.pool)",
-				Sources: cli.EnvVars("INCUS_COMPOSE_BACKUP_POOL"),
-			},
+			backupPoolFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			globalClient, err := clientFromContext(ctx)
@@ -64,18 +60,9 @@ func newBackupListCommand() *cli.Command {
 				return errLogged.Wrap(err)
 			}
 
-			backupConfig := p.ClientConfig.Backup
-			if cmd.String("pool") != "" {
-				backupConfig.Pool = cmd.String("pool")
-			}
-			if backupConfig.Pool == "" {
-				backupConfig.Pool = c.Config().DefaultStoragePool
-			}
-			if backupConfig.MetaVolume == "" {
-				backupConfig.MetaVolume = "ic-backup-manifest"
-			}
+			backupConfig := resolveBackupConfig(cmd, p, c)
 
-			bc, err := globalClient.EnsureProject(c.Project() + "-backup")
+			bc, err := globalClient.EnsureProject(c.Project() + backupProjectSuffix)
 			if errors.Is(err, client.ErrNotFound) {
 				return printBackupList(cmd.Root().Writer, cmd.String("format"), nil, backupConfig)
 			}
@@ -83,6 +70,7 @@ func newBackupListCommand() *cli.Command {
 				c.LogError("Getting the backup project", "error", err)
 				return errLogged.Wrap(err)
 			}
+
 			err = bc.Open()
 			if err != nil {
 				globalClient.LogError("Opening the backup client", "error", err)
@@ -90,68 +78,46 @@ func newBackupListCommand() *cli.Command {
 			}
 			defer func() { _ = bc.Done() }()
 
-			rBMVol, err := bc.Resource(client.KindStorageVolume, backupConfig.MetaVolume, &client.StorageVolumeConfig{Pool: backupConfig.Pool})
+			manifests, err := readBackupManifests(ctx, bc, backupConfig)
 			if err != nil {
-				c.LogError("Getting the backup manifest volume", "error", err)
+				c.LogError("Reading the backup manifests", "error", err)
 				return errLogged.Wrap(err)
 			}
 
-			err = client.RunAction(ctx, rBMVol, client.ActionEnsure)
-			if errors.Is(err, client.ErrNotFound) {
-				return printBackupList(cmd.Root().Writer, cmd.String("format"), nil, backupConfig)
-			}
-			if err != nil {
-				c.LogError("Reading the backup manifest volume", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			bMVol, ok := rBMVol.(*client.StorageVolume)
-			if !ok {
-				c.LogError("Converting a backup resource to a StorageVolume", "error", client.ErrUnknownResource)
-				return errLogged.Wrap(client.ErrUnknownResource)
-			}
-
-			sc, err := bMVol.SFTP(ctx)
-			if err != nil {
-				c.LogError("Opening an SFTP client", "error", err)
-				return errLogged.Wrap(err)
-			}
-			defer c.WarnError(sc.Close, "Failed to close an SFTP connection")
-
-			entries, err := sc.ReadDir("/")
-			if err != nil {
-				c.LogError("Listing the backup manifest volume", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			manifests := []backupManifest{}
-			for _, entry := range entries {
-				if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-					continue
-				}
-
-				f, err := sc.Open(entry.Name())
+			for i := range manifests {
+				manifests[i].Size, err = backupRunSize(ctx, bc, manifests[i], backupConfig)
 				if err != nil {
-					c.LogError("Opening a backup manifest", "manifest", entry.Name(), "error", err)
+					c.LogError("Reading the backup volume sizes", "error", err)
 					return errLogged.Wrap(err)
 				}
-
-				m := backupManifest{}
-				err = json.NewDecoder(f).Decode(&m)
-				_ = f.Close()
-				if err != nil {
-					c.LogError("Decoding a backup manifest", "manifest", entry.Name(), "error", err)
-					return errLogged.Wrap(err)
-				}
-
-				manifests = append(manifests, m)
 			}
-
-			sortBackupList(manifests)
 
 			return printBackupList(cmd.Root().Writer, cmd.String("format"), manifests, backupConfig)
 		},
 	}
+}
+
+// backupRunSize sums what the run's backup volumes occupy. Incus reports usage
+// per volume and not per snapshot, so runs sharing a volume report the same
+// bytes rather than a per-restore-point figure.
+func backupRunSize(ctx context.Context, bc *client.Client, m backupManifest, cfg client.BackupConfig) (int64, error) {
+	var total int64
+
+	for _, v := range m.Volumes {
+		pool := v.Backup.Pool
+		if pool == "" {
+			pool = cfg.Pool
+		}
+
+		used, err := client.BackupVolumeUsage(ctx, bc, pool, v.Backup.Name)
+		if err != nil {
+			return 0, err
+		}
+
+		total += used
+	}
+
+	return total, nil
 }
 
 // sortBackupList orders manifests by timestamp, newest first. Malformed
@@ -171,7 +137,7 @@ func printBackupList(w io.Writer, format string, manifests []backupManifest, cfg
 	switch format {
 	case "table":
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		_, err := fmt.Fprintln(tw, "TIMESTAMP\tNAME\tVOLUMES\tPOOL")
+		_, err := fmt.Fprintln(tw, "TIMESTAMP\tNAME\tVOLUMES\tPOOL\tSIZE")
 		if err != nil {
 			return err
 		}
@@ -188,7 +154,7 @@ func printBackupList(w io.Writer, format string, manifests []backupManifest, cfg
 				name = "---"
 			}
 
-			_, err := fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", m.Timestamp, name, len(m.Volumes), pool)
+			_, err := fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", m.Timestamp, name, len(m.Volumes), pool, units.GetByteSizeString(m.Size, 1))
 			if err != nil {
 				return err
 			}
