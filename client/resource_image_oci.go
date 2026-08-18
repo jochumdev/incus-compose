@@ -30,10 +30,7 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 	}
 
 	if config == nil {
-		// oci.cwd is the marker because it is the only one always written:
-		// Incus drops an empty property, so an image with no CMD keeps no
-		// oci.cmd and would be fetched from its registry on every ensure.
-		_, stored := img.Properties["oci.cwd"]
+		_, stored := img.Properties["oci.volumes"]
 		if stored || r.source == nil || r.source.info.Protocol != "oci" {
 			return nil
 		}
@@ -65,12 +62,18 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 		props = map[string]string{}
 	}
 
+	// The presence of oci.volumes is what marks the config as already read.
+	volumes := strings.Join(slices.Sorted(maps.Keys(config.Volumes)), ",")
+	if volumes == "" {
+		volumes = ","
+	}
+
 	props["oci.uid"] = strconv.FormatUint(uid, 10)
 	props["oci.gid"] = strconv.FormatUint(gid, 10)
 	props["oci.entrypoint"] = shellquote.Join(config.Entrypoint...)
 	props["oci.cmd"] = shellquote.Join(config.Cmd...)
 	props["oci.cwd"] = cwd
-	props["oci.volumes"] = strings.Join(slices.Sorted(maps.Keys(config.Volumes)), ",")
+	props["oci.volumes"] = volumes
 
 	err = server.UpdateImage(ctx, fingerprint, incusApi.ImagePut{
 		AutoUpdate: img.AutoUpdate,
@@ -201,7 +204,10 @@ func ociReadProperties(s *ImageState, props map[string]string) {
 	s.Cwd = props["oci.cwd"]
 
 	s.Volumes = nil
-	if volumes := props["oci.volumes"]; volumes != "" {
-		s.Volumes = strings.Split(volumes, ",")
+
+	for _, at := range strings.Split(props["oci.volumes"], ",") {
+		if at != "" {
+			s.Volumes = append(s.Volumes, at)
+		}
 	}
 }
