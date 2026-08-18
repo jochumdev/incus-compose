@@ -18,7 +18,6 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/project"
 )
 
 // ProjectStatus holds the status of the project for ps output.
@@ -134,28 +133,14 @@ func newListCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
 			}
-			if err := globalClient.Connect(); err != nil {
-				return err
-			}
 
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
+			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			// Get the per Project client early, gives early errors if the project does not exists
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
-			}
-			if err := c.Open(); err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()

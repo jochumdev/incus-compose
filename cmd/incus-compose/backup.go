@@ -189,31 +189,14 @@ func newBackupCreateCommand() *cli.Command {
 			backupPoolFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd, client.EnsureProjectWithCreate())
 			if err != nil {
 				return err
-			}
-
-			err = globalClient.Connect()
-			if err != nil {
-				return err
-			}
-
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return err
-			}
-
-			c, err := globalClient.EnsureProject(p.Name, client.EnsureProjectWithCreate(), client.EnsureProjectWithConfig(p.ClientConfig.XIncus))
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged
 			}
 
 			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
@@ -235,7 +218,7 @@ func newBackupCreateCommand() *cli.Command {
 			}
 			err = bc.Open()
 			if err != nil {
-				globalClient.LogError("Opening the backup client", "error", err)
+				c.LogError("Opening the backup client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = bc.Done() }()
@@ -254,7 +237,7 @@ func newBackupCreateCommand() *cli.Command {
 
 			lock, err := client.BackupLock(ctx, bc, sc, backupConfig, 1*time.Minute, "metadata.lock")
 			if err != nil {
-				globalClient.LogError("Failed to lock metadata", "error", err)
+				c.LogError("Failed to lock metadata", "error", err)
 				c.WarnError(sc.Close, "Failed to close the metadata lock sFTP connection")
 				return errLogged.Wrap(err)
 			}

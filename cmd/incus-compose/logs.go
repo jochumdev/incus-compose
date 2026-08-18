@@ -282,27 +282,14 @@ func newLogsCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd, client.EnsureProjectWithCreate())
 			if err != nil {
 				return err
 			}
-			if err := globalClient.Connect(); err != nil {
-				return err
-			}
 
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
+			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			c, err := globalClient.EnsureProject(p.Name, client.EnsureProjectWithCreate())
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
-			}
-			if err := c.Open(); err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()

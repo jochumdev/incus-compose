@@ -9,7 +9,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/project"
 )
 
 func newPullCommand() *cli.Command {
@@ -58,36 +57,17 @@ func newPullCommand() *cli.Command {
 
 			withDeps := cmd.Bool("include-deps")
 
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd, client.EnsureProjectWithCreate())
 			if err != nil {
 				return err
 			}
-			if err := globalClient.Connect(); err != nil {
-				return err
-			}
-
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return err
-			}
-
-			c, err := globalClient.EnsureProject(
-				p.Name,
-				client.EnsureProjectWithCreate(),
-				client.EnsureProjectWithConfig(p.ClientConfig.XIncus),
-			)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
-			}
-			defer c.WarnError(c.Done, "Failure during Client.Done()")
 
 			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
+			defer c.WarnError(c.Done, "Failure during Client.Done()")
 
 			if !cmd.Root().Bool("debug") {
 				progress := newProgressRenderer(cmd.Root().Writer, noColor, isatty.IsTerminal(os.Stdout.Fd()))
@@ -97,7 +77,7 @@ func newPullCommand() *cli.Command {
 
 			// Register the DNS Watcher after the progress renderer so progress waits for the dns changes.
 			if err := c.RegisterDNSWatcher(); err != nil {
-				globalClient.LogError("Registering the DNS watcher", "project", p.Name, "error", err)
+				c.LogError("Registering the DNS watcher", "project", p.Name, "error", err)
 				return errLogged.Wrap(err)
 			}
 
@@ -142,7 +122,7 @@ func newPullCommand() *cli.Command {
 				}
 			}
 
-			if !cmd.Bool("no-healthd") && healthdInUseByProject(globalClient, p) {
+			if !cmd.Bool("no-healthd") && healthdInUseByProject(c.Global(), p) {
 				hparams := healthdParams{
 					binary:       "",
 					image:        resolveHealthdImage(cmd.String("healthd-image")),
@@ -155,7 +135,7 @@ func newPullCommand() *cli.Command {
 
 				_, hResources, err := healthdGetResources(c, hparams)
 				if err != nil {
-					globalClient.LogError("Creating healthd resources", "error", err)
+					c.LogError("Creating healthd resources", "error", err)
 					return errLogged.Wrap(err)
 				}
 

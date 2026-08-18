@@ -15,7 +15,6 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/project"
 )
 
 // newPsCommand implements `incus-compose ps`
@@ -63,26 +62,9 @@ func newPsCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
-			}
-			if err := globalClient.Connect(); err != nil {
-				return err
-			}
-
-			// Load compose project.
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			// Ensure project client exists (do not create)
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
 

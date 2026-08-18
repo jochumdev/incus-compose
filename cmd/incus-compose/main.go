@@ -159,37 +159,6 @@ func resolveHealthdImage(image string) string {
 	return strings.ReplaceAll(image, "{version}", v)
 }
 
-// loadProjectClient loads the compose project and opens its per-project Incus
-// client, without creating the project if it doesn't exist yet.
-func loadProjectClient(ctx context.Context, cmd *cli.Command) (*project.Project, *client.Client, error) {
-	globalClient, err := clientFromContext(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := globalClient.Connect(); err != nil {
-		return nil, nil, err
-	}
-
-	p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-	if err != nil {
-		globalClient.LogError("Configuring the project", "error", err)
-		return nil, nil, err
-	}
-
-	c, err := globalClient.EnsureProject(p.Name)
-	if err != nil {
-		globalClient.LogError("Getting the incus project", "error", err)
-		return nil, nil, errLogged
-	}
-
-	if err := c.Open(); err != nil {
-		globalClient.LogError("Opening the project client", "error", err)
-		return nil, nil, errLogged.Wrap(err)
-	}
-
-	return p, c, nil
-}
-
 func clientFromContext(ctx context.Context) (*client.GlobalClient, error) {
 	ca := ctx.Value(clientKey{})
 	c, ok := ca.(*client.GlobalClient)
@@ -240,6 +209,8 @@ func newRootCommand() *cli.Command {
 		newPullCommand(),
 		newConfigCommand(),
 		newExecCommand(),
+		newPortCommand(),
+		newPortForwardCommand(),
 		newLogsCommand(),
 		newIncusCommand(),
 		newHealthdCommand(),
