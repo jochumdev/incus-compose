@@ -93,6 +93,23 @@ func (c *Connection) CreateStoragePoolVolumeSnapshot(ctx context.Context, pool s
 	return c.asyncOperation(ctx, http.MethodPost, incusVolumesPath(pool, volType, name)+"/snapshots", snap, "")
 }
 
+// DeleteStoragePoolVolumeSnapshot removes a volume snapshot and follows the operation.
+func (c *Connection) DeleteStoragePoolVolumeSnapshot(ctx context.Context, pool string, volType string, name string, snap string) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, http.MethodDelete, incusVolumesPath(pool, volType, name)+"/snapshots/"+url.PathEscape(snap), nil, "")
+}
+
+// GetStoragePoolVolumeState returns a volume's live state, which carries its usage.
+func (c *Connection) GetStoragePoolVolumeState(ctx context.Context, pool string, volType string, name string) (*api.StorageVolumeState, error) {
+	state := api.StorageVolumeState{}
+
+	_, err := c.getStruct(ctx, incusVolumesPath(pool, volType, name)+"/state", nil, &state)
+	if err != nil {
+		return nil, err
+	}
+
+	return &state, nil
+}
+
 // DeleteStoragePoolVolume removes a volume from a pool.
 func (c *Connection) DeleteStoragePoolVolume(ctx context.Context, pool string, volType string, name string) error {
 	_, _, err := c.do(ctx, http.MethodDelete, incusVolumesPath(pool, volType, name), nil, nil, "")
