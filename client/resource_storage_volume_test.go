@@ -116,7 +116,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 		{
 			name:   "shifted volume",
 			volume: "test-shifted",
-			config: &StorageVolumeConfig{Shifted: true, UID: 1000, GID: 1000},
+			config: &StorageVolumeConfig{Shifted: true, Owner: &Owner{UID: 1000, GID: 1000}},
 			opts:   []Option{OptionCreate()},
 			validate: func(t *testing.T, r Resource) {
 				t.Helper()
@@ -207,8 +207,7 @@ func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 
 	r, err := c.Resource(KindStorageVolume, "test-shifted", &StorageVolumeConfig{
 		Shifted: true,
-		UID:     1000,
-		GID:     1000,
+		Owner:   &Owner{UID: 1000, GID: 1000},
 	})
 	require.NoError(t, err)
 
@@ -533,17 +532,22 @@ func TestStorageVolumePrefetch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "server", "the file must arrive with its contents")
 
-	// No temp instance is left behind.
+	// A second ensure fetches, so nothing is created and nothing is copied again.
+	require.NoError(t, RunAction(ctx, volRes, ActionEnsure, OptionCreate()))
+	assert.False(t, vol.Created(), "an ensure that fetched must not report a creation")
+
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
 	names, err := conn.GetInstanceNames(ctx, nil)
 	require.NoError(t, err)
-	assert.Empty(t, names, "the instance the prefetch read the image from must be gone")
+	assert.Len(t, names, 1, "the instance the image is read through stays up for the run")
 
-	// A second ensure fetches, so nothing is created and nothing is copied again.
-	require.NoError(t, RunAction(ctx, volRes, ActionEnsure, OptionCreate()))
-	assert.False(t, vol.Created(), "an ensure that fetched must not report a creation")
+	require.NoError(t, c.Done())
+
+	names, err = conn.GetInstanceNames(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, names, "Client.Done must remove the instance the image was read through")
 }
 
 // TestStorageVolumePrefetchMissingPath pins that an image without the path

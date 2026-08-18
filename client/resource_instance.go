@@ -50,8 +50,8 @@ type InstanceFile struct {
 	File    string
 	Content io.ReadSeekCloser
 
-	UID       int64 // Uses oci.uid if -1 has been given.
-	GID       int64 // Uses oci.gid if -1 has been given.
+	// Owner of the pushed file. Nil uses the instance's oci.uid/oci.gid.
+	Owner     *Owner
 	Mode      int
 	NoMKDir   bool
 	DirMode   int
@@ -107,10 +107,13 @@ type InstanceConfig struct {
 	// instead of giving each one a volume of the service's own.
 	NoAutoVolumes bool
 
-	// UID if not 0 use that value else use the user id from the image.
-	UID uint64
-	// GID if not 0 use that value else use the user id from the image.
-	GID uint64
+	// Owner the instance runs as. Nil resolves User, then the image.
+	Owner *Owner
+
+	// User is the compose `user:` override, `uid[:gid]` or the names the
+	// image's own /etc/passwd and /etc/group give them. Ignored unless Owner
+	// is nil.
+	User string
 }
 
 // GetConfig returns the configuration.
@@ -425,10 +428,9 @@ func (r *Instance) fetch(ctx context.Context, state *InstanceState) error {
 	newState.IncusInstance = &instance.Instance
 	newState.ETag = etag
 
-	newState.UID = r.Config.UID
-	newState.GID = r.Config.GID
-
-	if newState.UID == 0 || newState.GID == 0 {
+	if r.Config.Owner != nil {
+		newState.UID, newState.GID = r.Config.Owner.UID, r.Config.Owner.GID
+	} else {
 		var err error
 		newState.UID, newState.GID, err = extractUIDGID(newState.IncusInstance)
 		if err != nil {
@@ -577,14 +579,26 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 
 	imageState := image.State()
 
-	// Locals: the fetch below resolves the fields from the created instance.
-	uid, gid := r.Config.UID, r.Config.GID
+	// Local: the fetch below resolves it from the created instance.
+	owner := r.Config.Owner
 
-	if uid == 0 && gid == 0 {
-		// Use UID/GID from image properties when available so volumes are created
-		// with the correct shifted config before the instance is created.
-		if imageState.UID > 0 || imageState.GID > 0 {
-			uid, gid = imageState.UID, imageState.GID
+	if owner == nil {
+		// The compose override wins over the image's own USER, and either may
+		// name a user only the image's /etc/passwd resolves.
+		user := r.Config.User
+		if user == "" {
+			user = imageState.OCIUser
+		}
+
+		if user != "" {
+			owner, err = image.ResolveUser(ctx, user)
+			if err != nil {
+				return err
+			}
+		} else {
+			// The image's own ids, so volumes are created with the right
+			// shifted config before the instance is.
+			owner = &Owner{UID: imageState.UID, GID: imageState.GID}
 		}
 	}
 
@@ -595,18 +609,18 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 
 	// Store UID/GID.
 	if !image.NativeIncus() {
-		if uid != imageState.UID {
-			config["oci.uid"] = strconv.FormatUint(uid, 10)
+		if owner.UID != imageState.UID {
+			config["oci.uid"] = strconv.FormatUint(owner.UID, 10)
 		}
-		if gid != imageState.GID {
-			config["oci.gid"] = strconv.FormatUint(gid, 10)
+		if owner.GID != imageState.GID {
+			config["oci.gid"] = strconv.FormatUint(owner.GID, 10)
 		}
 	}
 
 	// Store the image name
 	config["user.image_alias"] = image.IncusName()
 
-	err = r.prefetchVolumes(ctx, image, uid, gid)
+	err = r.prefetchVolumes(ctx, image, owner)
 	if err != nil {
 		return err
 	}
@@ -1251,16 +1265,14 @@ func (r *Instance) pushFile(sftpConn *sftp.Client, file InstanceFile) error {
 		file.Content = fp
 	}
 
-	// Resolve ownership: -1 falls back to the instance's oci.uid/oci.gid.
-	state := r.State()
+	// Resolve ownership: no owner falls back to the instance's oci.uid/oci.gid.
+	owner := file.Owner
+	if owner == nil {
+		state := r.State()
+		owner = &Owner{UID: state.UID, GID: state.GID}
+	}
 
-	uid, gid := file.UID, file.GID
-	if uid == -1 {
-		uid = int64(state.UID)
-	}
-	if gid == -1 {
-		gid = int64(state.GID)
-	}
+	uid, gid := int64(owner.UID), int64(owner.GID)
 
 	// Create parent directories, owned by the instance user.
 	if !file.NoMKDir {

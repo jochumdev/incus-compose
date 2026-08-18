@@ -380,9 +380,26 @@ func (c *Client) Open() error {
 	return c.hookConnected(nil)
 }
 
-// Done fires the done hooks. Call when the client's work is complete.
+// Done releases what the client's resources hold and fires the done hooks.
+// Call when the client's work is complete; calling it twice is a no-op.
 func (c *Client) Done() error {
-	return c.hookDone(nil)
+	var doners []doner
+
+	c.rangeResources(func(r Resource) {
+		d, ok := r.(doner)
+		if ok {
+			doners = append(doners, d)
+		}
+	})
+
+	var errs error
+
+	// Before the hooks, so the progress renderer is still up to report on this.
+	for _, d := range doners {
+		errs = errors.Join(errs, d.Done())
+	}
+
+	return errors.Join(errs, c.hookDone(nil))
 }
 
 // FindHealthd returns the name of the healthd instance in the project,

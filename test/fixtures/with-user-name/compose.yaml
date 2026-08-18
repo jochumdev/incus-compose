@@ -1,0 +1,16 @@
+services:
+  web:
+    image: library/busybox:latest
+    user: "nobody:www-data"
+    volumes:
+      - data:/data
+
+  solo:
+    image: library/busybox:latest
+    user: "nobody"
+    volumes:
+      - solo:/data
+
+volumes:
+  data:
+  solo:

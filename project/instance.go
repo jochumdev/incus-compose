@@ -79,28 +79,9 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		errs = errors.Join(errs, err)
 	}
 
-	var (
-		uid uint64
-		gid uint64
-	)
 	// User override - https://github.com/compose-spec/compose-spec/blob/main/05-services.md#user
-	if service.User != "" {
-		split := strings.Split(service.User, ":")
-
-		uid, err = strconv.ParseUint(split[0], 10, 64)
-		if err != nil {
-			return nil, nil, fmt.Errorf("cannot convert service '%v' user '%v' to int: %w", service.Name, split[0], err)
-		}
-		config["oci.uid"] = split[0]
-		if len(split) > 1 {
-			gid, err = strconv.ParseUint(split[1], 10, 64)
-			if err != nil {
-				return nil, nil, fmt.Errorf("cannot convert service '%v' user '%v' to int: %w", service.Name, split[1], err)
-			}
-		}
-	}
-
-	volumes, files, volumeResources, err := instanceVolumeDevices(c, p, service, image, uid, gid)
+	// A name resolves against the image, which is not pulled yet here.
+	volumes, files, volumeResources, err := instanceVolumeDevices(c, p, service, image, service.User)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
@@ -145,8 +126,7 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		Dependencies:  instanceDependencyWaits(p, service, options),
 		Entrypoint:    service.Entrypoint,
 		Command:       service.Command,
-		UID:           uid,
-		GID:           gid,
+		User:          service.User,
 	}
 
 	ir, err := c.Resource(client.KindInstance, instanceName, instCfg)
@@ -620,7 +600,7 @@ func instanceProxyDevices(c *client.Client, devices []client.InstanceDevice, ser
 // instanceVolumeDevices builds disk, bind, and tmpfs devices for a service's
 // volumes plus the shm_size tmpfs. It returns any storage volume resources
 // and the files map for single-file binds.
-func instanceVolumeDevices(c *client.Client, p *types.Project, service types.ServiceConfig, image client.Resource, uid, gid uint64) ([]client.InstanceDevice, []client.InstanceFile, []client.Resource, error) {
+func instanceVolumeDevices(c *client.Client, p *types.Project, service types.ServiceConfig, image client.Resource, user string) ([]client.InstanceDevice, []client.InstanceFile, []client.Resource, error) {
 	var errs error
 	devices := []client.InstanceDevice{}
 	resources := []client.Resource{}
@@ -688,8 +668,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 			volConfig := &client.StorageVolumeConfig{
 				Shifted:       shifted,
 				ImageResource: image,
-				UID:           uid,
-				GID:           gid,
+				User:          user,
 				Pool:          pool,
 				Prefetch:      prefetch,
 				Extensions:    extensions,
@@ -732,8 +711,6 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 					files = append(files, client.InstanceFile{
 						Target:    cVol.Target,
 						File:      cVol.Source,
-						UID:       -1,
-						GID:       -1,
 						Mode:      0o644,
 						DirMode:   0o755,
 						Overwrite: true,
@@ -744,8 +721,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 					volConfig := &client.StorageVolumeConfig{
 						Shifted:       shifted,
 						ImageResource: image,
-						UID:           uid,
-						GID:           gid,
+						User:          user,
 						HostPath:      cVol.Source,
 						Pool:          c.Config().DefaultStoragePool,
 					}
@@ -876,8 +852,7 @@ func instanceSecrets(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    svcSecret.Target,
 				Content:   fp,
-				UID:       parseSecretID(svcSecret.UID),
-				GID:       parseSecretID(svcSecret.GID),
+				Owner:     secretOwner(svcSecret.UID, svcSecret.GID),
 				Mode:      parseSecretMode(svcSecret.Mode),
 				Overwrite: true,
 			})
@@ -891,8 +866,7 @@ func instanceSecrets(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    svcSecret.Target,
 				Content:   client.NewReaderFromBytes([]byte(value)),
-				UID:       parseSecretID(svcSecret.UID),
-				GID:       parseSecretID(svcSecret.GID),
+				Owner:     secretOwner(svcSecret.UID, svcSecret.GID),
 				Mode:      parseSecretMode(svcSecret.Mode),
 				Overwrite: true,
 			})
@@ -1080,8 +1054,7 @@ func instanceConfigs(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    target,
 				Content:   fp,
-				UID:       parseSecretID(svcConfig.UID),
-				GID:       parseSecretID(svcConfig.GID),
+				Owner:     secretOwner(svcConfig.UID, svcConfig.GID),
 				Mode:      parseConfigMode(svcConfig.Mode),
 				Overwrite: true,
 			})
@@ -1090,8 +1063,7 @@ func instanceConfigs(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    target,
 				Content:   client.NewReaderFromBytes([]byte(configDef.Content)),
-				UID:       parseSecretID(svcConfig.UID),
-				GID:       parseSecretID(svcConfig.GID),
+				Owner:     secretOwner(svcConfig.UID, svcConfig.GID),
 				Mode:      parseConfigMode(svcConfig.Mode),
 				Overwrite: true,
 			})
@@ -1113,13 +1085,18 @@ func parseConfigMode(mode *types.FileMode) int {
 	return int(*mode) &^ 0o222
 }
 
-// parseSecretID parses a UID string to int64.
-func parseSecretID(id string) int64 {
-	if id == "" {
-		return -1
+// secretOwner reads a secret's uid/gid. Nil when neither is given, so the file
+// lands as the instance user.
+func secretOwner(uid string, gid string) *client.Owner {
+	if uid == "" && gid == "" {
+		return nil
 	}
-	v, _ := strconv.ParseInt(id, 10, 64)
-	return v
+
+	owner := &client.Owner{}
+	owner.UID, _ = strconv.ParseUint(uid, 10, 64)
+	owner.GID, _ = strconv.ParseUint(gid, 10, 64)
+
+	return owner
 }
 
 // parseSecretMode parses a file mode to int. Per the

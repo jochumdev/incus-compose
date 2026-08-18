@@ -85,6 +85,13 @@ type Resource interface {
 	Created() bool
 }
 
+// Owner is a uid/gid pair. A nil *Owner means unset, which each config field
+// documents its own fallback for.
+type Owner struct {
+	UID uint64
+	GID uint64
+}
+
 // Config is implemented by resource configuration types.
 type Config interface {
 	GetConfig() any
@@ -114,6 +121,12 @@ type StopAble interface {
 // DeleteAble is implemented by resources that can be deleted.
 type DeleteAble interface {
 	Delete(ctx context.Context, opts ...Option) error
+}
+
+// doner is implemented by resources holding something Incus will not reclaim
+// on its own, such as the instance an image is read through.
+type doner interface {
+	Done() error
 }
 
 // LogAble is implemented by resources that can stream logs.

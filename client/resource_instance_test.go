@@ -473,8 +473,6 @@ func TestInstanceFileUnderAVolume(t *testing.T) {
 		Files: []InstanceFile{{
 			Target:    "/etc/nginx/conf.d/site.conf",
 			Content:   NewReaderFromBytes([]byte("server { listen 8080; }\n")),
-			UID:       -1,
-			GID:       -1,
 			Mode:      0o644,
 			Overwrite: true,
 		}},

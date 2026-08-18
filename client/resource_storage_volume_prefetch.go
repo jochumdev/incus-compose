@@ -7,16 +7,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/avast/retry-go/v5"
-	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/lxc/incus/v7/shared/units"
 	"github.com/pkg/sftp"
-
-	"github.com/lxc/incus-compose/iclient"
 )
-
-// TempInstanceKey marks an instance incus-compose created to read an image with.
-const TempInstanceKey = "user.incus-compose.temp"
 
 // prefetch fills the volume with what the image holds at Config.Prefetch.
 // An image has no file API, so its bytes are read from an instance of its own.
@@ -26,69 +19,10 @@ func (r *StorageVolume) prefetch(ctx context.Context) error {
 		return ErrUnknownResource.WithResource(r.Config.ImageResource)
 	}
 
-	if !img.IsEnsured() {
-		return ErrNotEnsured.WithResource(img)
-	}
-
-	conn, err := r.client.Connection()
+	src, err := img.SFTP(ctx)
 	if err != nil {
 		return err
 	}
-
-	name := "ic-seed-" + SanitizeIncusName(RandString(16), MaxIncusNameLen-8)
-
-	op, err := conn.CreateInstance(ctx, incusApi.InstancesPost{
-		Name: name,
-		Type: incusApi.InstanceTypeContainer,
-		Source: incusApi.InstanceSource{
-			Type:        "image",
-			Fingerprint: img.State().IncusAlias.Target,
-		},
-		InstancePut: incusApi.InstancePut{
-			Description: fmt.Sprintf(r.client.Config().DescriptionFormat, name),
-			Config:      map[string]string{TempInstanceKey: "true"},
-			Devices: map[string]map[string]string{
-				"root": {"type": "disk", "path": "/", "pool": r.Config.Pool},
-			},
-		},
-	})
-	if err != nil {
-		return ErrCreate.WithText("creating an instance to read the image").Wrap(err)
-	}
-
-	_, err = iclient.WaitOperation(ctx, op)
-	if err != nil {
-		return ErrCreate.WithText("creating an instance to read the image").Wrap(err)
-	}
-
-	defer func() {
-		r.client.WarnError(func() error {
-			deleteOp, err := conn.DeleteInstance(context.WithoutCancel(ctx), name)
-			if err != nil {
-				return err
-			}
-
-			_, err = iclient.WaitOperation(context.WithoutCancel(ctx), deleteOp)
-
-			return err
-		}, "Failed to remove the instance a prefetch read the image from")
-	}()
-
-	// The instance stays stopped, so this is the image's own filesystem: a
-	// stopped instance mounts no disk devices.
-	src, err := retry.NewWithData[*sftp.Client](
-		retry.Context(ctx),
-		retry.Attempts(3),
-		retry.Delay(2*time.Second),
-		retry.LastErrorOnly(true),
-	).Do(func() (*sftp.Client, error) {
-		return conn.GetInstanceFileSFTP(ctx, name)
-	})
-	if err != nil {
-		return ErrCreate.WithText("connecting to instance SFTP").Wrap(err)
-	}
-
-	defer r.client.WarnError(src.Close, "Failed to close an instance sFTP connection")
 
 	from, err := src.Lstat(r.Config.Prefetch)
 	if err != nil || !from.IsDir() {

@@ -239,8 +239,7 @@ func TestStackInstanceWithSecrets(t *testing.T) {
 		{
 			Target:  "/app/secrets/api.key",
 			Content: NewReaderFromBytes([]byte("my-api-key-value")),
-			UID:     0,
-			GID:     0,
+			Owner:   &Owner{},
 			Mode:    0o440,
 		},
 	}

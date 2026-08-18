@@ -185,6 +185,9 @@ var (
 	// server's architecture.
 	ErrNoPlatform = NewError("image has no manifest for the architecture")
 
+	// ErrNoSuchUser indicates a user or group name the image does not define.
+	ErrNoSuchUser = NewError("no such user or group in the image")
+
 	// ErrDeviceConflict indicates a device name conflict.
 	ErrDeviceConflict = NewError("device conflict")
 

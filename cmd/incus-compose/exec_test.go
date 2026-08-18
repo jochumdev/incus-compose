@@ -81,3 +81,48 @@ func TestE2EExecRunsAsInstanceUser(t *testing.T) {
 	assert.Equal(t, "1000", fields[2], "file owner uid")
 	assert.Equal(t, "1000", fields[3], "file owner gid")
 }
+
+// TestE2EExecRunsAsNamedInstanceUser is the same for a `user:` naming its user
+// and group instead of numbering them, which only the image's own /etc/passwd
+// and /etc/group resolve: busybox spells them 65534 and 33. A name with no
+// group takes the user's own, as docker does.
+func TestE2EExecRunsAsNamedInstanceUser(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
+
+	ctx := t.Context()
+	pn := t.Name()
+	compose := testlib.Fixture(t, "with-user-name", "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project", "--volumes")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
+	require.NoError(t, err)
+
+	tests := []struct {
+		service string
+		wantUID string
+		wantGID string
+	}{
+		{service: "web", wantUID: "65534", wantGID: "33"},
+		{service: "solo", wantUID: "65534", wantGID: "65534"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.service, func(t *testing.T) {
+			_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "exec", "--no-tty", tt.service,
+				"--", "sh", "-c", "echo hello > /data/test.txt")
+			require.NoError(t, err)
+
+			stdout, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "exec", "--no-tty", tt.service,
+				"--", "ls", "-ln", "/data/test.txt")
+			require.NoError(t, err)
+
+			fields := strings.Fields(stdout)
+			require.GreaterOrEqual(t, len(fields), 4, "unexpected ls output: %q", stdout)
+			assert.Equal(t, tt.wantUID, fields[2], "file owner uid")
+			assert.Equal(t, tt.wantGID, fields[3], "file owner gid")
+		})
+	}
+}

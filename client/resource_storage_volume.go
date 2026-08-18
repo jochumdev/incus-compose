@@ -29,9 +29,12 @@ type StorageVolumeConfig struct {
 	// Shifted enables UID/GID shifting for the volume.
 	Shifted bool
 
-	// UID/GID for shifting ImageResource will overwrite this if given.
-	UID uint64
-	GID uint64
+	// Owner the volume is created for. Nil resolves User, then ImageResource.
+	Owner *Owner
+
+	// User is the compose `user:` override the owning instance was given, in
+	// the same form. Ignored unless Owner is nil.
+	User string
 
 	// ImageResource to take UID/GID from for shifting, only
 	// needed if shifting is true.
@@ -205,7 +208,7 @@ func (r *StorageVolume) get(ctx context.Context) error {
 }
 
 // Start validates the storage volume.
-func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
+func (r *StorageVolume) Start(ctx context.Context, _ ...Option) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -231,25 +234,13 @@ func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
 		errs = errors.Join(errors.New("expected security.shifted=true"))
 	}
 
-	expectedUID := strconv.FormatUint(r.Config.UID, 10)
-	expectedGID := strconv.FormatUint(r.Config.GID, 10)
-	if r.Config.UID == 0 && r.Config.GID == 0 && r.Config.ImageResource != nil {
-		img, ok := r.Config.ImageResource.(*Image)
-		if !ok {
-			errs = errors.Join(errs, ErrUnknownResource.WithResource(r.Config.ImageResource))
-			return errs
-		}
-
-		if !img.IsEnsured() {
-			errs = errors.Join(errs, ErrNotEnsured.WithResource(img))
-			return errs
-		}
-
-		// Check UID/GID match
-		imageState := img.State()
-		expectedUID = strconv.FormatUint(imageState.UID, 10)
-		expectedGID = strconv.FormatUint(imageState.GID, 10)
+	owner, err := r.resolveUser(ctx)
+	if err != nil {
+		return errors.Join(errs, err)
 	}
+
+	expectedUID := strconv.FormatUint(owner.UID, 10)
+	expectedGID := strconv.FormatUint(owner.GID, 10)
 
 	if volume.Config["initial.uid"] != expectedUID {
 		errs = errors.Join(errs, fmt.Errorf("UID mismatch, expected %s got %s", expectedUID, volume.Config["initial.uid"]))
@@ -266,30 +257,56 @@ func (r *StorageVolume) Start(_ context.Context, _ ...Option) error {
 	return nil
 }
 
+// resolveUser returns the owner a shifted volume is created for. Config.Owner
+// wins; otherwise the image says, naming a user if it has to.
+func (r *StorageVolume) resolveUser(ctx context.Context) (*Owner, error) {
+	if r.Config.Owner != nil || r.Config.ImageResource == nil {
+		if r.Config.Owner != nil {
+			return r.Config.Owner, nil
+		}
+
+		return &Owner{}, nil
+	}
+
+	img, ok := r.Config.ImageResource.(*Image)
+	if !ok {
+		return nil, ErrUnknownResource.WithResource(r.Config.ImageResource)
+	}
+
+	// initial.uid is applied at creation and cannot be corrected later, so an
+	// unensured image would bake 0/0 in for good.
+	if !img.IsEnsured() {
+		return nil, ErrNotEnsured.WithResource(img)
+	}
+
+	state := img.State()
+
+	user := r.Config.User
+	if user == "" {
+		user = state.OCIUser
+	}
+
+	if user != "" {
+		return img.ResolveUser(ctx, user)
+	}
+
+	return &Owner{UID: state.UID, GID: state.GID}, nil
+}
+
 func (r *StorageVolume) create(ctx context.Context) error {
 	config := map[string]string{}
 
 	if r.Config.Shifted {
-		if r.Config.UID == 0 && r.Config.GID == 0 && r.Config.ImageResource != nil {
-			img, ok := r.Config.ImageResource.(*Image)
-			if !ok {
-				return ErrUnknownResource.WithResource(r.Config.ImageResource)
-			}
-
-			// initial.uid is applied at creation and cannot be corrected later,
-			// so an unensured image would bake 0/0 in for good.
-			if !img.IsEnsured() {
-				return ErrNotEnsured.WithResource(img)
-			}
-
-			imageState := img.State()
-			r.Config.UID = imageState.UID
-			r.Config.GID = imageState.GID
+		owner, err := r.resolveUser(ctx)
+		if err != nil {
+			return err
 		}
 
+		r.Config.Owner = owner
+
 		config["security.shifted"] = "true"
-		config["initial.uid"] = strconv.FormatUint(r.Config.UID, 10)
-		config["initial.gid"] = strconv.FormatUint(r.Config.GID, 10)
+		config["initial.uid"] = strconv.FormatUint(owner.UID, 10)
+		config["initial.gid"] = strconv.FormatUint(owner.GID, 10)
 	}
 
 	volReq := incusApi.StorageVolumesPost{
