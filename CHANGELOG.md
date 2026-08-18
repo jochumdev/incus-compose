@@ -13,6 +13,23 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `kill [SERVICE...]` force stops services without the graceful shutdown, which
+  is what `stop` did until now. `-s` accepts `SIGKILL` only: the Incus state API
+  carries no signal, and an OCI entrypoint is not PID 1 under Incus, so any
+  other signal would reach the wrong process. (by @jochumdev)
+
+- `cp SERVICE:SRC DEST` and `cp SRC SERVICE:DEST` copy files between a service's
+  instance and your filesystem, as `docker compose cp` does. Which side is the
+  instance is decided by the name before the colon naming a compose service, so
+  a Windows drive or a path holding a colon stays local. A pushed file is owned
+  by the instance's user rather than root, as configs and secrets already are;
+  `--archive` keeps the source's ownership. (by @jochumdev)
+
+- `top` and `events` scope `incus top` and `incus monitor` to the project.
+  `top` reports per instance where `docker compose top` reports per process,
+  and neither takes service arguments, since Incus filters by project rather
+  than by instance. (by @jochumdev)
+
 - `port SERVICE PRIVATE_PORT` prints the host address a published port is bound
   to, as `docker compose port` does. A stopped instance answers too, and an
   unpublished port names the ports the instance does have. (by @jochumdev)
@@ -67,6 +84,17 @@ for correct semver ordering. Headings below preserve each release's announced fo
   `OCIUserKey` and `ErrNoSuchUser`. (by @jochumdev)
 
 ### Changed
+
+- `stop`, and with it `restart`, now shuts a service down gracefully and kills
+  it once `--timeout` is up. Both always killed outright before, so `--timeout`
+  did nothing at all. `kill` is the old behaviour under its own name. Incus does
+  not escalate a shutdown that ran out of time - it reports a failure and leaves
+  the instance running - so incus-compose issues that kill itself. (by @jochumdev)
+
+- **library**: a stop timeout under a second no longer arrives at Incus as zero,
+  which it reads as an immediate kill. It is rounded up to one second, so
+  `OptionTimeout(500 * time.Millisecond)` shuts down rather than kills.
+  (by @jochumdev)
 
 - **library**: ownership is one type in one spelling. `Owner{UID, GID uint64}`
   replaces the three conventions that meant "unset" differently:

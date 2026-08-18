@@ -70,7 +70,8 @@ func (o Options) incusTimeout() int {
 		return -1
 	}
 
-	return int(o.Timeout.Seconds())
+	// Anything under a second truncates to 0, which is that same kill.
+	return max(1, int(o.Timeout.Seconds()))
 }
 
 // Option configures action arguments.

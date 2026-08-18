@@ -1556,6 +1556,36 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 		return nil
 	}
 
+	err = r.requestStop(ctx, options, options.Force)
+	if err == nil {
+		return r.fetch(ctx, nil)
+	}
+
+	if options.Force {
+		return err
+	}
+
+	// Incus fails the shutdown and leaves the instance running once the
+	// graceful deadline is up. Docker kills it there, so do the same.
+	fetchErr := r.fetch(ctx, nil)
+	if fetchErr != nil {
+		return errors.Join(err, fetchErr)
+	}
+
+	if !r.Running() {
+		return nil
+	}
+
+	err = r.requestStop(ctx, options, true)
+	if err != nil {
+		return err
+	}
+
+	return r.fetch(ctx, nil)
+}
+
+// requestStop asks Incus to stop the instance and waits for the operation.
+func (r *Instance) requestStop(ctx context.Context, options Options, force bool) error {
 	conn, err := r.client.Connection()
 	if err != nil {
 		return err
@@ -1564,7 +1594,7 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
 		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
 			Action:  "stop",
-			Force:   options.Force,
+			Force:   force,
 			Timeout: options.incusTimeout(),
 		}, "")
 		if err != nil {
@@ -1573,11 +1603,8 @@ func (r *Instance) stop(ctx context.Context, options Options) error {
 
 		return struct{}{}, r.client.hookOperation(ctx, ActionStop, r, options, op, nil)
 	})
-	if err != nil {
-		return err
-	}
 
-	return r.fetch(ctx, nil)
+	return err
 }
 
 // SetHealthCheckingStopped writes the user.healthcheck.stopped marker, which

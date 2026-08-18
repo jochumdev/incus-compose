@@ -18,10 +18,13 @@ import (
 type stopArgs struct {
 	Services []string
 	WithDeps bool
-	Timeout  time.Duration
-	Workers  int
-	Debug    bool
-	Writer   io.Writer
+	// Force kills outright instead of shutting down within Timeout. This is
+	// what separates `kill` from `stop`.
+	Force   bool
+	Timeout time.Duration
+	Workers int
+	Debug   bool
+	Writer  io.Writer
 }
 
 // stop stops the project's running services.
@@ -79,9 +82,15 @@ func stop(ctx context.Context, p *project.Project, c *client.Client, args stopAr
 
 	// Without --with-deps the linked services are not in scope; skip the
 	// healthd interaction that targets out-of-scope dependencies.
-	stopOpts := []client.Option{
-		client.OptionForce(),
-		client.OptionTimeout(args.Timeout),
+	// An explicit zero would override the client's own default with a context
+	// that is already expired, so leave the option off instead.
+	stopOpts := []client.Option{}
+	if args.Timeout > 0 {
+		stopOpts = append(stopOpts, client.OptionTimeout(args.Timeout))
+	}
+
+	if args.Force {
+		stopOpts = append(stopOpts, client.OptionForce())
 	}
 
 	_, _, err = healthdResolve(p, c)
