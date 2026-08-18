@@ -66,6 +66,11 @@ func TestOCIReadProperties(t *testing.T) {
 			want:  ImageState{},
 		},
 		{
+			name:  "the marker an image with no VOLUME carries is no volumes either",
+			props: map[string]string{"oci.volumes": ","},
+			want:  ImageState{},
+		},
+		{
 			name:  "a value that is not a number is left at zero",
 			props: map[string]string{"oci.uid": "nobody"},
 			want:  ImageState{},

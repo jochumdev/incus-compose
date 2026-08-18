@@ -78,9 +78,8 @@ func TestE2EImageCarriesTheOCISplit(t *testing.T) {
 	assert.Equal(t, "docker-entrypoint.sh", props["oci.entrypoint"])
 	assert.Equal(t, "memcached", props["oci.cmd"])
 
-	// Incus keeps no property whose value is empty, so memcached declaring no
-	// VOLUME leaves no oci.volumes at all.
-	assert.NotContains(t, props, "oci.volumes")
+	// memcached declares no VOLUME, and the key has to stay: it is the marker.
+	assert.Equal(t, ",", props["oci.volumes"])
 }
 
 // TestE2EUpgradesAnAgedCacheEntry pins that upgrading incus-compose over an
