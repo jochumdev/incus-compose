@@ -53,12 +53,13 @@ type Action string
 
 // Action constants for resource actions.
 const (
-	ActionEnsure Action = "ensure"
-	ActionDelete Action = "delete"
-	ActionStart  Action = "start"
-	ActionStop   Action = "stop"
-	ActionLog    Action = "log"
-	ActionBackup Action = "backup"
+	ActionEnsure  Action = "ensure"
+	ActionDelete  Action = "delete"
+	ActionStart   Action = "start"
+	ActionStop    Action = "stop"
+	ActionLog     Action = "log"
+	ActionBackup  Action = "backup"
+	ActionRestore Action = "restore"
 )
 
 // Resource defines the common interface for all Incus resources.
@@ -124,4 +125,9 @@ type LogAble interface {
 type BackupAble interface {
 	BackupEntry(cfg BackupConfig, backupProject string) BackupVolume
 	Backup(ctx context.Context, opts ...Option) error
+}
+
+// RestoreAble is implemented by resources that can be restored from a backup.
+type RestoreAble interface {
+	Restore(ctx context.Context, opts ...Option) error
 }

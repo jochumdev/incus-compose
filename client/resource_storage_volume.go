@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -572,10 +573,118 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 	return r.client.hookAfter(ctx, ActionBackup, r, options, nil)
 }
 
+// Restore rewinds the volume to the restore point named by the backup config.
+// The instances holding it must be stopped; Incus refreshes a mounted volume
+// without complaint and the writes already in flight are not part of the backup.
+func (r *StorageVolume) Restore(ctx context.Context, opts ...Option) error {
+	if !r.IsEnsured() {
+		return ErrNotEnsured
+	}
+
+	options := NewOptions(opts...)
+	if options.BackupClient == nil {
+		return ErrUnsupportedAction.WithText("restore without OptionBackup doesn't work")
+	}
+
+	if options.BackupConfig.Timestamp == "" {
+		return ErrUnsupportedAction.WithText("restore without a timestamp doesn't work")
+	}
+
+	err := r.client.hookBefore(ctx, ActionRestore, r, options, nil)
+	if err != nil {
+		return err
+	}
+
+	bc := options.BackupClient
+	if options.BackupConfig.Pool == "" {
+		options.BackupConfig.Pool = bc.Config().DefaultStoragePool
+	}
+
+	backupName := r.backupName()
+
+	// The same lock a backup takes, so neither can refresh the mirror under the other.
+	lockName := SanitizeIncusName(r.IncusName(), MaxIncusNameLen-5) + ".lock"
+	bMVol, err := BackupManifestVolume(ctx, bc, options.BackupConfig)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, err)
+	}
+
+	sc, err := bMVol.SFTP(ctx)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, err)
+	}
+
+	lock, err := BackupLock(ctx, bc, sc, options.BackupConfig, 5*time.Minute, lockName)
+	if err != nil {
+		bc.WarnError(sc.Close, "Failed to close a backup lock sFTP connection")
+		return r.client.hookAfter(ctx, ActionRestore, r, options, err)
+	}
+	defer func() {
+		r.client.WarnError(lock.Unlock, "Failed to release a backup lock")
+		r.client.WarnError(sc.Close, "Failed to close a backup lock sFTP connection")
+	}()
+
+	bConn, err := bc.Connection()
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrUnknown.Wrap(err))
+	}
+
+	mirror, _, err := bConn.GetStoragePoolVolume(ctx, options.BackupConfig.Pool, "custom", backupName, nil)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrBackupNotFound.WithText(backupName).Wrap(err))
+	}
+
+	snapshots, err := bConn.GetStoragePoolVolumeSnapshotNames(ctx, options.BackupConfig.Pool, "custom", backupName)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrUnknown.Wrap(err))
+	}
+
+	if !slices.Contains(snapshots, options.BackupConfig.Timestamp) {
+		err = ErrBackupNotFound.WithText(backupName + "/" + options.BackupConfig.Timestamp)
+		return r.client.hookAfter(ctx, ActionRestore, r, options, err)
+	}
+
+	target := r.State().IncusVolume
+	req := incusApi.StorageVolumesPost{
+		Name:        r.incusName,
+		Type:        target.Type,
+		ContentType: target.ContentType,
+		Source: incusApi.StorageVolumeSource{
+			Name:    backupName + "/" + options.BackupConfig.Timestamp,
+			Type:    "copy",
+			Pool:    options.BackupConfig.Pool,
+			Refresh: true,
+		},
+	}
+
+	if r.client.Project() != bc.Project() {
+		req.Source.Project = bc.Project()
+	}
+
+	// Cluster-internal copies must name the member the source volume is on.
+	if mirror.Location != "" && mirror.Location != "none" {
+		req.Source.Location = mirror.Location
+	}
+
+	conn, err := r.client.Connection()
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrUnknown.Wrap(err))
+	}
+
+	copyOp, err := conn.CopyStoragePoolVolume(ctx, r.Config.Pool, req)
+	err = r.client.hookOperation(ctx, ActionRestore, r, options, copyOp, err)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrRestoreFailed.WithText("copy").Wrap(err))
+	}
+
+	return r.client.hookAfter(ctx, ActionRestore, r, options, nil)
+}
+
 var (
-	_ Resource   = (*StorageVolume)(nil)
-	_ EnsureAble = (*StorageVolume)(nil)
-	_ StartAble  = (*StorageVolume)(nil)
-	_ DeleteAble = (*StorageVolume)(nil)
-	_ BackupAble = (*StorageVolume)(nil)
+	_ Resource    = (*StorageVolume)(nil)
+	_ EnsureAble  = (*StorageVolume)(nil)
+	_ StartAble   = (*StorageVolume)(nil)
+	_ DeleteAble  = (*StorageVolume)(nil)
+	_ BackupAble  = (*StorageVolume)(nil)
+	_ RestoreAble = (*StorageVolume)(nil)
 )

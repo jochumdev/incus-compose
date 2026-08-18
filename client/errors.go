@@ -203,4 +203,10 @@ var (
 
 	// ErrBackupFailed indicates a backup failed.
 	ErrBackupFailed = NewError("backup failed")
+
+	// ErrBackupNotFound indicates a backup volume or restore point is missing.
+	ErrBackupNotFound = NewError("backup not found")
+
+	// ErrRestoreFailed indicates a restore failed.
+	ErrRestoreFailed = NewError("restore failed")
 )
