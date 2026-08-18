@@ -13,6 +13,14 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `port SERVICE PRIVATE_PORT` prints the host address a published port is bound
+  to, as `docker compose port` does. A stopped instance answers too, and an
+  unpublished port names the ports the instance does have. (by @jochumdev)
+
+- `port-forward SERVICE TARGET_PORT [LISTEN_PORT]` runs a local TCP listener and
+  forwards every connection into the instance, reaching a port that was never
+  published. Needs Incus 7.3 or 7.0.1 LTS. (by @jochumdev)
+
 - `healthd status` prints the shared daemon's health status key. (by @jochumdev)
 
 - `backup` copies a project's named volumes into a separate `<project>-backup`

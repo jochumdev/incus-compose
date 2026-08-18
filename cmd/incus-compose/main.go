@@ -240,6 +240,8 @@ func newRootCommand() *cli.Command {
 		newPullCommand(),
 		newConfigCommand(),
 		newExecCommand(),
+		newPortCommand(),
+		newPortForwardCommand(),
 		newLogsCommand(),
 		newIncusCommand(),
 		newHealthdCommand(),
