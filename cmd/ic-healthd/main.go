@@ -463,7 +463,10 @@ func decodeLifecycle(ctx context.Context, raw incusApi.Event) (lifecycleEvent, b
 		}
 
 		switch lc.Action {
-		case incusApi.EventLifecycleInstanceStarted, incusApi.EventLifecycleInstanceRestarted:
+		// A resume leaves the instance in the shape a start does, and it is
+		// the only thing that takes one parked by a pause back off the shelf.
+		case incusApi.EventLifecycleInstanceStarted, incusApi.EventLifecycleInstanceRestarted,
+			incusApi.EventLifecycleInstanceResumed:
 			ev.Instance.Action = instanceRestarted
 		case incusApi.EventLifecycleInstanceUpdated:
 			ev.Instance.Action = instanceUpdated

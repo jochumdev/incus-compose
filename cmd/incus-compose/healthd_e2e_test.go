@@ -380,3 +380,54 @@ func TestE2EHealthdMigratesToGlobal(t *testing.T) {
 
 	waitHealthy(t, c, "web-1")
 }
+
+// instanceStatus returns the Incus status of an instance.
+func instanceStatus(t *testing.T, c *client.Client, name string) string {
+	t.Helper()
+
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	inst, _, err := conn.GetInstance(t.Context(), name, nil)
+	require.NoError(t, err)
+
+	return inst.Status
+}
+
+// TestE2EPauseSurvivesHealthd is the pause worth testing: a service with a
+// restart policy, whose healthcheck cannot pass while it is frozen. The daemon
+// must leave it alone, and pick it back up once it is resumed.
+func TestE2EPauseSurvivesHealthd(t *testing.T) {
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
+
+	ctx := t.Context()
+	pn := t.Name()
+	compose := testlib.Fixture(t, "with-pause", "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	waitHealthy(t, c, "web-1")
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pause")
+	require.NoError(t, err)
+	require.Equal(t, "Frozen", instanceStatus(t, c, "web-1"))
+
+	// interval 3s times 2 retries, so a daemon that read the frozen instance
+	// as stopped would have restarted it several times over by now.
+	require.Never(t, func() bool {
+		return instanceStatus(t, c, "web-1") != "Frozen"
+	}, 30*time.Second, 2*time.Second, "healthd restarted out of the pause")
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "unpause")
+	require.NoError(t, err)
+	require.Equal(t, "Running", instanceStatus(t, c, "web-1"))
+
+	// A resume is the only event that takes the instance off the shelf the
+	// pause put it on, so this is what proves the daemon is watching again.
+	waitHealthy(t, c, "web-1")
+}

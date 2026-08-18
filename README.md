@@ -61,7 +61,7 @@ Status: **Stable**.
 
 **The workflow you know:**
 
-- Familiar commands: `up`, `down`, `start`, `stop`, `restart`, `list` (and `ps`), `logs`, `exec`, `config`, plus `build`, `healthd`, `incus` (pass-through), and `self-update`
+- Familiar commands: `up`, `down`, `start`, `stop`, `kill`, `restart`, `pause`/`unpause`, `list` (and `ps`), `logs`, `exec`, `cp`, `top`, `events`, `config`, plus `build`, `healthd`, `incus` (pass-through), and `self-update`
 - Compose project parsing via compose-go: `.env` interpolation, profiles, `depends_on`, secrets, and configs
 - Automatic `compose.incus.yaml` override file - keep the upstream compose file untouched and put Incus tuning next to it [doc](https://docs.incus-compose.org/compose-compatibility#incus-override-file)
 - Windows and macOS clients: No Docker Desktop, no WSL, no local Linux VM. `incus-compose` and the `incus` client are portable Go binaries: from a Windows or macOS desktop you drive a remote Incus host over HTTPS and manage OCI containers, LXC system containers, and VMs directly. See [Installing on Windows](https://docs.incus-compose.org/getting-started/windows).

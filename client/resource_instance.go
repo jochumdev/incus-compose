@@ -850,6 +850,17 @@ func (r *Instance) Running() bool {
 	return state.IncusInstance.StatusCode == incusApi.Running
 }
 
+// Frozen returns whether the instance is paused. A frozen instance is not
+// Running, so the two never both hold.
+func (r *Instance) Frozen() bool {
+	state := r.State()
+	if state.IncusInstance == nil {
+		return false
+	}
+
+	return state.IncusInstance.StatusCode == incusApi.Frozen
+}
+
 // retryBusy waits out the instance's operation lock, then runs write. The lock
 // is taken by the driver, so a caller must do its operation wait inside write.
 func retryBusy[T any](ctx context.Context, r *Instance, write func() (T, error)) (T, error) {
@@ -1605,6 +1616,107 @@ func (r *Instance) requestStop(ctx context.Context, options Options, force bool)
 	})
 
 	return err
+}
+
+// Pause freezes the instance, leaving its processes in memory.
+func (r *Instance) Pause(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	options := NewOptions(opts...)
+
+	err := r.client.hookBefore(ctx, ActionPause, r, options, nil)
+	if err != nil {
+		return err
+	}
+
+	if !r.IsEnsured() {
+		return r.client.hookAfter(ctx, ActionPause, r, options, ErrNotEnsured)
+	}
+
+	if r.Frozen() {
+		return r.client.hookAfter(ctx, ActionPause, r, options, ErrPaused)
+	}
+
+	if !r.Running() {
+		return r.client.hookAfter(ctx, ActionPause, r, options, ErrNotRunning)
+	}
+
+	// A frozen instance answers no healthcheck, and ic-healthd reads that as a
+	// stop it should restart. The marker is what tells it the stop was meant.
+	err = r.setHealthCheckingStopped(ctx, true)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionPause, r, options, err)
+	}
+
+	err = r.freeze(ctx, ActionPause, options)
+
+	return r.client.hookAfter(ctx, ActionPause, r, options, err)
+}
+
+// Unpause resumes a paused instance.
+func (r *Instance) Unpause(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	options := NewOptions(opts...)
+
+	err := r.client.hookBefore(ctx, ActionUnpause, r, options, nil)
+	if err != nil {
+		return err
+	}
+
+	if !r.IsEnsured() {
+		return r.client.hookAfter(ctx, ActionUnpause, r, options, ErrNotEnsured)
+	}
+
+	if !r.Frozen() {
+		return r.client.hookAfter(ctx, ActionUnpause, r, options, ErrNotPaused)
+	}
+
+	err = r.freeze(ctx, ActionUnpause, options)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionUnpause, r, options, err)
+	}
+
+	err = r.setHealthCheckingStopped(ctx, false)
+
+	return r.client.hookAfter(ctx, ActionUnpause, r, options, err)
+}
+
+// freeze runs the freeze or unfreeze state action, which take neither a
+// timeout nor a force flag.
+func (r *Instance) freeze(ctx context.Context, action Action, options Options) error {
+	incusAction, text := "freeze", "pausing instance"
+	if action == ActionUnpause {
+		incusAction, text = "unfreeze", "resuming instance"
+	}
+
+	err := r.waitBusyOperation(ctx)
+	if err != nil {
+		return err
+	}
+
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	_, err = retryBusy(ctx, r, func() (struct{}, error) {
+		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
+			Action: incusAction,
+		}, "")
+		if err != nil {
+			return struct{}{}, ErrOperation.WithText(text).Wrap(err)
+		}
+
+		return struct{}{}, r.client.hookOperation(ctx, action, r, options, op, nil)
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.fetch(ctx, nil)
 }
 
 // SetHealthCheckingStopped writes the user.healthcheck.stopped marker, which

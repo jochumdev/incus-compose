@@ -576,3 +576,52 @@ func TestInstancePrefetchVolumes(t *testing.T) {
 	require.NoError(t, err, "an instance must name its own volumes without its image")
 	assert.Equal(t, auto.IncusName(), found.IncusName())
 }
+
+// TestInstancePauseUnpause covers the freeze/unfreeze round trip and the
+// guards on either side of it.
+func TestInstancePauseUnpause(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+	c := newRandomTestClient(t, "pause-")
+
+	image, err := c.Resource(KindImage, "docker.io/alpine:edge", &ImageConfig{})
+	require.NoError(t, err)
+
+	instRes, err := c.Resource(KindInstance, "web", &InstanceConfig{
+		Image:      image.Name(),
+		Extensions: map[string]string{"oci.entrypoint": "sh"},
+	})
+	require.NoError(t, err)
+
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(image, inst)
+	require.NoError(t, stack.ForAction(ActionEnsure).
+		Run(ctx, ActionEnsure, OptionCreate(), OptionNoHealthd()))
+
+	require.ErrorIs(t, RunAction(ctx, inst, ActionPause), ErrNotRunning,
+		"a stopped instance has nothing to freeze")
+
+	require.NoError(t, RunAction(ctx, inst, ActionStart, OptionNoHealthd()))
+	require.True(t, inst.Running())
+
+	require.NoError(t, RunAction(ctx, inst, ActionPause))
+	assert.True(t, inst.Frozen())
+	assert.False(t, inst.Running(), "frozen and running never both hold")
+
+	// The marker is what keeps ic-healthd from restarting out of the pause.
+	assert.Equal(t, "true", inst.State().IncusInstance.Config[HealthStoppedKey])
+
+	assert.ErrorIs(t, RunAction(ctx, inst, ActionPause), ErrPaused)
+
+	require.NoError(t, RunAction(ctx, inst, ActionUnpause))
+	assert.True(t, inst.Running())
+	assert.False(t, inst.Frozen())
+	assert.Equal(t, "false", inst.State().IncusInstance.Config[HealthStoppedKey])
+
+	assert.ErrorIs(t, RunAction(ctx, inst, ActionUnpause), ErrNotPaused)
+}

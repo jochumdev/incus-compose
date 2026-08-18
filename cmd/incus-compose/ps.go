@@ -108,8 +108,9 @@ func newPsCommand() *cli.Command {
 
 			// Helper to add entry if it matches filters (-a and default-running)
 			addIfMatches := func(e psEntry) {
-				// By default omit non-running unless --all
-				if !cmd.Bool("all") && e.Status != "Running" {
+				// By default omit non-running unless --all. A paused service
+				// still counts, as it does in docker.
+				if !cmd.Bool("all") && e.Status != "Running" && e.Status != "Frozen" {
 					return
 				}
 				entries = append(entries, e)

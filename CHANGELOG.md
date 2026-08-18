@@ -13,10 +13,22 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `pause [SERVICE...]` and `unpause [SERVICE...]` freeze and thaw a service's
+  instances, as `docker compose pause` does. A pause also sets
+  `user.healthcheck.stopped`, because a frozen instance answers no healthcheck
+  and ic-healthd would otherwise restart out of the pause; `unpause` clears it.
+  While paused, `user.healthcheck.status` reads `stopped`, and `ps` lists the
+  service without `--all`. (by @jochumdev)
+
+- **library**: `ActionPause` and `ActionUnpause`, with the `PauseAble` and
+  `UnpauseAble` interfaces `Instance` implements, plus `Instance.Frozen()` and
+  the `ErrPaused` / `ErrNotPaused` sentinels. (by @jochumdev)
+
 - `kill [SERVICE...]` force stops services without the graceful shutdown, which
-  is what `stop` did until now. `-s` accepts `SIGKILL` only: the Incus state API
-  carries no signal, and an OCI entrypoint is not PID 1 under Incus, so any
-  other signal would reach the wrong process. (by @jochumdev)
+  is what `stop` did until now. `-s` takes docker's three spellings of SIGKILL
+  (`SIGKILL`, `KILL`, `9`, in any case) and errors on anything else: the Incus
+  state API carries no signal, and an OCI entrypoint is not PID 1 under Incus,
+  so any other signal would reach the wrong process. (by @jochumdev)
 
 - `cp SERVICE:SRC DEST` and `cp SRC SERVICE:DEST` copy files between a service's
   instance and your filesystem, as `docker compose cp` does. Which side is the
@@ -84,6 +96,11 @@ for correct semver ordering. Headings below preserve each release's announced fo
   `OCIUserKey` and `ErrNoSuchUser`. (by @jochumdev)
 
 ### Changed
+
+- ic-healthd treats Incus's `instance-resumed` as a start, so a service picked
+  back up by `unpause` is watched again at once. Without it the daemon kept
+  treating a resumed instance as deliberately stopped until its next resync.
+  (by @jochumdev)
 
 - `stop`, and with it `restart`, now shuts a service down gracefully and kills
   it once `--timeout` is up. Both always killed outright before, so `--timeout`
