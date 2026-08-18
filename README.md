@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml/badge.svg?branch=main)](https://github.com/lxc/incus-compose/actions?query=event%3Apush+branch%3Amain)
 [![Go Reference](https://pkg.go.dev/badge/github.com/lxc/incus-compose.svg)](https://pkg.go.dev/github.com/lxc/incus-compose)
-[![Coverage 60%](https://img.shields.io/badge/coverage-60%25-orange)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml)
+[![Coverage 75%](https://img.shields.io/badge/coverage-75%25-yellow)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml)
 
 Bring the familiar Docker Compose workflow to Incus. `incus-compose` implements the Compose specification for the Incus ecosystem, allowing you to define and run multi-container applications using the `compose.yaml` files you already know.
 
@@ -46,13 +46,11 @@ Recorded during the beta - the workflow is unchanged in current releases:
 
 ## Why incus-compose?
 
-[Incus](https://linuxcontainers.org/incus/) provides system containers and virtual machines with strong isolation, but lacks the declarative multi-container orchestration that Docker Compose offers. This tool bridges that gap:
+`incus-compose` is a drop-in replacement for `docker compose`: point it at the `compose.yaml` you already have and run it against [Incus](https://linuxcontainers.org/incus/) instead.
 
-- Use existing `docker-compose.yml` files with Incus containers
-- Leverage Incus's native OCI registry support for image pulling
-- Run Docker/OCI images directly from registries
-- Manage complex multi-container applications with familiar commands
-- Benefit from Incus's resource efficiency and security model
+- Use existing `docker-compose.yml` files unchanged - no rewrite, no new format to learn
+- Windows, macOS, and Linux clients drive a remote Incus host over HTTPS - no Docker Desktop, no WSL, no local VM
+- Pull Docker/OCI images directly from docker.io, ghcr.io, and other registries via Incus's native OCI registry support
 
 New to Incus? See [Why Incus?](https://docs.incus-compose.org/why-incus) for what the platform brings over
 a classic OCI engine setup.
@@ -93,7 +91,7 @@ Status: **Stable**.
 - Incus project isolation
 - Resource limits and other advanced compose features (`shm_size`, `container_name`, etc.)
 
-**Beyond any OCI engine:**
+**Incus-native extras:**
 
 - Project-wide resource limits - cap CPU and memory for the entire stack, enforced by Incus [doc](https://docs.incus-compose.org/compose-compatibility#projects)
 - GPU, USB, and raw disk passthrough per service via `x-incus-compose.devices` [doc](https://docs.incus-compose.org/compose-compatibility#x-incus-compose-devices)
@@ -139,7 +137,7 @@ All docs: [docs.incus-compose.org](https://docs.incus-compose.org)
 - **[CLI Reference](https://docs.incus-compose.org/cli-reference)** - Commands and options
 - **[Compose Compatibility](https://docs.incus-compose.org/compose-compatibility)** - What works and what doesn't
 - **[Architecture](https://docs.incus-compose.org/architecture)** - the resource-first design behind incus-compose
-- **[Why Incus?](https://docs.incus-compose.org/why-incus)** - Benefits over Docker
+- **[Why Incus?](https://docs.incus-compose.org/why-incus)** - What Incus brings over a classic OCI engine setup
 - **[Changelog](CHANGELOG.md)** - what changed since 0.0.1-beta1
 
 ### Examples
@@ -163,6 +161,16 @@ Community support is handled at: [`https://discuss.linuxcontainers.org`](https:/
 Fixes and new features are greatly appreciated. Make sure to read our [contributing guidelines](CONTRIBUTING.md) first!
 
 ## Credits
+
+incus-compose wouldn't be what it is without the people who tested it, filed reports, and pushed on ideas along the way: @Sagi, @neitsab, @pyrodogg, @kgoetz, @edorgeville, @bburky, @blurry, @stgraber, @ishaan-jindal, @code-by-tanveer, and @Tofil.
+
+It also stands on a few libraries that make maintaining it far easier:
+
+- [compose-spec/compose-go](https://github.com/compose-spec/compose-go) - parses and resolves the compose file
+- [lxc/incus](https://github.com/lxc/incus) - the container/VM engine and Go client this all talks to
+- [creativeprojects/go-selfupdate](https://github.com/creativeprojects/go-selfupdate) - powers `self-update`
+- [dominikbraun/graph](https://github.com/dominikbraun/graph) - the `depends_on` dependency graph
+- [bradleyjkemp/cupaloy](https://github.com/bradleyjkemp/cupaloy) - snapshot testing across the test suite
 
 This project is inspired by [@bketelsen](https://github.com/bketelsen/incus-compose).
 Some components are adapted from [docker compose](https://github.com/docker/compose).
