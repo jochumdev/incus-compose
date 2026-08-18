@@ -20,6 +20,7 @@ func TestPrintBackupList(t *testing.T) {
 			Timestamp: "2026-08-13T16:18:38.272605835Z",
 			Name:      "first",
 			Volumes:   []client.BackupVolume{{Source: client.VolumeInfos{Name: "vol-data"}}},
+			Size:      5 * 1024 * 1024,
 		},
 		{
 			Timestamp: "2026-08-13T17:00:00.000000000Z",
@@ -37,6 +38,8 @@ func TestPrintBackupList(t *testing.T) {
 		assert.Contains(t, out.String(), "NAME")
 		assert.Contains(t, out.String(), "VOLUMES")
 		assert.Contains(t, out.String(), "POOL")
+		assert.Contains(t, out.String(), "SIZE")
+		assert.Contains(t, out.String(), "5.2MB")
 		assert.Contains(t, out.String(), "first")
 		assert.Contains(t, out.String(), "---", "an unnamed backup must render a placeholder name")
 		assert.Contains(t, out.String(), "default")
@@ -63,7 +66,7 @@ func TestPrintBackupList(t *testing.T) {
 		require.NoError(t, err)
 
 		// Tabwriter pads cells with spaces, so the header is not tab-separated.
-		assert.Equal(t, "TIMESTAMP  NAME  VOLUMES  POOL\n", out.String())
+		assert.Equal(t, "TIMESTAMP  NAME  VOLUMES  POOL  SIZE\n", out.String())
 	})
 
 	t.Run("empty json is an empty list", func(t *testing.T) {
