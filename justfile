@@ -20,6 +20,7 @@ v_test_procs := env("TEST_PROCS", "2")
 import 'just/mod.just'
 import 'just/test.just'
 import 'just/build.just'
+import 'just/docs.just'
 import 'just/fleet.just'
 import 'just/incus.just'
 
