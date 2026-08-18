@@ -30,8 +30,11 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 	}
 
 	if config == nil {
-		_, split := img.Properties["oci.cmd"]
-		if split || r.source == nil || r.source.info.Protocol != "oci" {
+		// oci.cwd is the marker because it is the only one always written:
+		// Incus drops an empty property, so an image with no CMD keeps no
+		// oci.cmd and would be fetched from its registry on every ensure.
+		_, stored := img.Properties["oci.cwd"]
+		if stored || r.source == nil || r.source.info.Protocol != "oci" {
 			return nil
 		}
 

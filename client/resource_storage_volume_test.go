@@ -242,6 +242,32 @@ func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 	require.Equal(t, "65534", vol.State().IncusVolume.Config["initial.gid"])
 }
 
+func TestStorageVolumeEnsure_ShiftedVolumeUnensuredImage(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+	ctx := t.Context()
+	c := newRandomTestClient(t, "volume-unensured-")
+
+	ir, err := c.Resource(KindImage, "ghcr.io/lxc/incus-compose/ic-healthd:latest", &ImageConfig{})
+	require.NoError(t, err)
+	require.False(t, ir.IsEnsured())
+
+	r, err := c.Resource(KindStorageVolume, "test-unensured-image", &StorageVolumeConfig{
+		Shifted:       true,
+		ImageResource: ir,
+	})
+	require.NoError(t, err)
+
+	// initial.uid is applied at creation, so a volume made before the image is
+	// ensured would carry 0/0 for good and fail every later Start.
+	err = RunAction(ctx, r, ActionEnsure, OptionCreate())
+	require.ErrorIs(t, err, ErrNotEnsured)
+
+	vol, ok := r.(*StorageVolume)
+	require.True(t, ok)
+	assert.False(t, vol.IsEnsured(), "no half-configured volume may be left behind")
+}
+
 func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)

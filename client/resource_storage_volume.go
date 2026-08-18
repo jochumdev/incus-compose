@@ -275,6 +275,12 @@ func (r *StorageVolume) create(ctx context.Context) error {
 				return ErrUnknownResource.WithResource(r.Config.ImageResource)
 			}
 
+			// initial.uid is applied at creation and cannot be corrected later,
+			// so an unensured image would bake 0/0 in for good.
+			if !img.IsEnsured() {
+				return ErrNotEnsured.WithResource(img)
+			}
+
 			imageState := img.State()
 			r.Config.UID = imageState.UID
 			r.Config.GID = imageState.GID

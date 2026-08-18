@@ -52,6 +52,23 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Fixed
 
+- An OCI image whose `CMD` is empty is no longer re-read from its registry on
+  every run. Incus stores no property for an empty value, so the key that marks
+  the config as already read was never there for such an image - one round trip
+  per run against the registry, and a warning for an image that is only local,
+  such as a locally built ic-healthd. (by @jochumdev)
+
+- A `healthd up` whose image cannot be pulled no longer leaves a storage volume
+  behind that every later attempt fails on. The volume was created before the
+  image was known, so it got `initial.uid=0` - which Incus applies at creation
+  and cannot be changed afterwards - and the next run died with
+  `UID mismatch, expected 65534 got 0` until the volume was deleted by hand.
+  (by @jochumdev)
+
+- `healthd up` now stops at the first resource that fails, the way `up`, `start`
+  and `pull` already did, instead of carrying on to create the rest of a daemon
+  that cannot run. (by @jochumdev)
+
 - A config or secret whose target sits inside a volume is now written into that
   volume. It used to be written into the instance's filesystem, where the mount
   hid it, so the container started with the image's file or nothing at all. (by

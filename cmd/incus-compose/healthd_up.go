@@ -145,7 +145,7 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 	// A daemon another project already started is the normal case, not an error.
 	hc.IgnoreError(client.ActionStart, client.ErrRunning)
 
-	stack := client.NewStack(hc, client.StackWorkers(params.stackWorkers))
+	stack := client.NewStack(hc, client.StackWorkers(params.stackWorkers), client.StackFailFast())
 
 	// Either sidecar may attach to a network of ours, so those come up first.
 	pResources, err := p.Resources(c)
@@ -223,7 +223,7 @@ func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdU
 	// the error out before the renderer would draw it.
 	hc.IgnoreError(client.ActionStart, client.ErrRunning)
 
-	return healthdEnsure(ctx, hc, client.NewStack(hc, client.StackWorkers(params.stackWorkers)), params)
+	return healthdEnsure(ctx, hc, client.NewStack(hc, client.StackWorkers(params.stackWorkers), client.StackFailFast()), params)
 }
 
 // healthdEnsure adds the sidecar to stack, brings it up, and replaces it when

@@ -177,11 +177,19 @@ func TestE2EPrefetchVolumes(t *testing.T) {
 	assert.Contains(t, devices, "imgvol-config", "isso declares /config")
 	assert.Contains(t, devices, "imgvol-db", "isso declares /db")
 
+	gc, err := client.NewTestClient(ctx)
+	require.NoError(t, err)
+
+	pc, err := gc.EnsureProject(pn)
+	require.NoError(t, err)
+
+	pool := pc.Config().DefaultStoragePool
+
 	volumes := func() []string {
 		t.Helper()
 
 		out, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose,
-			"incus", "storage", "volume", "list", "default", "--format=csv", "-c", "n")
+			"incus", "storage", "volume", "list", pool, "--format=csv", "-c", "n")
 		require.NoError(t, err)
 
 		names := []string{}
