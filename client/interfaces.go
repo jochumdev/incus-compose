@@ -57,6 +57,8 @@ const (
 	ActionDelete  Action = "delete"
 	ActionStart   Action = "start"
 	ActionStop    Action = "stop"
+	ActionPause   Action = "pause"
+	ActionUnpause Action = "unpause"
 	ActionLog     Action = "log"
 	ActionBackup  Action = "backup"
 	ActionRestore Action = "restore"
@@ -116,6 +118,16 @@ type StartAble interface {
 // StopAble is implemented by resources that can be stopped.
 type StopAble interface {
 	Stop(ctx context.Context, opts ...Option) error
+}
+
+// PauseAble is implemented by resources that can be paused.
+type PauseAble interface {
+	Pause(ctx context.Context, opts ...Option) error
+}
+
+// UnpauseAble is implemented by resources that can be resumed after a pause.
+type UnpauseAble interface {
+	Unpause(ctx context.Context, opts ...Option) error
 }
 
 // DeleteAble is implemented by resources that can be deleted.

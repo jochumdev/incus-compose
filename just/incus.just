@@ -62,7 +62,11 @@ purge-networks:
     set -euo pipefail
 
     remote="${INCUS_REMOTE:-local}"
-    networks=$(incus network list "${remote}:" -f json | jq -r '.[] | select(.used_by | length == 0) | select(.managed == true) | .name')
+
+    # ic-ovn-seed is seeded by setup-nested-incus.sh for OVN capability
+    # detection, so it is meant to sit there with no users.
+    keep="ic-ovn-seed"
+    networks=$(incus network list "${remote}:" -f json | jq -r --arg keep "${keep}" '.[] | select(.used_by | length == 0) | select(.managed == true) | select(.name != $keep) | .name')
 
     if [[ -z "${networks}" ]]; then
         echo "No dangling networks found."

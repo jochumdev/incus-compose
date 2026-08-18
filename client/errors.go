@@ -130,6 +130,12 @@ var (
 	// ErrNotRunning indicates a command on a not running instance.
 	ErrNotRunning = NewError("resource is not running").WithSeverity(SeverityWarn)
 
+	// ErrPaused indicates a command on an already paused instance.
+	ErrPaused = NewError("resource is already paused").WithSeverity(SeverityWarn)
+
+	// ErrNotPaused indicates a command on an instance that is not paused.
+	ErrNotPaused = NewError("resource is not paused").WithSeverity(SeverityWarn)
+
 	// ErrUnknownConfig indicates an unknown config for a resource.
 	ErrUnknownConfig = NewError("unknown config for resource")
 

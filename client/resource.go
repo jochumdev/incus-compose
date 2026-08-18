@@ -70,7 +70,8 @@ func (o Options) incusTimeout() int {
 		return -1
 	}
 
-	return int(o.Timeout.Seconds())
+	// Anything under a second truncates to 0, which is that same kill.
+	return max(1, int(o.Timeout.Seconds()))
 }
 
 // Option configures action arguments.
@@ -207,6 +208,12 @@ func SupportsAction(r Resource, action Action) bool {
 	case ActionStop:
 		_, ok := r.(StopAble)
 		return ok
+	case ActionPause:
+		_, ok := r.(PauseAble)
+		return ok
+	case ActionUnpause:
+		_, ok := r.(UnpauseAble)
+		return ok
 	case ActionLog:
 		_, ok := r.(LogAble)
 		return ok
@@ -244,6 +251,16 @@ func RunAction(ctx context.Context, r Resource, action Action, opts ...Option) e
 			return e.Stop(ctx, opts...)
 		}
 		return ErrUnsupportedAction.WithAction(ActionStop).WithResource(r)
+	case ActionPause:
+		if e, ok := r.(PauseAble); ok {
+			return e.Pause(ctx, opts...)
+		}
+		return ErrUnsupportedAction.WithAction(ActionPause).WithResource(r)
+	case ActionUnpause:
+		if e, ok := r.(UnpauseAble); ok {
+			return e.Unpause(ctx, opts...)
+		}
+		return ErrUnsupportedAction.WithAction(ActionUnpause).WithResource(r)
 	case ActionLog:
 		if e, ok := r.(LogAble); ok {
 			return e.Log(ctx, opts...)

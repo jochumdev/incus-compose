@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -18,10 +19,13 @@ import (
 type stopArgs struct {
 	Services []string
 	WithDeps bool
-	Timeout  time.Duration
-	Workers  int
-	Debug    bool
-	Writer   io.Writer
+	// Force kills outright instead of shutting down within Timeout. This is
+	// what separates `kill` from `stop`.
+	Force   bool
+	Timeout time.Duration
+	Workers int
+	Debug   bool
+	Writer  io.Writer
 }
 
 // stop stops the project's running services.
@@ -79,9 +83,15 @@ func stop(ctx context.Context, p *project.Project, c *client.Client, args stopAr
 
 	// Without --with-deps the linked services are not in scope; skip the
 	// healthd interaction that targets out-of-scope dependencies.
-	stopOpts := []client.Option{
-		client.OptionForce(),
-		client.OptionTimeout(args.Timeout),
+	// An explicit zero would override the client's own default with a context
+	// that is already expired, so leave the option off instead.
+	stopOpts := []client.Option{}
+	if args.Timeout > 0 {
+		stopOpts = append(stopOpts, client.OptionTimeout(args.Timeout))
+	}
+
+	if args.Force {
+		stopOpts = append(stopOpts, client.OptionForce())
 	}
 
 	_, _, err = healthdResolve(p, c)
@@ -103,11 +113,21 @@ func stop(ctx context.Context, p *project.Project, c *client.Client, args stopAr
 	return nil
 }
 
-//nolint:dupl // mirrors newStartCommand's shape intentionally; both are thin lifecycle-command wrappers around start()/stop().
-func newStopCommand() *cli.Command {
+// newStopCommand implements `incus-compose stop` and `kill`, which differ only
+// in whether the service is given a chance to shut down first.
+func newStopCommand(name, usage string) *cli.Command {
+	var kill bool
+
+	switch name {
+	case "kill":
+		kill = true
+	case "stop":
+		kill = false
+	}
+
 	return &cli.Command{
-		Name:      "stop",
-		Usage:     "Stop running services",
+		Name:      name,
+		Usage:     usage,
 		Category:  "compose",
 		ArgsUsage: "[SERVICE...]",
 		Flags: []cli.Flag{
@@ -116,10 +136,19 @@ func newStopCommand() *cli.Command {
 				Usage:   "Timeout for stopping",
 				Value:   10 * time.Second,
 				Sources: cli.EnvVars("INCUS_COMPOSE_STOP_TIMEOUT"),
+				// A kill gives nothing time to happen.
+				Hidden: kill,
+			},
+			&cli.StringFlag{
+				Name:    "signal",
+				Aliases: []string{"s"},
+				Usage:   "Signal to send to the container",
+				Value:   "SIGKILL",
+				Hidden:  !kill,
 			},
 			&cli.BoolFlag{
 				Name:    "with-deps",
-				Usage:   "Also stop linked services",
+				Usage:   "Also " + name + " linked services",
 				Sources: cli.EnvVars("INCUS_COMPOSE_STOP_WITH_DEPS"),
 			},
 		},
@@ -136,14 +165,26 @@ func newStopCommand() *cli.Command {
 			}
 			defer func() { _ = c.Done() }()
 
-			return stop(ctx, p, c, stopArgs{
+			signal := strings.ToUpper(cmd.String("signal"))
+			if kill && signal != "SIGKILL" && signal != "KILL" && signal != "9" {
+				c.LogError("Unsupported signal", "signal", signal)
+				return errLogged.WithText("unsupported signal")
+			}
+
+			args := stopArgs{
 				Services: cmd.Args().Slice(),
 				WithDeps: cmd.Bool("with-deps"),
-				Timeout:  cmd.Duration("timeout"),
+				Force:    kill,
 				Workers:  cmd.Root().Int("workers"),
 				Debug:    cmd.Root().Bool("debug"),
 				Writer:   cmd.Root().Writer,
-			})
+			}
+
+			if !kill {
+				args.Timeout = cmd.Duration("timeout")
+			}
+
+			return stop(ctx, p, c, args)
 		},
 	}
 }
