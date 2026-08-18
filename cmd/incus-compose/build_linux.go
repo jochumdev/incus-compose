@@ -10,7 +10,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/project"
 )
 
 func newBuildCommand() *cli.Command {
@@ -38,35 +37,17 @@ func newBuildCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd, client.EnsureProjectWithCreate())
 			if err != nil {
 				return err
 			}
-			if err := globalClient.Connect(); err != nil {
-				return err
-			}
 
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
+			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Loading the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			c, err := globalClient.EnsureProject(
-				p.Name,
-				client.EnsureProjectWithCreate(),
-				client.EnsureProjectWithConfig(p.ClientConfig.XIncus),
-			)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer c.WarnError(c.Done, "Failure during Client.Done()")
-
-			if err := c.Open(); err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
-				return errLogged.Wrap(err)
-			}
 
 			allResources, err := p.Resources(c)
 			if err != nil {

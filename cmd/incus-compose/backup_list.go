@@ -15,7 +15,6 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/project"
 )
 
 func newBackupListCommand() *cli.Command {
@@ -38,31 +37,14 @@ func newBackupListCommand() *cli.Command {
 			backupPoolFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
-			}
-
-			err = globalClient.Connect()
-			if err != nil {
-				return err
-			}
-
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
 			}
 
 			backupConfig := resolveBackupConfig(cmd, p, c)
 
-			bc, err := globalClient.EnsureProject(c.Project() + backupProjectSuffix)
+			bc, err := c.Global().EnsureProject(c.Project() + backupProjectSuffix)
 			if errors.Is(err, client.ErrNotFound) {
 				return printBackupList(cmd.Root().Writer, cmd.String("format"), nil, backupConfig)
 			}
@@ -73,7 +55,7 @@ func newBackupListCommand() *cli.Command {
 
 			err = bc.Open()
 			if err != nil {
-				globalClient.LogError("Opening the backup client", "error", err)
+				c.LogError("Opening the backup client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = bc.Done() }()

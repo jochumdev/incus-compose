@@ -15,47 +15,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
-
-// serviceInstance resolves a compose service and replica index to its ensured
-// instance.
-func serviceInstance(ctx context.Context, c *client.Client, p *project.Project, service string, index int) (*client.Instance, error) {
-	allResources, err := p.Resources(c)
-	if err != nil {
-		c.LogError("Getting project resources", "error", err)
-		return nil, errLogged.Wrap(err)
-	}
-
-	instances := []*client.Instance{}
-	for _, r := range allResources[service] {
-		i, ok := r.(*client.Instance)
-		if ok && i.ServiceName() == service {
-			instances = append(instances, i)
-		}
-	}
-
-	if len(instances) == 0 {
-		c.LogError("No instance for service", "service", service)
-		return nil, errLogged.Wrap(client.ErrNotFound.WithText("service instance not found"))
-	}
-
-	if index < 0 || index >= len(instances) {
-		c.LogError("Not enough instances", "have", len(instances), "expected", index)
-		return nil, errLogged.Wrap(client.ErrNotFound.WithText("not enough instances"))
-	}
-
-	inst := instances[index]
-
-	err = client.RunAction(ctx, inst, client.ActionEnsure)
-	if err != nil {
-		c.LogError("Failed to ensure the instance", "error", err)
-		return nil, errLogged.Wrap(fmt.Errorf("failed to ensure the instance: %w", err))
-	}
-
-	return inst, nil
-}
 
 // splitProxyEndpoint splits an Incus proxy endpoint ("tcp:0.0.0.0:8080") into
 // its protocol and its address:port half.
@@ -162,31 +123,14 @@ func newPortCommand() *cli.Command {
 				return fmt.Errorf("bad port %q must be a number: %w", private, err)
 			}
 
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
-			}
-
-			err = globalClient.Connect()
-			if err != nil {
-				return err
-			}
-
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
 			}
 
 			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
@@ -244,39 +188,22 @@ func newPortForwardCommand() *cli.Command {
 				listen = args[2]
 			}
 
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
-			}
-
-			err = globalClient.Connect()
-			if err != nil {
-				return err
-			}
-
-			if !globalClient.HasExtension(shared.Incus73Extension) {
-				globalClient.LogError("For port-forward you need at least incus 7.3 or 7.0.1 LTS")
-				return errLogged.Wrap(errors.New("the server does not support port forwarding"))
-			}
-
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
 			}
 
 			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
+
+			if !c.Global().HasExtension(shared.Incus73Extension) {
+				c.LogError("For port-forward you need at least incus 7.3 or 7.0.1 LTS")
+				return errLogged.Wrap(errors.New("the server does not support port forwarding"))
+			}
 
 			inst, err := serviceInstance(ctx, c, p, service, cmd.Int("index"))
 			if err != nil {

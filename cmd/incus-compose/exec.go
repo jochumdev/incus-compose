@@ -10,9 +10,6 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
-
-	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/project"
 )
 
 // execCommand implements `incus-compose exec` similar to `docker compose exec`.
@@ -88,81 +85,26 @@ func newExecCommand() *cli.Command {
 			service := args[0]
 			args = args[1:]
 
-			// Get global client from context
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
 			}
-			if err := globalClient.Connect(); err != nil {
-				return err
-			}
 
-			// Load project
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
+			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			// Get the per Project client - don't create if it doesn't exist
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
-			}
-			if err := c.Open(); err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
 
-			allResources, err := p.Resources(c)
+			inst, err := serviceInstance(ctx, c, p, service, cmd.Int("index"))
 			if err != nil {
-				c.LogError("Getting project resources in reCreate", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			resources, ok := allResources[service]
-			if !ok {
-				c.LogError("No service", "service", service)
-				return errLogged.Wrap(client.ErrNotFound.WithText("service not found"))
-			}
-
-			instances := []*client.Instance{}
-			for _, r := range resources {
-				if r.Kind() == client.KindInstance {
-					i, ok := r.(*client.Instance)
-					if !ok {
-						continue
-					}
-
-					if i.ServiceName() == service {
-						instances = append(instances, i)
-					}
-				}
-			}
-
-			if len(instances) == 0 {
-				c.LogError("No instance for service", "service", service)
-				return errLogged.Wrap(client.ErrNotFound.WithText("service instance not found"))
-			}
-
-			if cmd.Int("index") >= len(instances) || cmd.Int("index") < 0 {
-				c.LogError("Not enough instances", "have", len(instances), "expected", cmd.Int("index"))
-				return errLogged.Wrap(client.ErrNotFound.WithText("not enough instances"))
-			}
-
-			inst := instances[cmd.Int("index")]
-
-			err = client.RunAction(ctx, inst, client.ActionEnsure)
-			if err != nil {
-				globalClient.LogError("Failed to ensure the instance", "error", err)
-				return errLogged.Wrap(fmt.Errorf("failed to ensure the instance: %w", err))
+				return err
 			}
 
 			execPath, err := exec.LookPath("incus")
 			if err != nil {
-				globalClient.LogError("`incus` not found in PATH")
+				c.LogError("`incus` not found in PATH")
 				return errLogged.Wrap(errors.New("'incus' not found in PATH"))
 			}
 
@@ -191,7 +133,7 @@ func newExecCommand() *cli.Command {
 				iArgs = append(iArgs, "--group", strconv.FormatUint(inst.State().GID, 10))
 			}
 
-			iArgs = append(iArgs, instances[cmd.Int("index")].IncusName())
+			iArgs = append(iArgs, inst.IncusName())
 			// Terminate incus's own flag parsing so a command with leading dashes
 			// (e.g. `ls -ln`, `sh -c`) is passed through verbatim.
 			iArgs = append(iArgs, "--")

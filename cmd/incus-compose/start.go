@@ -121,9 +121,15 @@ func newStartCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			p, c, err := loadProjectClient(ctx, cmd)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
+			}
+
+			err = c.Open()
+			if err != nil {
+				c.LogError("Opening the project client", "error", err)
+				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
 

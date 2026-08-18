@@ -59,38 +59,21 @@ func newBackupVerifyCommand() *cli.Command {
 			backupPoolFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			globalClient, err := clientFromContext(ctx)
+			p, c, err := loadProject(ctx, cmd)
 			if err != nil {
 				return err
-			}
-
-			err = globalClient.Connect()
-			if err != nil {
-				return err
-			}
-
-			p, err := project.New().Load(ctx, buildLoadOptions(cmd)...)
-			if err != nil {
-				globalClient.LogError("Configuring the project", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			c, err := globalClient.EnsureProject(p.Name)
-			if err != nil {
-				globalClient.LogError("Getting the incus project", "error", err)
-				return errLogged.Wrap(err)
 			}
 
 			err = c.Open()
 			if err != nil {
-				globalClient.LogError("Opening the project client", "error", err)
+				c.LogError("Opening the project client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = c.Done() }()
 
 			backupConfig := resolveBackupConfig(cmd, p, c)
 
-			bc, err := globalClient.EnsureProject(c.Project() + backupProjectSuffix)
+			bc, err := c.Global().EnsureProject(c.Project() + backupProjectSuffix)
 			if err != nil {
 				c.LogError("Getting the backup project", "error", err)
 				return errLogged.Wrap(err)
@@ -98,7 +81,7 @@ func newBackupVerifyCommand() *cli.Command {
 
 			err = bc.Open()
 			if err != nil {
-				globalClient.LogError("Opening the backup client", "error", err)
+				c.LogError("Opening the backup client", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer func() { _ = bc.Done() }()
