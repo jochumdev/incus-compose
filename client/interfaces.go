@@ -116,6 +116,12 @@ type DeleteAble interface {
 	Delete(ctx context.Context, opts ...Option) error
 }
 
+// doner is implemented by resources holding something Incus will not reclaim
+// on its own, such as the instance an image is read through.
+type doner interface {
+	Done() error
+}
+
 // LogAble is implemented by resources that can stream logs.
 type LogAble interface {
 	Log(ctx context.Context, opts ...Option) error

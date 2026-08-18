@@ -666,41 +666,32 @@ func TestServiceToInstanceUser(t *testing.T) {
 		t.Parallel()
 		inst, err := build("1000")
 		require.NoError(t, err)
-		assert.Equal(t, uint64(1000), inst.Config.UID)
-		assert.Equal(t, uint64(0), inst.Config.GID)
-		assert.Equal(t, "1000", inst.Config.Extensions["oci.uid"])
+		assert.Equal(t, "1000", inst.Config.User)
 	})
 
 	t.Run("uid and gid", func(t *testing.T) {
 		t.Parallel()
 		inst, err := build("1000:1001")
 		require.NoError(t, err)
-		assert.Equal(t, uint64(1000), inst.Config.UID)
-		assert.Equal(t, uint64(1001), inst.Config.GID)
-		assert.Equal(t, "1000", inst.Config.Extensions["oci.uid"])
+		assert.Equal(t, "1000:1001", inst.Config.User)
 	})
 
 	t.Run("no user", func(t *testing.T) {
 		t.Parallel()
 		inst, err := build("")
 		require.NoError(t, err)
-		assert.Equal(t, uint64(0), inst.Config.UID)
-		assert.Equal(t, uint64(0), inst.Config.GID)
+		assert.Empty(t, inst.Config.User)
 		assert.NotContains(t, inst.Config.Extensions, "oci.uid")
 	})
 
-	t.Run("invalid uid", func(t *testing.T) {
+	// A name is carried through untouched; only the image resolves it, and it
+	// is not pulled at translation time.
+	t.Run("named user", func(t *testing.T) {
 		t.Parallel()
-		_, err := build("abc")
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "cannot convert service 'web' user 'abc' to int")
-	})
-
-	t.Run("invalid gid", func(t *testing.T) {
-		t.Parallel()
-		_, err := build("1000:xyz")
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "cannot convert service 'web' user 'xyz' to int")
+		inst, err := build("netbox:root")
+		require.NoError(t, err)
+		assert.Equal(t, "netbox:root", inst.Config.User)
+		assert.NotContains(t, inst.Config.Extensions, "oci.uid")
 	})
 }
 
@@ -1194,7 +1185,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "volume", Source: "data", Target: "/data"},
 		}}
 
-		devices, files, resources, err := instanceVolumeDevices(c, p, service, nil, 0, 0)
+		devices, files, resources, err := instanceVolumeDevices(c, p, service, nil, "")
 		require.NoError(t, err)
 		assert.Empty(t, files)
 		require.Len(t, devices, 1)
@@ -1212,7 +1203,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "volume", Source: "data", Target: "/data"},
 		}}
 
-		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, 0, 0)
+		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, "")
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		require.Len(t, resources, 1)
@@ -1229,7 +1220,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "volume", Source: "data", Target: "/data"},
 		}}
 
-		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, 0, 0)
+		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, "")
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		require.Len(t, resources, 1)
@@ -1250,7 +1241,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			},
 		}}
 
-		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, 0, 0)
+		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, "")
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		require.Len(t, resources, 1)
@@ -1269,7 +1260,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "volume", Source: "data", Target: "/data"},
 		}}
 
-		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, 0, 0)
+		devices, _, resources, err := instanceVolumeDevices(c, p, service, nil, "")
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		require.Len(t, resources, 1)
@@ -1288,7 +1279,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			},
 		}}
 
-		devices, files, resources, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		devices, files, resources, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.NoError(t, err)
 		assert.Empty(t, devices)
 		assert.Empty(t, resources)
@@ -1314,7 +1305,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			},
 		}}
 
-		devices, files, resources, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		devices, files, resources, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.NoError(t, err)
 		assert.Empty(t, files)
 		require.Len(t, devices, 1)
@@ -1331,7 +1322,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "bind", Source: dir, Target: "/mnt", Extensions: types.Extensions{"x-incus": map[string]any{"security.shifted": "false"}}},
 		}}
 
-		devices, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		devices, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		assert.Equal(t, client.InstanceDeviceTypeDisk, devices[0].Config.DeviceType)
@@ -1344,7 +1335,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "tmpfs", Target: "/cache"},
 		}}
 
-		devices, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		devices, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		assert.Equal(t, client.InstanceDeviceTypeTmpfs, devices[0].Config.DeviceType)
@@ -1358,7 +1349,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 			{Type: "bind", Source: dir, Target: "/mnt"},
 		}}
 
-		devices, files, resources, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		devices, files, resources, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.NoError(t, err)
 		assert.Empty(t, files)
 		require.Len(t, devices, 1)
@@ -1371,7 +1362,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 		service := types.ServiceConfig{Name: "web", Volumes: []types.ServiceVolumeConfig{
 			{Type: "weird", Source: "x", Target: "/y"},
 		}}
-		_, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		_, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.Error(t, err)
 	})
 
@@ -1380,7 +1371,7 @@ func TestInstanceVolumeDevices(t *testing.T) {
 		service := types.ServiceConfig{Name: "web", Volumes: []types.ServiceVolumeConfig{
 			{Type: "bind", Source: filepath.Join(t.TempDir(), "nope"), Target: "/m"},
 		}}
-		_, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, 0, 0)
+		_, _, _, err := instanceVolumeDevices(c, &types.Project{}, service, nil, "")
 		require.Error(t, err)
 	})
 }
@@ -1403,7 +1394,7 @@ func TestVolumePrefetchTarget(t *testing.T) {
 		image, err := c.Resource(client.KindImage, "docker.io/nginx:alpine", &client.ImageConfig{})
 		require.NoError(t, err)
 
-		_, _, resources, err := instanceVolumeDevices(c, p, service, image, 0, 0)
+		_, _, resources, err := instanceVolumeDevices(c, p, service, image, "")
 		require.NoError(t, err)
 		require.Len(t, resources, 1)
 

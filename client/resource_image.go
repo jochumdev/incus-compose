@@ -14,6 +14,7 @@ import (
 	"github.com/avast/retry-go/v5"
 	"github.com/distribution/reference"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/pkg/sftp"
 
 	"github.com/lxc/incus-compose/iclient"
 )
@@ -102,6 +103,12 @@ type Image struct {
 
 	// state is swapped whole, so a reader never sees a half-updated image.
 	state atomic.Pointer[ImageState]
+
+	// sftpMu guards the reader instance below, and is held across its creation
+	// so a second caller waits rather than starting one of its own.
+	sftpMu   sync.Mutex
+	sftpName string
+	sftpConn *sftp.Client
 }
 
 // imageSource is where incusd fetches an image from. A registry that is not a
@@ -141,8 +148,13 @@ type ImageState struct {
 	ETag       string
 
 	// OCI metadata extracted from the image (empty/0 for native Incus images).
-	UID        uint64
-	GID        uint64
+	UID uint64
+	GID uint64
+
+	// OCIUser is the image's own USER verbatim, which UID/GID cannot hold when
+	// it names a user instead of numbering one.
+	OCIUser string
+
 	Entrypoint string
 	Cmd        string
 	Cwd        string

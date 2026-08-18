@@ -49,6 +49,15 @@ for correct semver ordering. Headings below preserve each release's announced fo
   `StorageVolumeState`, so it follows a fetch instead of staying set.
   (by @jochumdev)
 
+- **library**: `Image.SFTP()` reads an image's own filesystem, through a stopped
+  instance it creates from the image. One such instance per image serves every
+  prefetch and user lookup, and `Client.Done()` - which now releases what a
+  client's resources hold before firing the done hooks - removes it.
+  `Image.ResolveUser()` maps a `user[:group]` value to numeric ids through it,
+  reading the image only when either side is a name. New alongside them:
+  `InstanceConfig.User`, `StorageVolumeConfig.User`, `ImageState.OCIUser`,
+  `OCIUserKey` and `ErrNoSuchUser`. (by @jochumdev)
+
 ### Changed
 
 - **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -
@@ -60,6 +69,14 @@ for correct semver ordering. Headings below preserve each release's announced fo
   likely cause and a command to check it. (by @jochumdev)
 
 ### Fixed
+
+- A service `user:` may now name its user and group, not only number them:
+  `user: "netbox:root"` starts instead of failing the whole project. Names
+  resolve against the image's own `/etc/passwd` and `/etc/group`, and one the
+  image does not define is an error rather than a silent fall back to root. The
+  same goes for the image's own `USER`, so an image built with `USER nginx` no
+  longer runs as root. A name with no group takes that user's own group, as
+  `login` would; a number with no group still keeps GID 0. (by @jochumdev)
 
 - An OCI image whose `CMD` is empty is no longer re-read from its registry on
   every run. Incus stores no property for an empty value, so the key that marks

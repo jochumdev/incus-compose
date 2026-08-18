@@ -111,6 +111,11 @@ type InstanceConfig struct {
 	UID uint64
 	// GID if not 0 use that value else use the user id from the image.
 	GID uint64
+
+	// User is the compose `user:` override, `uid[:gid]` or the names the
+	// image's own /etc/passwd and /etc/group give them. Ignored unless UID and
+	// GID are both 0.
+	User string
 }
 
 // GetConfig returns the configuration.
@@ -581,9 +586,23 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 	uid, gid := r.Config.UID, r.Config.GID
 
 	if uid == 0 && gid == 0 {
+		// The compose override wins over the image's own USER, and either may
+		// name a user only the image's /etc/passwd resolves.
+		user := r.Config.User
+		if user == "" {
+			user = imageState.OCIUser
+		}
+
+		switch {
+		case user != "":
+			uid, gid, err = image.ResolveUser(ctx, user)
+			if err != nil {
+				return err
+			}
+
 		// Use UID/GID from image properties when available so volumes are created
 		// with the correct shifted config before the instance is created.
-		if imageState.UID > 0 || imageState.GID > 0 {
+		case imageState.UID > 0 || imageState.GID > 0:
 			uid, gid = imageState.UID, imageState.GID
 		}
 	}

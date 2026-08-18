@@ -43,7 +43,8 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 		}
 	}
 
-	// A named USER needs the rootfs' /etc/passwd, so it lands as root.
+	// A named USER lands as 0 here; oci.uid takes nothing else, and only the
+	// image's own /etc/passwd resolves it, a project away from this one.
 	var uid, gid uint64
 
 	if config.User != "" {
@@ -74,6 +75,10 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 	props["oci.cmd"] = shellquote.Join(config.Cmd...)
 	props["oci.cwd"] = cwd
 	props["oci.volumes"] = volumes
+
+	if config.User != "" {
+		props[OCIUserKey] = config.User
+	}
 
 	err = server.UpdateImage(ctx, fingerprint, incusApi.ImagePut{
 		AutoUpdate: img.AutoUpdate,
@@ -199,6 +204,7 @@ func ociReadProperties(s *ImageState, props map[string]string) {
 		s.GID = gid
 	}
 
+	s.OCIUser = props[OCIUserKey]
 	s.Entrypoint = props["oci.entrypoint"]
 	s.Cmd = props["oci.cmd"]
 	s.Cwd = props["oci.cwd"]
