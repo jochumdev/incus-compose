@@ -13,9 +13,9 @@ const OCIUserKey = "user.incus-compose.oci.user"
 
 // ResolveUser maps a `user[:group]` value to numeric ids, reading the image's
 // /etc/passwd and /etc/group when either side is a name.
-func (r *Image) ResolveUser(ctx context.Context, user string) (uint64, uint64, error) {
+func (r *Image) ResolveUser(ctx context.Context, user string) (*Owner, error) {
 	if user == "" {
-		return 0, 0, nil
+		return &Owner{}, nil
 	}
 
 	name, group, _ := strings.Cut(user, ":")
@@ -24,18 +24,18 @@ func (r *Image) ResolveUser(ctx context.Context, user string) (uint64, uint64, e
 	gid, gidErr := strconv.ParseUint(group, 10, 32)
 
 	if uidErr == nil && (group == "" || gidErr == nil) {
-		return uid, gid, nil
+		return &Owner{UID: uid, GID: gid}, nil
 	}
 
 	if r.NativeIncus() {
-		return 0, 0, ErrNoSuchUser.WithText("a native Incus image has no OCI user").WithResource(r)
+		return nil, ErrNoSuchUser.WithText("a native Incus image has no OCI user").WithResource(r)
 	}
 
 	if uidErr != nil {
 		// Without a group docker takes the user's own, as login would.
 		found, primary, err := r.imageIDs(ctx, "/etc/passwd", name)
 		if err != nil {
-			return 0, 0, err
+			return nil, err
 		}
 
 		uid, gid = found, primary
@@ -44,13 +44,13 @@ func (r *Image) ResolveUser(ctx context.Context, user string) (uint64, uint64, e
 	if group != "" && gidErr != nil {
 		found, _, err := r.imageIDs(ctx, "/etc/group", group)
 		if err != nil {
-			return 0, 0, err
+			return nil, err
 		}
 
 		gid = found
 	}
 
-	return uid, gid, nil
+	return &Owner{UID: uid, GID: gid}, nil
 }
 
 // imageIDs looks name up in one of the image's id files.

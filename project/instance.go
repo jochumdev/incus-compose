@@ -711,8 +711,6 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 					files = append(files, client.InstanceFile{
 						Target:    cVol.Target,
 						File:      cVol.Source,
-						UID:       -1,
-						GID:       -1,
 						Mode:      0o644,
 						DirMode:   0o755,
 						Overwrite: true,
@@ -854,8 +852,7 @@ func instanceSecrets(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    svcSecret.Target,
 				Content:   fp,
-				UID:       parseSecretID(svcSecret.UID),
-				GID:       parseSecretID(svcSecret.GID),
+				Owner:     secretOwner(svcSecret.UID, svcSecret.GID),
 				Mode:      parseSecretMode(svcSecret.Mode),
 				Overwrite: true,
 			})
@@ -869,8 +866,7 @@ func instanceSecrets(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    svcSecret.Target,
 				Content:   client.NewReaderFromBytes([]byte(value)),
-				UID:       parseSecretID(svcSecret.UID),
-				GID:       parseSecretID(svcSecret.GID),
+				Owner:     secretOwner(svcSecret.UID, svcSecret.GID),
 				Mode:      parseSecretMode(svcSecret.Mode),
 				Overwrite: true,
 			})
@@ -1058,8 +1054,7 @@ func instanceConfigs(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    target,
 				Content:   fp,
-				UID:       parseSecretID(svcConfig.UID),
-				GID:       parseSecretID(svcConfig.GID),
+				Owner:     secretOwner(svcConfig.UID, svcConfig.GID),
 				Mode:      parseConfigMode(svcConfig.Mode),
 				Overwrite: true,
 			})
@@ -1068,8 +1063,7 @@ func instanceConfigs(p *types.Project, service types.ServiceConfig) ([]client.In
 			result = append(result, client.InstanceFile{
 				Target:    target,
 				Content:   client.NewReaderFromBytes([]byte(configDef.Content)),
-				UID:       parseSecretID(svcConfig.UID),
-				GID:       parseSecretID(svcConfig.GID),
+				Owner:     secretOwner(svcConfig.UID, svcConfig.GID),
 				Mode:      parseConfigMode(svcConfig.Mode),
 				Overwrite: true,
 			})
@@ -1091,13 +1085,18 @@ func parseConfigMode(mode *types.FileMode) int {
 	return int(*mode) &^ 0o222
 }
 
-// parseSecretID parses a UID string to int64.
-func parseSecretID(id string) int64 {
-	if id == "" {
-		return -1
+// secretOwner reads a secret's uid/gid. Nil when neither is given, so the file
+// lands as the instance user.
+func secretOwner(uid string, gid string) *client.Owner {
+	if uid == "" && gid == "" {
+		return nil
 	}
-	v, _ := strconv.ParseInt(id, 10, 64)
-	return v
+
+	owner := &client.Owner{}
+	owner.UID, _ = strconv.ParseUint(uid, 10, 64)
+	owner.GID, _ = strconv.ParseUint(gid, 10, 64)
+
+	return owner
 }
 
 // parseSecretMode parses a file mode to int. Per the

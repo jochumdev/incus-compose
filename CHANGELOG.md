@@ -53,12 +53,22 @@ for correct semver ordering. Headings below preserve each release's announced fo
   instance it creates from the image. One such instance per image serves every
   prefetch and user lookup, and `Client.Done()` - which now releases what a
   client's resources hold before firing the done hooks - removes it.
-  `Image.ResolveUser()` maps a `user[:group]` value to numeric ids through it,
-  reading the image only when either side is a name. New alongside them:
+  `Image.ResolveUser()` maps a `user[:group]` value to an `*Owner`, reading the
+  image only when either side is a name. New alongside them:
   `InstanceConfig.User`, `StorageVolumeConfig.User`, `ImageState.OCIUser`,
   `OCIUserKey` and `ErrNoSuchUser`. (by @jochumdev)
 
 ### Changed
+
+- **library**: ownership is one type in one spelling. `Owner{UID, GID uint64}`
+  replaces the three conventions that meant "unset" differently:
+  `InstanceConfig.UID`/`GID` and `StorageVolumeConfig.UID`/`GID` (uint64, 0) and
+  `InstanceFile.UID`/`GID` (int64, -1). Each is now an `Owner *Owner` where nil
+  is unset, so the zero value needs no thought. Two behaviours follow: an
+  instance config setting only one of the pair is no longer silently discarded
+  and re-read from the instance, and a secret or config that sets `uid` without
+  `gid` now leaves the other at 0 the way docker does, instead of taking the
+  instance's. (by @jochumdev)
 
 - **library**: `InstanceConfig.Full`/`project.ResourcesFull()` are gone -
   `Instance.fetch()` now always fetches runtime state, so `ps`, `list` and

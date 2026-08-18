@@ -24,7 +24,7 @@ func prefetchVolumeName(service string, at string) string {
 
 // prefetchVolumes attaches a volume to every path the image declares that no
 // device already covers, so what an application writes there survives a stop.
-func (r *Instance) prefetchVolumes(ctx context.Context, image *Image, uid uint64, gid uint64) error {
+func (r *Instance) prefetchVolumes(ctx context.Context, image *Image, owner *Owner) error {
 	if r.Config.NoAutoVolumes {
 		return nil
 	}
@@ -45,8 +45,7 @@ func (r *Instance) prefetchVolumes(ctx context.Context, image *Image, uid uint64
 		volConfig := &StorageVolumeConfig{
 			Shifted:       true,
 			ImageResource: image,
-			UID:           uid,
-			GID:           gid,
+			Owner:         owner,
 			Pool:          r.client.Config().DefaultStoragePool,
 			Prefetch:      at,
 			Extensions:    map[string]string{PrefetchVolumeServiceKey: r.Config.ServiceName},

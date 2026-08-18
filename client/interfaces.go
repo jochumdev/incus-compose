@@ -85,6 +85,13 @@ type Resource interface {
 	Created() bool
 }
 
+// Owner is a uid/gid pair. A nil *Owner means unset, which each config field
+// documents its own fallback for.
+type Owner struct {
+	UID uint64
+	GID uint64
+}
+
 // Config is implemented by resource configuration types.
 type Config interface {
 	GetConfig() any

@@ -430,8 +430,6 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 		inst.Config.Files = append(inst.Config.Files, client.InstanceFile{
 			Target:  "/run/secrets/token",
 			Content: client.NewReaderFromBytes([]byte(token)),
-			UID:     -1,
-			GID:     -1,
 			Mode:    0o600,
 			DirMode: 0o700,
 		})
@@ -455,8 +453,6 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 			inst.Config.Files = append(inst.Config.Files, client.InstanceFile{
 				Target:  "/usr/local/bin/ic-healthd",
 				File:    f,
-				UID:     -1,
-				GID:     -1,
 				Mode:    0o700,
 				DirMode: 0o700,
 			})

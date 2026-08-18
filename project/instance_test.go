@@ -74,10 +74,11 @@ func TestParseSecretOwnershipAndMode(t *testing.T) {
 
 	mode := types.FileMode(0o640)
 
-	// Empty maps to -1 so InstanceFile falls back to the image's oci.uid/oci.gid.
-	assert.Equal(t, int64(-1), parseSecretID(""))
-	assert.Equal(t, int64(1000), parseSecretID("1000"))
-	assert.Equal(t, int64(0), parseSecretID("not-a-number"))
+	// Neither given leaves the owner unset, so the file lands as the instance user.
+	assert.Nil(t, secretOwner("", ""))
+	assert.Equal(t, &client.Owner{UID: 1000}, secretOwner("1000", ""))
+	assert.Equal(t, &client.Owner{UID: 1000, GID: 1001}, secretOwner("1000", "1001"))
+	assert.Equal(t, &client.Owner{}, secretOwner("not-a-number", ""))
 	assert.Equal(t, 0o400, parseSecretMode(nil))
 	assert.Equal(t, 0o440, parseSecretMode(&mode))
 }
@@ -526,9 +527,8 @@ func TestInstanceSecrets(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, secrets, 1)
 		require.Equal(t, "db_pw", secrets[0].Target)
-		// Unset UID/GID fall back to the image's oci.uid/oci.gid.
-		assert.Equal(t, int64(-1), secrets[0].UID)
-		assert.Equal(t, int64(-1), secrets[0].GID)
+		// An unset owner falls back to the image's oci.uid/oci.gid.
+		assert.Nil(t, secrets[0].Owner)
 	})
 
 	t.Run("environment source", func(t *testing.T) {
@@ -578,8 +578,7 @@ func TestInstanceConfigs(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, configs, 1)
 		require.Equal(t, "/etc/app.conf", configs[0].Target)
-		assert.Equal(t, int64(-1), configs[0].UID)
-		assert.Equal(t, int64(-1), configs[0].GID)
+		assert.Nil(t, configs[0].Owner)
 	})
 
 	t.Run("content source", func(t *testing.T) {

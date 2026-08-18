@@ -64,35 +64,31 @@ func TestImageResolveUser(t *testing.T) {
 	require.NoError(t, err)
 
 	// Numbers need no lookup, so nothing is created to do one with.
-	uid, gid, err := img.ResolveUser(ctx, "1000:1001")
+	owner, err := img.ResolveUser(ctx, "1000:1001")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(1000), uid)
-	assert.Equal(t, uint64(1001), gid)
+	assert.Equal(t, &Owner{UID: 1000, GID: 1001}, owner)
 
 	names, err := conn.GetInstanceNames(ctx, nil)
 	require.NoError(t, err)
 	require.Empty(t, names, "a numeric user must not read the image")
 
 	// A name without a group takes the user's own, as login would.
-	uid, gid, err = img.ResolveUser(ctx, "nginx")
+	owner, err = img.ResolveUser(ctx, "nginx")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(101), uid)
-	assert.Equal(t, uint64(101), gid)
+	assert.Equal(t, &Owner{UID: 101, GID: 101}, owner)
 
-	uid, gid, err = img.ResolveUser(ctx, "nginx:root")
+	owner, err = img.ResolveUser(ctx, "nginx:root")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(101), uid)
-	assert.Equal(t, uint64(0), gid)
+	assert.Equal(t, &Owner{UID: 101, GID: 0}, owner)
 
-	uid, gid, err = img.ResolveUser(ctx, "1000:root")
+	owner, err = img.ResolveUser(ctx, "1000:root")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(1000), uid)
-	assert.Equal(t, uint64(0), gid)
+	assert.Equal(t, &Owner{UID: 1000, GID: 0}, owner)
 
-	_, _, err = img.ResolveUser(ctx, "nosuchuser")
+	_, err = img.ResolveUser(ctx, "nosuchuser")
 	require.ErrorIs(t, err, ErrNoSuchUser)
 
-	_, _, err = img.ResolveUser(ctx, "nginx:nosuchgroup")
+	_, err = img.ResolveUser(ctx, "nginx:nosuchgroup")
 	require.ErrorIs(t, err, ErrNoSuchUser)
 
 	// One instance served every lookup above.

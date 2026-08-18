@@ -116,7 +116,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 		{
 			name:   "shifted volume",
 			volume: "test-shifted",
-			config: &StorageVolumeConfig{Shifted: true, UID: 1000, GID: 1000},
+			config: &StorageVolumeConfig{Shifted: true, Owner: &Owner{UID: 1000, GID: 1000}},
 			opts:   []Option{OptionCreate()},
 			validate: func(t *testing.T, r Resource) {
 				t.Helper()
@@ -207,8 +207,7 @@ func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 
 	r, err := c.Resource(KindStorageVolume, "test-shifted", &StorageVolumeConfig{
 		Shifted: true,
-		UID:     1000,
-		GID:     1000,
+		Owner:   &Owner{UID: 1000, GID: 1000},
 	})
 	require.NoError(t, err)
 
