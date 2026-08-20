@@ -150,20 +150,20 @@ func TestE2EUpRunDown(t *testing.T) {
 
 	// Incus itself, not ps: `ps --all` lists a declared service whether or not
 	// the instance exists, so it cannot answer whether one is gone.
-	names := projectInstances(ctx, t, pn, compose)
+	names := listProjectInstances(ctx, t, pn, compose)
 	assert.Contains(t, names, "leftover", "the one-off stays without --rm")
 	assert.Contains(t, names, "web-1", "the declared service is up")
 
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "down")
 	require.NoError(t, err)
 
-	names = projectInstances(ctx, t, pn, compose)
+	names = listProjectInstances(ctx, t, pn, compose)
 	assert.NotContains(t, names, "leftover", "down takes the one-off with it")
 	assert.NotContains(t, names, "web-1", "and the declared service")
 }
 
-// projectInstances lists the instances Incus actually holds for the project.
-func projectInstances(ctx context.Context, t *testing.T, pn, compose string) []string {
+// listProjectInstances lists the instances Incus actually holds for the project.
+func listProjectInstances(ctx context.Context, t *testing.T, pn, compose string) []string {
 	t.Helper()
 
 	out, err := testlib.RunCompose(ctx, t, pn, "", nil,

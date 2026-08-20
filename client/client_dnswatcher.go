@@ -165,7 +165,7 @@ func (c *Client) RegisterDNSWatcher() error {
 
 				changed = true
 			default:
-				// ActionDelete and ActionLog don't affect DNS registration.
+				// ActionDelete does not affect DNS registration.
 			}
 
 			if !changed {

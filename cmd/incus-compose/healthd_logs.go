@@ -24,8 +24,6 @@ func newHealthdLogsCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			noColor := noColor(ctx)
-
 			globalClient, err := clientFromContext(ctx)
 			if err != nil {
 				return err
@@ -49,27 +47,17 @@ func newHealthdLogsCommand() *cli.Command {
 			} else {
 				out = cmd.Root().Writer
 			}
-			formatter := newLogFormatter(out, noColor)
-			formatter.registerService(h.IncusName())
-			globalClient.SetOutputHandler(formatter.write)
-
-			var opts []client.Option
-			if cmd.Bool("follow") {
-				opts = append(opts, client.OptionFollow())
-			}
 
 			if err := h.Ensure(ctx); err != nil {
 				c.LogError("Ensuring healthd", "error", err)
 				return errLogged.Wrap(err)
 			}
 
-			if err := h.Log(ctx, opts...); err != nil {
-				c.LogError("Getting healthd logs", "error", err)
-				return errLogged.Wrap(err)
-			}
-
-			formatter.flush()
-			return nil
+			return logs(ctx, c, logsArgs{
+				Instances: []*client.Instance{h},
+				Follow:    cmd.Bool("follow"),
+				Writer:    out,
+			})
 		},
 	}
 }

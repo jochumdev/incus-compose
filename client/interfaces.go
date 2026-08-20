@@ -59,7 +59,6 @@ const (
 	ActionStop    Action = "stop"
 	ActionPause   Action = "pause"
 	ActionUnpause Action = "unpause"
-	ActionLog     Action = "log"
 	ActionBackup  Action = "backup"
 	ActionRestore Action = "restore"
 )
@@ -139,11 +138,6 @@ type DeleteAble interface {
 // on its own, such as the instance an image is read through.
 type doner interface {
 	Done() error
-}
-
-// LogAble is implemented by resources that can stream logs.
-type LogAble interface {
-	Log(ctx context.Context, opts ...Option) error
 }
 
 // BackupAble is implemented by resources that can be backed up.

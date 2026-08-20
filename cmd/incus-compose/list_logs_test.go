@@ -97,8 +97,8 @@ func TestLogFormatterNoColor(t *testing.T) {
 
 	formatter.registerService("web")
 	formatter.registerService("database")
-	formatter.write(client.ActionLog, logResource{name: "web"}, []byte("first\npartial"))
-	formatter.write(client.ActionLog, logResource{name: "database"}, []byte("ready\n"))
+	formatter.write(logResource{name: "web"}, []byte("first\npartial"))
+	formatter.write(logResource{name: "database"}, []byte("ready\n"))
 	formatter.flush()
 
 	output := buf.String()
@@ -113,7 +113,7 @@ func TestLogFormatterColor(t *testing.T) {
 	var buf bytes.Buffer
 	formatter := newLogFormatter(&buf, false)
 
-	formatter.write(client.ActionLog, logResource{name: "web"}, []byte("hello\n"))
+	formatter.write(logResource{name: "web"}, []byte("hello\n"))
 	formatter.flush()
 
 	output := buf.String()
