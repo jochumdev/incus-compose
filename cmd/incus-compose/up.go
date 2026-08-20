@@ -224,8 +224,8 @@ func newUpCommand() *cli.Command {
 				pullMode = client.PullNever
 			}
 
-			// The stale set below needs the images pulled first; built ones stay
-			// with builtServices and healthd pulls its own in healthdUp.
+			// The ensure below carries no pull mode, so this is where --pull
+			// lands. Built images stay with builtServices, healthd with healthdUp.
 			err = pull(ctx, p, c, pullArgs{
 				Services:        cmd.Args().Slice(),
 				WithDeps:        !cmd.Bool("no-deps"),
@@ -241,33 +241,14 @@ func newUpCommand() *cli.Command {
 				return err
 			}
 
-			// A rebuilt or re-pulled image only reaches an instance created from it again.
+			// A rebuilt image only reaches an instance created from it again.
 			recreate := cmd.Bool("recreate")
 			downServices, downNoDeps := cmd.Args().Slice(), cmd.Bool("no-deps")
-			if !recreate {
-				stale := []string{}
-				if buildMode == client.BuildForce {
-					stale = builtServices(p, args)
-				}
-
-				if pullMode == client.PullAlways {
-					pulled, err := pulledServices(ctx, p, c, args, pullMode, scale)
-					if err != nil {
-						c.LogError("Comparing the instance images against the pulled ones", "error", err)
-						return errLogged.Wrap(err)
-					}
-
-					stale = append(stale, pulled...)
-				}
-
-				slices.Sort(stale)
-
-				downServices = slices.Compact(stale)
+			if !recreate && buildMode == client.BuildForce {
+				downServices = builtServices(p, args)
 				downNoDeps = true
 				recreate = len(downServices) > 0
-				if recreate {
-					c.LogDebug("Recreating stale services", "services", downServices)
-				}
+				c.LogDebug("Recreating built services", "services", downServices)
 			}
 
 			if recreate {
@@ -350,6 +331,54 @@ func newUpCommand() *cli.Command {
 				return errLogged.Wrap(err)
 			}
 
+			// A pulled image only reaches an instance created from it again, so
+			// the ones the ensure above found on the previous fingerprint are
+			// torn down and made from the new one.
+			if pullMode == client.PullAlways {
+				stale := staleInstances(myResources)
+				if len(stale) > 0 {
+					c.LogDebug("Recreating instances on a replaced image", "instances", stale)
+
+					downStack := client.NewStack(c, client.StackSortDescending(), client.StackWorkers(cmd.Root().Int("workers")))
+					downStack.Add(stale...)
+
+					err = downStack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, client.OptionTimeout(cmd.Duration("timeout")))
+					if err != nil {
+						c.LogError("Stopping instances on a replaced image", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					err = downStack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, client.OptionTimeout(cmd.Duration("timeout")))
+					if err != nil {
+						c.LogError("Deleting instances on a replaced image", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					// Delete drops them from the client, so Start below runs on
+					// the resources this rebuild registers rather than the dead ones.
+					resources, err = p.Resources(c, project.ResourcesScale(scale))
+					if err != nil {
+						c.LogError("Getting project resources after the teardown", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					myResources = filterResources(p, resources, args)
+
+					stack = client.NewStack(c, client.StackWorkers(cmd.Root().Int("workers")), client.StackFailFast())
+					stack.AddOrdered(order, myResources)
+
+					// Everything else came through the ensure above; the deleted
+					// instances are what the rebuild handed back unensured.
+					deleted := func(r client.Resource) bool { return !r.IsEnsured() }
+
+					err = stack.ForActionF(client.ActionEnsure, deleted).Run(ctx, client.ActionEnsure, startOptions...)
+					if err != nil {
+						c.LogError("Ensuring the recreated instances", "error", err)
+						return errLogged.Wrap(err)
+					}
+				}
+			}
+
 			// Start
 			if !cmd.Bool("no-start") {
 				startFilter := func(r client.Resource) bool { return r.IsEnsured() }
@@ -427,21 +456,12 @@ func builtServices(p *project.Project, args filterResourcesArgs) []string {
 	return services
 }
 
-// pulledServices returns the in-scope services running an image other than the
-// one pull() just ensured for them, sorted.
-func pulledServices(ctx context.Context, p *project.Project, c *client.Client, args filterResourcesArgs, pull client.PullMode, scale map[string]int) ([]string, error) {
-	resources, err := p.Resources(c, project.ResourcesScale(scale))
-	if err != nil {
-		return nil, err
-	}
+// staleInstances returns the ensured instances running an image other than the
+// one their service holds now, sorted by Incus name.
+func staleInstances(resources map[string][]client.Resource) []client.Resource {
+	stale := []client.Resource{}
 
-	conn, err := c.Connection()
-	if err != nil {
-		return nil, err
-	}
-
-	services := []string{}
-	for name, res := range filterResources(p, resources, args) {
+	for _, res := range resources {
 		var image *client.Image
 		for _, r := range res {
 			i, ok := r.(*client.Image)
@@ -461,28 +481,29 @@ func pulledServices(ctx context.Context, p *project.Project, c *client.Client, a
 				continue
 			}
 
-			// An instance that is not there yet gets the image on creation.
-			current, _, err := conn.GetInstance(ctx, instance.IncusName(), nil)
-			if err != nil {
+			// Nil for one the ensure just created, which already runs the new image.
+			info := instance.State().IncusInstance
+			if info == nil {
 				continue
 			}
 
-			if pulledImageChanged(pull, current.Config["volatile.base_image"], image.State().IncusAlias) {
-				services = append(services, name)
-				break
+			if pulledImageChanged(info.Config["volatile.base_image"], image.State().IncusAlias) {
+				stale = append(stale, instance)
 			}
 		}
 	}
 
-	slices.Sort(services)
+	slices.SortFunc(stale, func(a, b client.Resource) int {
+		return strings.Compare(a.IncusName(), b.IncusName())
+	})
 
-	return services, nil
+	return stale
 }
 
-// pulledImageChanged is the recreate policy: only under PullAlways, and only
-// when the pulled alias differs from what the instance runs today.
-func pulledImageChanged(pull client.PullMode, baseImage string, alias *incusApi.ImageAliasesEntry) bool {
-	return pull == client.PullAlways && alias != nil && alias.Target != "" && alias.Target != baseImage
+// pulledImageChanged reports whether the pulled alias differs from the image
+// the instance runs today.
+func pulledImageChanged(baseImage string, alias *incusApi.ImageAliasesEntry) bool {
+	return alias != nil && alias.Target != "" && alias.Target != baseImage
 }
 
 // parseScale parses --scale flags of the form "service=num".

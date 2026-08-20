@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/cmd/incus-compose/version"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
@@ -112,8 +111,8 @@ func TestParseScale(t *testing.T) {
 	}
 }
 
-// TestPulledImageChanged covers the recreate policy up feeds downServices
-// with: gated on PullAlways, and only for an actual change.
+// TestPulledImageChanged covers what up feeds the recreate teardown: an
+// unensured image never recreates, a changed fingerprint does.
 func TestPulledImageChanged(t *testing.T) {
 	t.Parallel()
 
@@ -123,37 +122,32 @@ func TestPulledImageChanged(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		pull      client.PullMode
 		baseImage string
 		alias     *incusApi.ImageAliasesEntry
 		want      bool
 	}{
 		{
-			name:      "missing pull never recreates, even with a new fingerprint",
-			pull:      client.PullMissing,
-			baseImage: "old-fingerprint",
-			alias:     imgAlias("new-fingerprint"),
-			want:      false,
-		},
-		{
-			name:      "always pull with an unchanged fingerprint does not recreate",
-			pull:      client.PullAlways,
+			name:      "an unchanged fingerprint does not recreate",
 			baseImage: "same-fingerprint",
 			alias:     imgAlias("same-fingerprint"),
 			want:      false,
 		},
 		{
-			name:      "always pull with a changed fingerprint recreates",
-			pull:      client.PullAlways,
+			name:      "a changed fingerprint recreates",
 			baseImage: "old-fingerprint",
 			alias:     imgAlias("new-fingerprint"),
 			want:      true,
 		},
 		{
-			name:      "always pull with no ensured alias never recreates",
-			pull:      client.PullAlways,
+			name:      "no ensured alias never recreates",
 			baseImage: "old-fingerprint",
 			alias:     nil,
+			want:      false,
+		},
+		{
+			name:      "an empty alias target never recreates",
+			baseImage: "old-fingerprint",
+			alias:     imgAlias(""),
 			want:      false,
 		},
 	}
@@ -161,7 +155,7 @@ func TestPulledImageChanged(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, pulledImageChanged(tt.pull, tt.baseImage, tt.alias))
+			assert.Equal(t, tt.want, pulledImageChanged(tt.baseImage, tt.alias))
 		})
 	}
 }
