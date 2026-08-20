@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/lxc/incus-compose.svg)](https://pkg.go.dev/github.com/lxc/incus-compose)
 [![Coverage 75%](https://img.shields.io/badge/coverage-75%25-yellow)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml)
 
-Bring the familiar Docker Compose workflow to Incus. `incus-compose` implements the Compose specification for the Incus ecosystem, allowing you to define and run multi-container applications using the `compose.yaml` files you already know.
+A drop-in replacement for `docker compose` that runs your `compose.yaml` on [Incus](https://linuxcontainers.org/incus/) - with the full Incus API available as an escape hatch when you need more than the Compose spec covers.
 
 ```yaml
 services:
@@ -39,14 +39,12 @@ A plain compose file, running unchanged.
 
 ## Demos
 
-Recorded during the beta - the workflow is unchanged in current releases:
-
 - [30-service dependency graph, 30 parallel workers](https://asciinema.org/a/1260145)
 - [Immich - a full photo-management stack](https://asciinema.org/a/1259458)
 
 ## Why incus-compose?
 
-`incus-compose` is a drop-in replacement for `docker compose`: point it at the `compose.yaml` you already have and run it against [Incus](https://linuxcontainers.org/incus/) instead.
+Point it at the `compose.yaml` you already have and run it against Incus instead of Docker.
 
 - Use existing `docker-compose.yml` files unchanged - no rewrite, no new format to learn
 - Windows, macOS, and Linux clients drive a remote Incus host over HTTPS - no Docker Desktop, no WSL, no local VM
@@ -57,45 +55,17 @@ a classic OCI engine setup.
 
 ## Features
 
-Status: **Stable**.
+**Drop-in.** All the commands you know - `up`, `down`, `start`, `stop`, `restart`, `pause`, `logs`, `exec`, `cp`, `top`, `ps`, `config`, `build` - parsing via compose-go with `.env` interpolation, profiles, `depends_on`, secrets, and configs. See the [CLI reference](https://docs.incus-compose.org/cli-reference) and the [compatibility matrix](https://docs.incus-compose.org/compose-compatibility).
 
-**The workflow you know:**
+**Operable.** Health checks, restart policies, and `depends_on: service_healthy` ordering via the `ic-healthd` sidecar; scaling with `up --scale`; project isolation; live progress for pulls and lifecycle. See [Health Checking](https://docs.incus-compose.org/healthd).
 
-- Familiar commands: `up`, `down`, `start`, `stop`, `kill`, `restart`, `pause`/`unpause`, `list` (and `ps`), `logs`, `exec`, `cp`, `top`, `events`, `config`, plus `build`, `healthd`, `incus` (pass-through), and `self-update`
-- Compose project parsing via compose-go: `.env` interpolation, profiles, `depends_on`, secrets, and configs
-- Automatic `compose.incus.yaml` override file - keep the upstream compose file untouched and put Incus tuning next to it [doc](https://docs.incus-compose.org/compose-compatibility#incus-override-file)
-- Windows and macOS clients: No Docker Desktop, no WSL, no local Linux VM. `incus-compose` and the `incus` client are portable Go binaries: from a Windows or macOS desktop you drive a remote Incus host over HTTPS and manage OCI containers, LXC system containers, and VMs directly. See [Installing on Windows](https://docs.incus-compose.org/getting-started/windows).
-- Configuration via `INCUS_COMPOSE_*` environment variables for every flag, with a configurable parallel worker count [doc](https://docs.incus-compose.org/environment-variables)
+**Fast images.** OCI pulls from any registry, a two-stage cache that survives `down`/`up` and dodges rate limits, and local builds via Podman/Docker. See [Builds](https://docs.incus-compose.org/builds).
 
-**Images:**
+**Real networking and storage.** Bridge networks with static IPs, port publishing via proxy devices or kernel NAT, volumes with UID/GID shifting, seeded bind mounts, and per-volume pool placement.
 
-- OCI image pulling from docker.io, ghcr.io, and other registries
-- Two-stage image cache in a dedicated Incus project (survives `down`/`up`, avoids registry rate limits)
-- Local image building via Podman/Docker [doc](https://docs.incus-compose.org/builds)
+**Incus-native when you want it.** Every instance, network, and volume option passes straight through via `x-incus`; `x-incus-compose` adds devices (GPU, USB, raw disk), project-wide resource limits, and healthd tuning. See [Compose Compatibility](https://docs.incus-compose.org/compose-compatibility).
 
-**Networking:**
-
-- Bridge networks with automatic name sanitization; external pre-existing networks
-- Static IPv4/IPv6 addresses with automatic DHCP ranges [doc](https://docs.incus-compose.org/compose-compatibility#automatic-dhcp-ranges)
-- Port forwarding via proxy devices or kernel NAT mode [doc](https://docs.incus-compose.org/compose-compatibility#port-publishing)
-
-**Storage:**
-
-- Storage volumes with UID/GID shifting; bind mounts (pass-through by default, optional seeding) [doc](https://docs.incus-compose.org/compose-compatibility#volume-permissions)
-- Per-volume storage pool placement - pin a database volume to your fast SSD pool [doc](https://docs.incus-compose.org/compose-compatibility#x-incus-compose-volume-pool)
-
-**Operations:**
-
-- Health checks, restart policies, and `depends_on: service_healthy` ordering via the `ic-healthd` sidecar [doc](https://docs.incus-compose.org/healthd)
-- Service scaling with `up --scale` and orphan pruning
-- Incus project isolation
-- Resource limits and other advanced compose features (`shm_size`, `container_name`, etc.)
-
-**Incus-native extras:**
-
-- Project-wide resource limits - cap CPU and memory for the entire stack, enforced by Incus [doc](https://docs.incus-compose.org/compose-compatibility#projects)
-- GPU, USB, and raw disk passthrough per service via `x-incus-compose.devices` [doc](https://docs.incus-compose.org/compose-compatibility#x-incus-compose-devices)
-- The full Incus API as an escape hatch: any instance, network, or volume option passes straight through via `x-incus` [doc](https://docs.incus-compose.org/compose-compatibility)
+**Extensions.** `incus-compose backup` snapshots a project's data volumes into a backup project - create, list, verify, restore, and prune - so a stack's state survives the project itself, and `incus-compose port-forward` forwards a local TCP port into an instance, published or not. See [backup](https://docs.incus-compose.org/cli-reference#backup) and [port-forward](https://docs.incus-compose.org/cli-reference#port-forward).
 
 ## Quick Start
 
