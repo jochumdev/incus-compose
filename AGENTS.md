@@ -15,10 +15,11 @@ To get an idea about the project read [README.md](README.md).
 3. `AGENTS.local.md` - personal collaboration notes (untracked, local only).
 
 Resolve conflicts upward: CONTRIBUTING.md beats this file, which beats local
-notes. The Legal section is the one exception - it is non-negotiable and
-CONTRIBUTING.md agrees with it.
+notes. A lower layer may add guidance only where the higher layer is silent; it
+may not weaken or contradict a higher layer.
 
-Do not restate or reinterpret project rules locally. Everything not fixed here is
+Keep project policy in CONTRIBUTING.md. This file adds AI-specific execution
+rules and repository-specific clarifications. Everything not fixed here is
 discussable - always ask before guessing.
 
 ## Legal
@@ -30,7 +31,7 @@ Licensing is in [CONTRIBUTING.md](CONTRIBUTING.md). What is specific to you:
 
 ## Formatting
 
-- Comments are one line. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full rule; the short version is that every exported symbol gets one, a self-explanatory line gets none, and a second line needs a reason you can name.
+- Follow the comment rules in CONTRIBUTING.md. In addition to required exported doc comments, do not write organizational comments or comments that merely summarize the code; add comments for non-obvious reasons and constraints.
 - Commit messages are kept as short and to the point as possible, no need to summarize the whole issue. Keep the conventional `<type>(<scope>): <description>` format from CONTRIBUTING.md.
 - Do not use `go vet`, `gci` or any of those diagnostics tools, use `just fix`.
 - You don't need to capture tests on your own use `just test-log` to get the last log.
@@ -49,6 +50,47 @@ Licensing is in [CONTRIBUTING.md](CONTRIBUTING.md). What is specific to you:
   }
   ```
 
+## Architectural decisions
+
+Five rules. A1 is why the rest exist; most of them push in one direction: fewer
+hops and plainer types.
+
+### A1. Code is written once and read many times
+
+Keep it simple, and follow the lead of whoever is directing the work - they sign
+it, so their judgement decides. A helper is a hop: a frame the reader has to hold
+on the way to the thing they came for. Inline helpers that only shorten one caller
+or have one call site, unless the caller would stop being readable. The same
+judgement applies to large functions: stop extracting when the code becomes
+harder to follow.
+
+### A2. Constraints outside, freedom inside
+
+Preconditions belong at the boundary, and the body is then free to be direct.
+Hops are the cost, not lines: a long function is fine, but a function defending
+itself against its own callers is not. Checking again in the body re-decides what
+the boundary already decided, and two places defining what is valid will drift.
+It nests: an outer boundary constrains an inner one, and each body is free inside
+what it was handed.
+
+### A3. One struct, one domain
+
+A type holding two unrelated concerns is a design error rather than an untidy
+one; "too many fields" is how it shows up. Each field should have a clear domain
+and ownership.
+
+### A4. Prefer one-goroutine ownership for mutable state
+
+A mutex or a comment is not a substitute for a clear ownership boundary. When
+state crosses goroutines, prefer handing over finished bytes or another value
+whose signature makes ownership clear.
+
+### A5. A function does one job, including construction
+
+Build clients at the caller or wiring boundary, where ownership and closing are
+clear. Do not make a function return a client when its job is something else, and
+avoid fields or lazy getters whose only purpose is deferred construction.
+
 ## Testing
 
 This project's testing model differs from the org default, so the org testing
@@ -59,7 +101,7 @@ rules do not apply here. Follow this repo's own rules in
 ## Working in this repo
 
 - Check existing patterns in the codebase before creating new ones.
-- `go build` and `go run` are denied, so `just` is your only compiler. `just run <args>` builds from the tree and runs it, which is what you want; it costs seconds, so run the thing rather than reasoning about it. `just build` recreates the sidecar and rewrites `.env`, so it destroys the state you are debugging - reach for it only when you mean to.
+- Do not invoke raw `go build` or `go run`; use `just` for compilation and execution. `just run <args>` builds from the tree and runs it, which is what you want; it costs seconds, so run the thing rather than reasoning about it. `just build` recreates the sidecar and rewrites `.env`, so it destroys the state you are debugging - reach for it only when you mean to.
 - Think through framework/library behavior before coding.
 - Keep code direct - no unnecessary intermediate variables.
 - If cycling (same approach, no progress), stop and ask.
