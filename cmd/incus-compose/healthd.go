@@ -367,22 +367,22 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 
 	// The kind matters: the daemon's volume is called ic-healthd too, and
 	// ensuring it from in here would re-enter this hook forever.
-	c.AddHookBefore(func(ctx context.Context, action client.Action, r client.Resource, _ client.Options, err error) error {
+	c.AddHookBefore(func(ctx context.Context, action client.Action, r client.Resource, options client.Options, err error) error {
 		if err != nil || action != client.ActionEnsure || r.Kind() != client.KindInstance || r.IncusName() != inst.IncusName() {
 			return err
 		}
 
-		conn, err := c.Connection()
-		if err != nil {
+		// Everything below builds what a create needs, and healthdEnsure's
+		// lookup pass carries no create - that pass is what fills the state.
+		if !options.Create {
 			return err
 		}
 
-		incusInstance, _, err := conn.GetInstance(ctx, r.IncusName(), nil)
-		if err == nil {
+		if info := inst.State().IncusInstance; info != nil {
 			// No need to setup the instance when we already did that.
-			_, ok := incusInstance.Config["environment.INCUS_COMPOSE_HEALTHD_INCUS"]
+			_, ok := info.Config["environment.INCUS_COMPOSE_HEALTHD_INCUS"]
 			if ok {
-				if drift := healthdConfigDrift(params, incusInstance.Config); len(drift) > 0 {
+				if drift := healthdConfigDrift(params, info.Config); len(drift) > 0 {
 					c.LogWarn("The running ic-healthd was configured by another project, ignoring",
 						"keys", strings.Join(drift, ", "), "instance", r.IncusName())
 				}
