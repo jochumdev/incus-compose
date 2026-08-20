@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
 
@@ -214,6 +215,32 @@ func newUpCommand() *cli.Command {
 				WithDependencies: !cmd.Bool("no-deps"),
 			}
 
+			// "missing" and the legacy "policy" are the default, as is anything unknown.
+			pullMode := client.PullMissing
+			switch cmd.String("pull") {
+			case "always":
+				pullMode = client.PullAlways
+			case "never":
+				pullMode = client.PullNever
+			}
+
+			// The ensure below carries no pull mode, so this is where --pull
+			// lands. Built images stay with builtServices, healthd with healthdUp.
+			err = pull(ctx, p, c, pullArgs{
+				Services:        cmd.Args().Slice(),
+				WithDeps:        !cmd.Bool("no-deps"),
+				IgnoreBuildable: true,
+				NoHealthd:       true,
+				Pull:            pullMode,
+				Scale:           scale,
+				Workers:         cmd.Root().Int("workers"),
+				Debug:           cmd.Root().Bool("debug"),
+				Writer:          cmd.Root().Writer,
+			})
+			if err != nil {
+				return err
+			}
+
 			// A rebuilt image only reaches an instance created from it again.
 			recreate := cmd.Bool("recreate")
 			downServices, downNoDeps := cmd.Args().Slice(), cmd.Bool("no-deps")
@@ -290,16 +317,7 @@ func newUpCommand() *cli.Command {
 
 			c.LogDebug("Ensure", "resources", stack.All())
 
-			// "missing" and the legacy "policy" are the default, as is anything unknown.
-			pull := client.PullMissing
-			switch cmd.String("pull") {
-			case "always":
-				pull = client.PullAlways
-			case "never":
-				pull = client.PullNever
-			}
-
-			startOptions := append(append([]client.Option{}, runOptions...), client.OptionCreate(), client.OptionPullMode(pull))
+			startOptions := append(append([]client.Option{}, runOptions...), client.OptionCreate())
 			if buildInfo.Mode != client.BuildAuto || buildInfo.PreferredBuilder != "" {
 				startOptions = append(startOptions, client.OptionBuild(buildInfo))
 			}
@@ -311,6 +329,54 @@ func newUpCommand() *cli.Command {
 			if err != nil {
 				c.LogError("Ensuring resources", "error", err)
 				return errLogged.Wrap(err)
+			}
+
+			// A pulled image only reaches an instance created from it again, so
+			// the ones the ensure above found on the previous fingerprint are
+			// torn down and made from the new one.
+			if pullMode == client.PullAlways {
+				stale := staleInstances(myResources)
+				if len(stale) > 0 {
+					c.LogDebug("Recreating instances on a replaced image", "instances", stale)
+
+					downStack := client.NewStack(c, client.StackSortDescending(), client.StackWorkers(cmd.Root().Int("workers")))
+					downStack.Add(stale...)
+
+					err = downStack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, client.OptionTimeout(cmd.Duration("timeout")))
+					if err != nil {
+						c.LogError("Stopping instances on a replaced image", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					err = downStack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, client.OptionTimeout(cmd.Duration("timeout")))
+					if err != nil {
+						c.LogError("Deleting instances on a replaced image", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					// Delete drops them from the client, so Start below runs on
+					// the resources this rebuild registers rather than the dead ones.
+					resources, err = p.Resources(c, project.ResourcesScale(scale))
+					if err != nil {
+						c.LogError("Getting project resources after the teardown", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					myResources = filterResources(p, resources, args)
+
+					stack = client.NewStack(c, client.StackWorkers(cmd.Root().Int("workers")), client.StackFailFast())
+					stack.AddOrdered(order, myResources)
+
+					// Everything else came through the ensure above; the deleted
+					// instances are what the rebuild handed back unensured.
+					deleted := func(r client.Resource) bool { return !r.IsEnsured() }
+
+					err = stack.ForActionF(client.ActionEnsure, deleted).Run(ctx, client.ActionEnsure, startOptions...)
+					if err != nil {
+						c.LogError("Ensuring the recreated instances", "error", err)
+						return errLogged.Wrap(err)
+					}
+				}
 			}
 
 			// Start
@@ -388,6 +454,56 @@ func builtServices(p *project.Project, args filterResourcesArgs) []string {
 	slices.Sort(services)
 
 	return services
+}
+
+// staleInstances returns the ensured instances running an image other than the
+// one their service holds now, sorted by Incus name.
+func staleInstances(resources map[string][]client.Resource) []client.Resource {
+	stale := []client.Resource{}
+
+	for _, res := range resources {
+		var image *client.Image
+		for _, r := range res {
+			i, ok := r.(*client.Image)
+			if ok {
+				image = i
+				break
+			}
+		}
+
+		if image == nil {
+			continue
+		}
+
+		for _, r := range res {
+			instance, ok := r.(*client.Instance)
+			if !ok {
+				continue
+			}
+
+			// Nil for one the ensure just created, which already runs the new image.
+			info := instance.State().IncusInstance
+			if info == nil {
+				continue
+			}
+
+			if pulledImageChanged(info.Config["volatile.base_image"], image.State().IncusAlias) {
+				stale = append(stale, instance)
+			}
+		}
+	}
+
+	slices.SortFunc(stale, func(a, b client.Resource) int {
+		return strings.Compare(a.IncusName(), b.IncusName())
+	})
+
+	return stale
+}
+
+// pulledImageChanged reports whether the pulled alias differs from the image
+// the instance runs today.
+func pulledImageChanged(baseImage string, alias *incusApi.ImageAliasesEntry) bool {
+	return alias != nil && alias.Target != "" && alias.Target != baseImage
 }
 
 // parseScale parses --scale flags of the form "service=num".

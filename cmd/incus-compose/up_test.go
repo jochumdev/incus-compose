@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -106,6 +107,55 @@ func TestParseScale(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, parseScale(tt.values))
+		})
+	}
+}
+
+// TestPulledImageChanged covers what up feeds the recreate teardown: an
+// unensured image never recreates, a changed fingerprint does.
+func TestPulledImageChanged(t *testing.T) {
+	t.Parallel()
+
+	imgAlias := func(target string) *incusApi.ImageAliasesEntry {
+		return &incusApi.ImageAliasesEntry{ImageAliasesEntryPut: incusApi.ImageAliasesEntryPut{Target: target}}
+	}
+
+	tests := []struct {
+		name      string
+		baseImage string
+		alias     *incusApi.ImageAliasesEntry
+		want      bool
+	}{
+		{
+			name:      "an unchanged fingerprint does not recreate",
+			baseImage: "same-fingerprint",
+			alias:     imgAlias("same-fingerprint"),
+			want:      false,
+		},
+		{
+			name:      "a changed fingerprint recreates",
+			baseImage: "old-fingerprint",
+			alias:     imgAlias("new-fingerprint"),
+			want:      true,
+		},
+		{
+			name:      "no ensured alias never recreates",
+			baseImage: "old-fingerprint",
+			alias:     nil,
+			want:      false,
+		},
+		{
+			name:      "an empty alias target never recreates",
+			baseImage: "old-fingerprint",
+			alias:     imgAlias(""),
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, pulledImageChanged(tt.baseImage, tt.alias))
 		})
 	}
 }

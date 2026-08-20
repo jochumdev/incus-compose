@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -980,4 +981,88 @@ func TestE2EUpReconcilesToReplicas(t *testing.T) {
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 	assertCount(3)
+}
+
+// TestE2EUpPullAlwaysRecreates pins that --pull always replaces an instance
+// whose image moved under it, and that every other policy leaves it alone.
+func TestE2EUpPullAlwaysRecreates(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+	testlib.SkipE2E(t)
+
+	ctx := t.Context()
+	pn := t.Name()
+
+	// Two tags of one image, so the fingerprint the pull lands differs.
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `services:
+  web:
+    image: docker.io/library/busybox:1.36-glibc
+    x-incus:
+      oci.entrypoint: sh
+`,
+		"compose-new.yaml": `services:
+  web:
+    image: docker.io/library/busybox:1.37-glibc
+    x-incus:
+      oci.entrypoint: sh
+`,
+	})
+	oldCompose := filepath.Join(dir, "compose.yaml")
+	newCompose := filepath.Join(dir, "compose-new.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", oldCompose, "down", "--project")
+
+	runE2ETests(ctx, t, pn, []e2eTest{
+		{
+			name: "up on the old image",
+			args: []string{"-f", oldCompose, "up", "--detach"},
+		},
+	})
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	inst, _, err := conn.GetInstance(ctx, "web-1", nil)
+	require.NoError(t, err)
+
+	created := inst.Config["volatile.base_image"]
+	require.NotEmpty(t, created)
+
+	runE2ETests(ctx, t, pn, []e2eTest{
+		{
+			name: "up on the new image without a pull policy",
+			args: []string{"-f", newCompose, "up", "--detach"},
+		},
+	})
+
+	inst, _, err = conn.GetInstance(ctx, "web-1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, created, inst.Config["volatile.base_image"], "only --pull always recreates")
+
+	runE2ETests(ctx, t, pn, []e2eTest{
+		{
+			name: "up on the new image with --pull always",
+			args: []string{"-f", newCompose, "up", "--detach", "--pull", "always"},
+		},
+	})
+
+	inst, _, err = conn.GetInstance(ctx, "web-1", nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, created, inst.Config["volatile.base_image"], "the replaced image must reach the instance")
+	assert.Equal(t, "Running", inst.Status)
+
+	pulled := inst.Config["volatile.base_image"]
+
+	runE2ETests(ctx, t, pn, []e2eTest{
+		{
+			name: "up again with --pull always",
+			args: []string{"-f", newCompose, "up", "--detach", "--pull", "always"},
+		},
+	})
+
+	inst, _, err = conn.GetInstance(ctx, "web-1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, pulled, inst.Config["volatile.base_image"], "an unchanged image must not recreate")
 }
