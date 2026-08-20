@@ -1,0 +1,7 @@
+FROM busybox:glibc
+
+ARG TARGETPLATFORM
+
+COPY ${TARGETPLATFORM}/ic-sleep /sleep
+
+ENTRYPOINT ["/sleep"]

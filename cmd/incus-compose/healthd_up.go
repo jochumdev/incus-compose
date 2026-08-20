@@ -20,7 +20,7 @@ import (
 // healthdUpArgs holds the healthdUp() options, mirroring the `healthd up` command's flags.
 type healthdUpArgs struct {
 	Binary  string
-	Image   string // raw --image flag value; resolved via resolveHealthdImage inside healthdUp.
+	Image   string // raw --image flag value; resolved via resolveImageVersion inside healthdUp.
 	Incus   string // raw --incus/--healthd-incus override; empty keeps the project default.
 	Network string // raw --network/--healthd-network override; empty keeps the project default.
 	Scope   string // raw --scope/--healthd-scope override; loses to a scope the project carries.
@@ -75,7 +75,7 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 		global:         scope == shared.HealthScopeGlobal,
 		trace:          args.Trace,
 		binary:         args.Binary,
-		image:          resolveHealthdImage(args.Image),
+		image:          resolveImageVersion(args.Image),
 		pull:           args.Pull,
 		incus:          incus,
 		network:        healthdNetwork,
@@ -187,7 +187,7 @@ func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdU
 		global:       true,
 		trace:        args.Trace,
 		binary:       args.Binary,
-		image:        resolveHealthdImage(args.Image),
+		image:        resolveImageVersion(args.Image),
 		pull:         args.Pull,
 		incus:        incus,
 		network:      args.Network,

@@ -100,6 +100,12 @@ func newUpCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
 			},
 			&cli.StringFlag{
+				Name:    "init",
+				Usage:   "Image the `run` helper comes from",
+				Value:   DefaultInitImage,
+				Sources: cli.EnvVars("INCUS_COMPOSE_INIT_IMAGE"),
+			},
+			&cli.StringFlag{
 				Name:    "healthd-binary",
 				Usage:   "Path to local ic-healthd binary (uses images:alpine/edge instead of OCI image)",
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_BINARY"),
@@ -231,6 +237,7 @@ func newUpCommand() *cli.Command {
 				WithDeps:        !cmd.Bool("no-deps"),
 				IgnoreBuildable: true,
 				NoHealthd:       true,
+				Init:            cmd.String("init"),
 				Pull:            pullMode,
 				Scale:           scale,
 				Workers:         cmd.Root().Int("workers"),

@@ -1458,3 +1458,67 @@ func TestVolumePrefetchTarget(t *testing.T) {
 			Volume: &types.ServiceVolumeVolume{NoCopy: true},
 		}, "nocopy"), "nocopy means the volume starts empty")
 }
+
+// TestOneOffService pins the rewrite `run` does before the translation: docker
+// forces scale to 1, clears the restart policy and drops the ports, and the
+// entrypoint becomes the helper an exec attaches to.
+func TestOneOffService(t *testing.T) {
+	t.Parallel()
+
+	replicas := 3
+	limits := types.Resource{NanoCPUs: 1.5}
+
+	service := types.ServiceConfig{
+		Name:        "web",
+		Restart:     "always",
+		Ports:       []types.ServicePortConfig{{Target: 80, Published: "8080"}},
+		HealthCheck: &types.HealthCheckConfig{Test: types.HealthCheckTest{"CMD", "true"}},
+		Entrypoint:  types.ShellCommand{"/docker-entrypoint.sh"},
+		Command:     types.ShellCommand{"nginx"},
+		Deploy:      &types.DeployConfig{Replicas: &replicas, Resources: types.Resources{Limits: &limits}},
+	}
+
+	got := oneOffService(service, &OneOff{Entrypoint: "/incus-compose-tools/abc/sleep-x86_64"})
+
+	assert.Empty(t, got.Ports, "a proxy device would fight the running service for the listener")
+	assert.Empty(t, got.Restart)
+	assert.Nil(t, got.HealthCheck)
+	assert.Equal(t, types.ShellCommand{"/incus-compose-tools/abc/sleep-x86_64"}, got.Entrypoint)
+	assert.Empty(t, got.Command)
+
+	require.NotNil(t, got.Deploy)
+	assert.Nil(t, got.Deploy.Replicas, "a one-off is a single instance")
+	assert.Equal(t, &limits, got.Deploy.Resources.Limits, "but it keeps the limits")
+
+	assert.Equal(t, 3, replicas, "the declared service must not be touched")
+	assert.NotNil(t, service.HealthCheck)
+	assert.Len(t, service.Ports, 1)
+}
+
+// TestOneOffServiceKeepsPorts covers `run -P`, where the ports are the point.
+func TestOneOffServiceKeepsPorts(t *testing.T) {
+	t.Parallel()
+
+	service := types.ServiceConfig{
+		Name:  "web",
+		Ports: []types.ServicePortConfig{{Target: 80, Published: "8080"}},
+	}
+
+	got := oneOffService(service, &OneOff{Entrypoint: "/sleep", ServicePorts: true})
+	assert.Len(t, got.Ports, 1)
+}
+
+// TestOneOffMarks pins what tells the rest of incus-compose, and ic-healthd,
+// that this instance is nobody's declared service.
+func TestOneOffMarks(t *testing.T) {
+	t.Parallel()
+
+	got := oneOffMarks(map[string]string{"user.mine": "kept"})
+
+	assert.Equal(t, "kept", got["user.mine"])
+	assert.Equal(t, "true", got[OneOffKey])
+	assert.Equal(t, "false", got[shared.HealthEnabledKey],
+		"a one-off is not something healthd restarts")
+
+	assert.NotPanics(t, func() { oneOffMarks(nil) })
+}

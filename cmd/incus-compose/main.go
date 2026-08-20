@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/creativeprojects/go-selfupdate"
@@ -35,6 +36,14 @@ type noColorKey struct{}
 
 // errLogged is an internal sentinel error, return it to silence the error but exit 1.
 var errLogged = client.NewError("Logged error")
+
+// errExitCode carries a one-off's own status out to main, which is what `run`
+// exists to report.
+type errExitCode int
+
+func (e errExitCode) Error() string {
+	return "exit status " + strconv.Itoa(int(e))
+}
 
 // buildLoadOptions converts CLI flags to project.LoadOption slice.
 func buildLoadOptions(cmd *cli.Command) []project.LoadOption {
@@ -150,7 +159,7 @@ func initLogger(debug bool, noColor bool, writer io.Writer) *slog.Logger {
 
 type clientKey struct{}
 
-func resolveHealthdImage(image string) string {
+func resolveImageVersion(image string) string {
 	v := version.Current()
 	if v[0] == 'v' {
 		v = v[1:]
@@ -204,6 +213,7 @@ func newRootCommand() *cli.Command {
 		newStopCommand("stop", "Stop running services"),
 		newStopCommand("kill", "Force stop running services"),
 		newRestartCommand(),
+		newRunCommand(),
 		newPauseCommand(client.ActionPause),
 		newPauseCommand(client.ActionUnpause),
 		newBackupCommand(),
@@ -373,6 +383,11 @@ func newRootCommand() *cli.Command {
 
 func main() {
 	if err := newRootCommand().Run(context.Background(), os.Args); err != nil {
+		var code errExitCode
+		if errors.As(err, &code) {
+			os.Exit(int(code))
+		}
+
 		if errors.Is(err, errLogged) {
 			os.Exit(1)
 		}

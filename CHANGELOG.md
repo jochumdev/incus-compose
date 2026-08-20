@@ -13,6 +13,35 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `run SERVICE [COMMAND]` starts a one-off instance from a service and exits
+  with the command's own status, as `docker compose run` does. Incus reports no
+  exit status for an instance that stopped, so the instance runs a helper that
+  only blocks and the command runs through an exec into it - which means the
+  command is not PID 1. The helper comes from
+  `ghcr.io/lxc/incus-compose/ic-sleep`, prefetched into an `incus-compose-tools`
+  volume; point `--init` or `x-incus-compose.init` elsewhere for a private
+  mirror. A cluster mixing CPU architectures is not supported. (by @jochumdev)
+
+- One-off instances carry `user.incus-compose.oneoff=true`: `up` never
+  reconciles them, `ps` lists them under their service instead of `<orphan>`,
+  `down` removes them even without `--rm`, and ic-healthd never restarts one.
+  (by @jochumdev)
+
+- `pull` and `up` fetch the `run` helper image into the `incus-compose` project,
+  which is the only step of a one-off needing the network - so an air-gapped
+  site can `pull` while connected and `run` later. Both take `--init`
+  (`INCUS_COMPOSE_INIT_IMAGE`), and both only warn when it cannot be fetched.
+  (by @jochumdev)
+
+- ic-healthd and ic-sleep are published for `ppc64le`, `s390x` and `riscv64`
+  besides `amd64` and `arm64` - the architectures Incus runs virtual machines
+  on, plus riscv64, which is as far as the `busybox:glibc` base reaches.
+  (by @jochumdev)
+
+- **library**: `project.OneOff` with `ResourcesOneOff`, and the exported
+  `project.OneOffKey` / `project.ServiceLabelKey` instance config keys.
+  (by @jochumdev)
+
 - `pause [SERVICE...]` and `unpause [SERVICE...]` freeze and thaw a service's
   instances, as `docker compose pause` does. A pause also sets
   `user.healthcheck.stopped`, because a frozen instance answers no healthcheck
