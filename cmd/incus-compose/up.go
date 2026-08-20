@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
 
@@ -214,14 +215,59 @@ func newUpCommand() *cli.Command {
 				WithDependencies: !cmd.Bool("no-deps"),
 			}
 
-			// A rebuilt image only reaches an instance created from it again.
+			// "missing" and the legacy "policy" are the default, as is anything unknown.
+			pullMode := client.PullMissing
+			switch cmd.String("pull") {
+			case "always":
+				pullMode = client.PullAlways
+			case "never":
+				pullMode = client.PullNever
+			}
+
+			// The stale set below needs the images pulled first; built ones stay
+			// with builtServices and healthd pulls its own in healthdUp.
+			err = pull(ctx, p, c, pullArgs{
+				Services:        cmd.Args().Slice(),
+				WithDeps:        !cmd.Bool("no-deps"),
+				IgnoreBuildable: true,
+				NoHealthd:       true,
+				Pull:            pullMode,
+				Scale:           scale,
+				Workers:         cmd.Root().Int("workers"),
+				Debug:           cmd.Root().Bool("debug"),
+				Writer:          cmd.Root().Writer,
+			})
+			if err != nil {
+				return err
+			}
+
+			// A rebuilt or re-pulled image only reaches an instance created from it again.
 			recreate := cmd.Bool("recreate")
 			downServices, downNoDeps := cmd.Args().Slice(), cmd.Bool("no-deps")
-			if !recreate && buildMode == client.BuildForce {
-				downServices = builtServices(p, args)
+			if !recreate {
+				stale := []string{}
+				if buildMode == client.BuildForce {
+					stale = builtServices(p, args)
+				}
+
+				if pullMode == client.PullAlways {
+					pulled, err := pulledServices(ctx, p, c, args, pullMode, scale)
+					if err != nil {
+						c.LogError("Comparing the instance images against the pulled ones", "error", err)
+						return errLogged.Wrap(err)
+					}
+
+					stale = append(stale, pulled...)
+				}
+
+				slices.Sort(stale)
+
+				downServices = slices.Compact(stale)
 				downNoDeps = true
 				recreate = len(downServices) > 0
-				c.LogDebug("Recreating built services", "services", downServices)
+				if recreate {
+					c.LogDebug("Recreating stale services", "services", downServices)
+				}
 			}
 
 			if recreate {
@@ -290,16 +336,7 @@ func newUpCommand() *cli.Command {
 
 			c.LogDebug("Ensure", "resources", stack.All())
 
-			// "missing" and the legacy "policy" are the default, as is anything unknown.
-			pull := client.PullMissing
-			switch cmd.String("pull") {
-			case "always":
-				pull = client.PullAlways
-			case "never":
-				pull = client.PullNever
-			}
-
-			startOptions := append(append([]client.Option{}, runOptions...), client.OptionCreate(), client.OptionPullMode(pull))
+			startOptions := append(append([]client.Option{}, runOptions...), client.OptionCreate())
 			if buildInfo.Mode != client.BuildAuto || buildInfo.PreferredBuilder != "" {
 				startOptions = append(startOptions, client.OptionBuild(buildInfo))
 			}
@@ -388,6 +425,64 @@ func builtServices(p *project.Project, args filterResourcesArgs) []string {
 	slices.Sort(services)
 
 	return services
+}
+
+// pulledServices returns the in-scope services running an image other than the
+// one pull() just ensured for them, sorted.
+func pulledServices(ctx context.Context, p *project.Project, c *client.Client, args filterResourcesArgs, pull client.PullMode, scale map[string]int) ([]string, error) {
+	resources, err := p.Resources(c, project.ResourcesScale(scale))
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := c.Connection()
+	if err != nil {
+		return nil, err
+	}
+
+	services := []string{}
+	for name, res := range filterResources(p, resources, args) {
+		var image *client.Image
+		for _, r := range res {
+			i, ok := r.(*client.Image)
+			if ok {
+				image = i
+				break
+			}
+		}
+
+		if image == nil {
+			continue
+		}
+
+		for _, r := range res {
+			instance, ok := r.(*client.Instance)
+			if !ok {
+				continue
+			}
+
+			// An instance that is not there yet gets the image on creation.
+			current, _, err := conn.GetInstance(ctx, instance.IncusName(), nil)
+			if err != nil {
+				continue
+			}
+
+			if pulledImageChanged(pull, current.Config["volatile.base_image"], image.State().IncusAlias) {
+				services = append(services, name)
+				break
+			}
+		}
+	}
+
+	slices.Sort(services)
+
+	return services, nil
+}
+
+// pulledImageChanged is the recreate policy: only under PullAlways, and only
+// when the pulled alias differs from what the instance runs today.
+func pulledImageChanged(pull client.PullMode, baseImage string, alias *incusApi.ImageAliasesEntry) bool {
+	return pull == client.PullAlways && alias != nil && alias.Target != "" && alias.Target != baseImage
 }
 
 // parseScale parses --scale flags of the form "service=num".

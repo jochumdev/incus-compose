@@ -131,6 +131,13 @@ for correct semver ordering. Headings below preserve each release's announced fo
   Waiting for a container's IP now reports a clearer timeout, naming the
   likely cause and a command to check it. (by @jochumdev)
 
+- `up --pull always` recreates a service whose image the pull replaced, the way
+  `up --build` recreates one whose image was rebuilt. A pulled image reaches an
+  instance only when it is created from it, so a newer one sat in the image
+  store unused unless `--recreate` came along too. Only `--pull always`
+  recreates: a service already running the image it was created from, and every
+  other pull policy, are left alone. (by @alien43)
+
 ### Fixed
 
 - A service `user:` may now name its user and group, not only number them:

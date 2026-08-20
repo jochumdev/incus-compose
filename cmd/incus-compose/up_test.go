@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/cmd/incus-compose/version"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
@@ -106,6 +108,60 @@ func TestParseScale(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, parseScale(tt.values))
+		})
+	}
+}
+
+// TestPulledImageChanged covers the recreate policy up feeds downServices
+// with: gated on PullAlways, and only for an actual change.
+func TestPulledImageChanged(t *testing.T) {
+	t.Parallel()
+
+	imgAlias := func(target string) *incusApi.ImageAliasesEntry {
+		return &incusApi.ImageAliasesEntry{ImageAliasesEntryPut: incusApi.ImageAliasesEntryPut{Target: target}}
+	}
+
+	tests := []struct {
+		name      string
+		pull      client.PullMode
+		baseImage string
+		alias     *incusApi.ImageAliasesEntry
+		want      bool
+	}{
+		{
+			name:      "missing pull never recreates, even with a new fingerprint",
+			pull:      client.PullMissing,
+			baseImage: "old-fingerprint",
+			alias:     imgAlias("new-fingerprint"),
+			want:      false,
+		},
+		{
+			name:      "always pull with an unchanged fingerprint does not recreate",
+			pull:      client.PullAlways,
+			baseImage: "same-fingerprint",
+			alias:     imgAlias("same-fingerprint"),
+			want:      false,
+		},
+		{
+			name:      "always pull with a changed fingerprint recreates",
+			pull:      client.PullAlways,
+			baseImage: "old-fingerprint",
+			alias:     imgAlias("new-fingerprint"),
+			want:      true,
+		},
+		{
+			name:      "always pull with no ensured alias never recreates",
+			pull:      client.PullAlways,
+			baseImage: "old-fingerprint",
+			alias:     nil,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, pulledImageChanged(tt.pull, tt.baseImage, tt.alias))
 		})
 	}
 }
