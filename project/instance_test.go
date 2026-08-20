@@ -964,6 +964,50 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		assert.Contains(t, err.Error(), "with no address")
 	})
 
+	t.Run("a non-internal x-incus-compose key does not force gateway=none", func(t *testing.T) {
+		t.Parallel()
+		skipNo73(t, c)
+
+		p := &types.Project{Networks: types.Networks{
+			"frontend": {Extensions: types.Extensions{"x-incus": map[string]any{
+				"ipv4.address": "10.0.1.1/24",
+			}}},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {
+				Ipv4Address: "10.0.1.5",
+				Extensions:  types.Extensions{"x-incus-compose": map[string]any{"network": "somebridge"}},
+			},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "10.0.1.1", devices[0].Config.Extensions["ipv4.gateway"])
+	})
+
+	t.Run("internal true still forces gateway=none", func(t *testing.T) {
+		t.Parallel()
+		skipNo73(t, c)
+
+		p := &types.Project{Networks: types.Networks{
+			"frontend": {Extensions: types.Extensions{"x-incus": map[string]any{
+				"ipv4.address": "10.0.1.1/24",
+			}}},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {
+				Ipv4Address: "10.0.1.5",
+				Extensions:  types.Extensions{"x-incus-compose": map[string]any{"internal": true}},
+			},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
+	})
+
 	t.Run("an external network is named by its compose name", func(t *testing.T) {
 		t.Parallel()
 
