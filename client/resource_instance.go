@@ -1745,6 +1745,24 @@ func (r *Instance) setHealthCheckingStopped(ctx context.Context, stopped bool) e
 	return r.patchConfig(ctx, map[string]string{HealthStoppedKey: value})
 }
 
+// Exec runs a command in the instance and waits for it to finish, discarding
+// its output. A non-zero exit from the command itself is not an error.
+func (r *Instance) Exec(ctx context.Context, command ...string) error {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	op, err := conn.ExecInstance(ctx, r.incusName, incusApi.InstanceExecPost{Command: command}, nil)
+	if err != nil {
+		return err
+	}
+
+	_, err = iclient.WaitOperation(ctx, op)
+
+	return err
+}
+
 // patchConfig writes the given keys and only those.
 func (r *Instance) patchConfig(ctx context.Context, config map[string]string) error {
 	conn, err := r.client.Connection()

@@ -43,7 +43,9 @@ func newHealthdReloadCommand() *cli.Command {
 				return errLogged.Wrap(err)
 			}
 
-			if err := healthdReload(ctx, hc, h); err != nil {
+			err = h.Exec(ctx, "sh", "-c",
+				`pids="$(pidof ic-healthd)" && for pid in $pids; do kill -HUP "$pid"; done`)
+			if err != nil {
 				hc.LogError("Reloading healthd", "error", err)
 				return errLogged.Wrap(err)
 			}
