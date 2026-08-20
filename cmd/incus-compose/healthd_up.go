@@ -258,7 +258,20 @@ func healthdEnsure(ctx context.Context, hc *client.Client, stack *client.Stack, 
 
 	// Only creating or replacing the sidecar needs the image, so the running one
 	// is read first - an unreachable tag must not fail a daemon already on it.
-	hc.IgnoreError(client.ActionEnsure, client.ErrNotFound)
+	// Not IgnoreError: that one is permanent, and under project scope hc is the
+	// caller's own client, so it would also swallow a create that cannot reach
+	// its image.
+	hc.AddHookAfter(func(_ context.Context, action client.Action, r client.Resource, options client.Options, err error) error {
+		if options.Create || action != client.ActionEnsure || r.IncusName() != hInst.IncusName() {
+			return err
+		}
+
+		if errors.Is(err, client.ErrNotFound) {
+			return nil
+		}
+
+		return err
+	})
 
 	// No create: creating is what needs the image this decides to fetch.
 	lookup := client.NewStack(hc, client.StackWorkers(params.stackWorkers))
