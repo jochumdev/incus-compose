@@ -17,9 +17,6 @@ including:
 
 ## Philosophy
 
-**KISS** - Keep It Simple, Stupid - and **boring** code. These are the guiding
-principles for all work, and the two most common reasons a change is sent back.
-
 **KISS** is about the solution: solve the problem in front of you, at the size it
 actually has. Not the general case, not the one you expect next quarter. A
 shallow package structure, direct code, working software over perfect
@@ -57,6 +54,7 @@ It defines non-negotiable boundaries, including:
 - Where Compose semantics must remain untouched
 - How mapping to Incus is structured
 - Which layers are allowed to change behavior
+- Use Incus terms and simple English
 
 Contributions that violate these principles will be rejected, regardless of
 feature completeness or test coverage.
@@ -286,10 +284,11 @@ Tiers, fixtures, coverage, and how to drive the CLI from a test are documented i
 [docs/root/architecture/testing.md](docs/root/architecture/testing.md). Read it
 before writing a test.
 
-One policy rather than a technique, so it lives here: **we do not mock.** A fake
-`incus.InstanceServer` encodes a guess about what the daemon returns, and a test
-that passes against the guess proves nothing. Anything needing Incus state gets
-it from a real one. Adding a mock is a maintainer's call - ask first.
+One policy rather than a technique, so it lives here: **do not add mocks.** A
+fake `incus.InstanceServer` encodes a guess about what the daemon returns, and a
+test that passes against the guess proves nothing. Anything needing Incus state
+gets it from a real one. The existing ordering mock is the exception; any other
+mock is a maintainer's call - ask first.
 
 ## Docker Compose Compatibility
 
