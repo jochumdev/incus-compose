@@ -394,8 +394,8 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 				Internal bool  `mapstructure:"internal"`
 				Gateway  *bool `mapstructure:"gateway"`
 			}
-			ok, err := sNet.Extensions.Get("x-incus-compose", &ext)
-			if ok || err == nil && ext.Internal {
+			_, err := sNet.Extensions.Get("x-incus-compose", &ext)
+			if err == nil && ext.Internal {
 				gateway4 = "none"
 				gateway6 = "none"
 			}
