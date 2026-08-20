@@ -15,6 +15,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/project"
 )
 
 // newPsCommand implements `incus-compose ps`
@@ -195,8 +196,9 @@ func newPsCommand() *cli.Command {
 				}
 
 				type instMinimal struct {
-					Name   string
-					Status string
+					Name    string
+					Status  string
+					Service string
 				}
 				orphanMap := map[string]instMinimal{}
 
@@ -211,7 +213,15 @@ func newPsCommand() *cli.Command {
 					if inst.State != nil && inst.State.Status != "" {
 						status = inst.State.Status
 					}
-					orphanMap[name] = instMinimal{Name: name, Status: status}
+
+					// A one-off is in no resource map, but it is not an orphan
+					// either: it says which service it was made from.
+					service := "<orphan>"
+					if util.IsTrue(inst.Config[project.OneOffKey]) {
+						service = inst.Config[project.ServiceLabelKey]
+					}
+
+					orphanMap[name] = instMinimal{Name: name, Status: status, Service: service}
 				}
 
 				// Remove instances that are present in stack
@@ -227,9 +237,14 @@ func newPsCommand() *cli.Command {
 
 				// Add orphans to entries
 				for _, o := range orphanMap {
+					name := "<orphan>"
+					if o.Service != "<orphan>" {
+						name = o.Name
+					}
+
 					e := psEntry{
-						Service:   "<orphan>",
-						Name:      "<orphan>",
+						Service:   o.Service,
+						Name:      name,
 						IncusName: o.Name,
 						Image:     "",
 						Status:    o.Status,

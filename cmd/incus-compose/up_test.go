@@ -34,9 +34,9 @@ func TestResolveHealthdImage(t *testing.T) {
 
 	assert.Equal(t,
 		"ghcr.io/lxc/incus-compose/ic-healthd:1.2.3",
-		resolveHealthdImage("ghcr.io/lxc/incus-compose/ic-healthd:{version}"),
+		resolveImageVersion("ghcr.io/lxc/incus-compose/ic-healthd:{version}"),
 	)
-	assert.Equal(t, "custom:latest", resolveHealthdImage("custom:latest"))
+	assert.Equal(t, "custom:latest", resolveImageVersion("custom:latest"))
 }
 
 func TestBuiltServices(t *testing.T) {

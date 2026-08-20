@@ -132,6 +132,11 @@ func down(ctx context.Context, p *project.Project, c *client.Client, args downAr
 		c.LogWarn("Deleting resources", "error", errDel)
 	}
 
+	// A one-off is nobody's declared service, so the stack above never saw it.
+	if len(args.Services) == 0 {
+		removeOneOffs(ctx, c, args.Timeout)
+	}
+
 	if args.Project {
 		c.LogDebug("Deleting the project")
 		err := c.Global().DeleteProject(c.Project(), true)

@@ -65,7 +65,7 @@ func healthdCertName(incusProject string, global bool) string {
 // healthdParams holds the image/binary options for healthd setup.
 type healthdParams struct {
 	binary       string
-	image        string // already resolved via resolveHealthdImage
+	image        string // already resolved via resolveImageVersion
 	pull         string
 	incus        *url.URL
 	network      string // Incus bridge name; empty = the scope's own default network

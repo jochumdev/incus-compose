@@ -167,6 +167,10 @@ type XICProject struct {
 	Healthd XICHealthd
 	XIncus  map[string]string
 
+	// Init is the image `run` takes its blocking helper from. Empty means the
+	// one this build ships; `run --init` overrides both.
+	Init string
+
 	// NoAutoVolumes is x-incus-compose.auto-volumes: false, which leaves the
 	// paths an image declares as volumes to Incus.
 	NoAutoVolumes bool
@@ -224,6 +228,8 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			// A pointer: absent means on, which a bool cannot say.
 			AutoVolumes *bool `mapstructure:"auto-volumes"`
 
+			Init string `mapstructure:"init"`
+
 			Healthd struct {
 				Incus          string         `mapstructure:"incus"`
 				Network        string         `mapstructure:"network"`
@@ -255,6 +261,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.Healthd.RestartWorkers = ext.Healthd.RestartWorkers
 			p.ClientConfig.Backup = ext.Backup
 			p.ClientConfig.NoAutoVolumes = ext.AutoVolumes != nil && !*ext.AutoVolumes
+			p.ClientConfig.Init = ext.Init
 
 			for k, v := range ext.Healthd.XIncus {
 				p.ClientConfig.Healthd.XIncus[k] = fmt.Sprint(v)
@@ -310,6 +317,38 @@ type ResourcesOptions struct {
 
 	// noAutoVolumes carries x-incus-compose.auto-volumes: false to the instances.
 	noAutoVolumes bool
+
+	// oneOff replaces one service's declared instances with a single one-off.
+	oneOff *OneOff
+}
+
+// OneOff is the instance `run` builds from a service, in place of the ones the
+// service declares.
+type OneOff struct {
+	// Service the one-off is made from.
+	Service string
+
+	// Name the instance takes, which carries a random suffix so runs of the
+	// same service do not collide.
+	Name string
+
+	// Entrypoint blocks for as long as the instance lives. The command runs
+	// through an exec into it, which is the only thing reporting its status.
+	Entrypoint string
+
+	// Volume holds Entrypoint, and is mounted read-only at Mount for it to exist.
+	Volume *client.StorageVolume
+	Mount  string
+
+	// ServicePorts keeps the ports the service declares, as `run -P` does.
+	ServicePorts bool
+}
+
+// ResourcesOneOff builds one service as a one-off instead of as it is declared.
+func ResourcesOneOff(o OneOff) ResourcesOption {
+	return func(opts *ResourcesOptions) {
+		opts.oneOff = &o
+	}
 }
 
 // ResourcesOption is a functional option for ToStack.
@@ -355,9 +394,10 @@ func (p *Project) Resources(c *client.Client, opts ...ResourcesOption) (map[stri
 		}
 
 		// Discover existing instances above the desired count so they can be
-		// reconciled away (highest index first) during Ensure.
+		// reconciled away (highest index first) during Ensure. A one-off is not
+		// one of the service's instances, so it reconciles nothing.
 		scale := desired
-		for {
+		for options.oneOff == nil || options.oneOff.Service != service.Name {
 			instanceName := fmt.Sprintf("%s-%d", service.Name, scale+1)
 			if ok, err := c.InstanceExists(instanceName); !ok || err != nil {
 				break

@@ -28,6 +28,29 @@ builds:
     goarch:
       - amd64
       - arm64
+      - ppc64le
+      - s390x
+      - riscv64
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
+
+  # One image per architecture, so a server of any of them finds a match:
+  # Incus pulls only its own from an OCI remote. The set is what Incus runs
+  # virtual machines on (doc/architectures.md) plus riscv64, intersected with
+  # what busybox:glibc publishes.
+  - id: "ic-sleep"
+    main: ./cmd/ic-sleep
+    binary: ic-sleep
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - ppc64le
+      - s390x
+      - riscv64
     ldflags:
       - -s -w
     env:
@@ -69,6 +92,31 @@ dockers_v2:
     platforms:
       - linux/amd64
       - linux/arm64
+      - linux/ppc64le
+      - linux/s390x
+      - linux/riscv64
+
+  - id: ic-sleep
+    ids:
+      - "ic-sleep"
+    dockerfile: cmd/ic-sleep/Dockerfile.goreleaser
+    images:
+      - "ghcr.io/lxc/incus-compose/ic-sleep"
+    tags:
+      - "{{ .Version }}"
+    annotations:
+      "org.opencontainers.image.description": "incus-compose - ic-sleep"
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.name": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/ppc64le
+      - linux/s390x
+      - linux/riscv64
 
 release:
   # Never publish straight from a tag push; the release is published by hand.

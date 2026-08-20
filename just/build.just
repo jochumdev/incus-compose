@@ -1,7 +1,7 @@
 # Building and running incus-compose and its ic-healthd sidecar.
 
 # Build a dev binary
-build: update-healthd
+build: update-healthd build-sleep-image
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -46,6 +46,36 @@ build-healthd-image tag_base="ghcr.io/lxc/incus-compose/ic-healthd":
     fi
 
     sed -i -e 's|export INCUS_COMPOSE_HEALTHD_IMAGE=".*"|export INCUS_COMPOSE_HEALTHD_IMAGE="{{ tag_base }}:'${VERSION}'"|g' .env
+
+# Build the ic-sleep container image, which holds every architecture's helper
+build-sleep-image tag_base="ghcr.io/lxc/incus-compose/ic-sleep":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ ! -f .env ]]; then
+      cp .env.sample .env
+    fi
+
+    # The random suffix gives a clear sign that your version is running.
+    VERSION="`git describe --tags --always --long --dirty="-dirty"`-`openssl rand -hex 4`"
+    # Container tags carry no v prefix, `release` pushes them without one too.
+    export VERSION="${VERSION#v}"
+    echo ${VERSION}
+
+    echo "Building for the 'default' cache on '${INCUS_REMOTE}'"
+    just run -P cmd/ic-sleep build --os-env # os-env cause of VERSION
+
+    if [[ ${INCUS_COMPOSE_IMAGE_CACHE:-} != "incus-compose-tests-cache" ]]; then
+      echo "Building for the 'incus-compose-tests-cache' cache on '${INCUS_REMOTE}'"
+      just run --image-cache="incus-compose-tests-cache" -P cmd/ic-sleep build --os-env
+    fi
+
+    line='export INCUS_COMPOSE_INIT_IMAGE="{{ tag_base }}:'${VERSION}'"'
+    if grep -q '^export INCUS_COMPOSE_INIT_IMAGE=' .env; then
+      sed -i -e "s|^export INCUS_COMPOSE_INIT_IMAGE=.*|${line}|" .env
+    else
+      echo "${line}" >> .env
+    fi
 
 # Rebuild the ic-healthd image and put the shared daemon on it
 update-healthd *args="--trace": build-healthd-image

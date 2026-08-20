@@ -52,7 +52,18 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	var errs error
 	resources := []client.Resource{}
 
-	config, err := instanceConfig(c, service, p.Name, options.marks)
+	oneOff := options.oneOff
+	if oneOff != nil && oneOff.Service != serviceName {
+		oneOff = nil
+	}
+
+	marks := options.marks
+	if oneOff != nil {
+		service = oneOffService(service, oneOff)
+		marks = oneOffMarks(marks)
+	}
+
+	config, err := instanceConfig(c, service, p.Name, marks)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
@@ -67,6 +78,9 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	resources = append(resources, image)
 
 	instanceName := instanceName(service, index, scale)
+	if oneOff != nil {
+		instanceName = oneOff.Name
+	}
 
 	devices, networks, err := instanceNetworkDevices(c, p, service, instanceName)
 	if err != nil {
@@ -93,6 +107,10 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		errs = errors.Join(errs, err)
 	}
 	devices = append(devices, extraDevices...)
+
+	if oneOff != nil {
+		devices = append(devices, oneOffDevice(oneOff))
+	}
 
 	secrets, err := instanceSecrets(p, service)
 	if err != nil {
@@ -142,6 +160,69 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	return instance, resources, nil
 }
 
+// OneOffKey marks the instances `run` created, which `up` leaves alone and
+// `down` takes with it.
+const OneOffKey = "user.incus-compose.oneoff"
+
+// ServiceLabelKey holds the service an instance was made from.
+const ServiceLabelKey = labelIncusComposePrefix + "service"
+
+// oneOffService rewrites a service into the one-off `docker compose run`
+// creates: one instance, no ports of its own, nothing restarting it, and the
+// blocking helper in place of the command, which an exec runs instead.
+func oneOffService(service types.ServiceConfig, oneOff *OneOff) types.ServiceConfig {
+	// A proxy device would fight the running service for the same listener.
+	if !oneOff.ServicePorts {
+		service.Ports = nil
+	}
+
+	service.Restart = ""
+	service.HealthCheck = nil
+
+	// Deploy also carries the resource limits, which a one-off keeps.
+	if service.Deploy != nil {
+		deploy := *service.Deploy
+		deploy.Replicas = nil
+		service.Deploy = &deploy
+	}
+
+	service.Entrypoint = types.ShellCommand{oneOff.Entrypoint}
+	service.Command = nil
+
+	return service
+}
+
+// oneOffDevice mounts the tools volume, read-only because a one-off has no
+// business writing to what every other one-off in the project runs from.
+func oneOffDevice(oneOff *OneOff) client.InstanceDevice {
+	return client.InstanceDevice{
+		Name: oneOff.Volume.Name(),
+		Config: client.InstanceDeviceConfig{
+			DeviceType: client.InstanceDeviceTypeDisk,
+			Disk: client.InstanceDeviceDiskConfig{
+				StorageVolumeConfig: &client.StorageVolumeConfig{Pool: oneOff.Volume.Config.Pool},
+				Source:              oneOff.Volume.IncusName(),
+				Path:                oneOff.Mount,
+				ReadOnly:            true,
+			},
+		},
+	}
+}
+
+// oneOffMarks adds what tells the rest of incus-compose, and ic-healthd, that
+// this instance is nobody's declared service.
+func oneOffMarks(marks map[string]string) map[string]string {
+	out := maps.Clone(marks)
+	if out == nil {
+		out = map[string]string{}
+	}
+
+	out[OneOffKey] = "true"
+	out[shared.HealthEnabledKey] = "false"
+
+	return out
+}
+
 // instanceConfig builds the Incus instance config map from a compose service.
 // Environment vars become environment.* keys, labels become user.* keys, and
 // restart/resource/healthcheck settings and raw x-incus options are merged in.
@@ -160,7 +241,7 @@ func instanceConfig(c *client.Client, service types.ServiceConfig, projectName s
 		config["user.label."+key] = val
 	}
 
-	config[labelIncusComposePrefix+"service"] = service.Name
+	config[ServiceLabelKey] = service.Name
 	config[labelIncusComposePrefix+"project"] = projectName
 
 	// Privileged.

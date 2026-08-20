@@ -21,11 +21,15 @@ type pullArgs struct {
 	IgnorePullFailures bool
 	NoHealthd          bool
 	HealthdImage       string
-	Pull               client.PullMode
-	Scale              map[string]int
-	Workers            int
-	Debug              bool
-	Writer             io.Writer
+
+	// Init is the tools image `run` needs. Prefetched here so an air-gapped
+	// site that can pull can also run a one-off later.
+	Init    string
+	Pull    client.PullMode
+	Scale   map[string]int
+	Workers int
+	Debug   bool
+	Writer  io.Writer
 }
 
 // pull fetches the images of the project's services.
@@ -80,7 +84,7 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 	if !args.NoHealthd && healthdInUseByProject(c.Global(), p) {
 		hparams := healthdParams{
 			binary:       "",
-			image:        resolveHealthdImage(args.HealthdImage),
+			image:        resolveImageVersion(args.HealthdImage),
 			incus:        nil,
 			network:      "",
 			timeout:      time.Second,
@@ -99,6 +103,8 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 			}
 		}
 	}
+
+	downloadTools(ctx, c, args.Init)
 
 	err = stack.ForAction(client.ActionEnsure).Run(
 		ctx,
@@ -154,6 +160,12 @@ func newPullCommand() *cli.Command {
 				Value:   DefaultHealthdImage,
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
 			},
+			&cli.StringFlag{
+				Name:    "init",
+				Usage:   "Image the `run` helper comes from",
+				Value:   DefaultInitImage,
+				Sources: cli.EnvVars("INCUS_COMPOSE_INIT_IMAGE"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			p, c, err := loadProject(ctx, cmd, client.EnsureProjectWithCreate())
@@ -190,6 +202,7 @@ func newPullCommand() *cli.Command {
 				IgnorePullFailures: cmd.Bool("ignore-pull-failures"),
 				NoHealthd:          cmd.Bool("no-healthd"),
 				HealthdImage:       cmd.String("healthd-image"),
+				Init:               cmd.String("init"),
 				Pull:               pullMode,
 				Workers:            cmd.Root().Int("workers"),
 				Debug:              cmd.Root().Bool("debug"),
