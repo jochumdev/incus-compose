@@ -86,6 +86,22 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		ServicePorts: args.ServicePorts || len(args.Publish) > 0,
 	}
 
+	// Before the renderer below, which pull() brings one of its own. The tools
+	// image is runTools' above, and a build is the ensure's further down.
+	err = pull(ctx, p, c, pullArgs{
+		Services:        []string{args.Service},
+		WithDeps:        !args.NoDeps,
+		IgnoreBuildable: true,
+		NoHealthd:       true,
+		Pull:            args.Pull,
+		Workers:         args.Workers,
+		Debug:           args.Debug,
+		Writer:          args.Writer,
+	})
+	if err != nil {
+		return err
+	}
+
 	var progress *progressRenderer
 	if !args.Debug {
 		progress = newProgressRenderer(args.Writer, noColor(ctx), isatty.IsTerminal(os.Stdout.Fd()))

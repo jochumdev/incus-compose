@@ -126,6 +126,23 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Changed
 
+- `--pull always` now asks the registry what the tag points at and only
+  re-fetches an image that moved. It used to drop every registry image and pull
+  it again, which cost a full download per run and recreated nothing, since the
+  bytes came back identical. The comparison is the fingerprint Incus itself
+  uses, a hash over the image's layer digests, resolved from the registry
+  manifest for the architecture the stored image was built for. A registry the
+  client cannot reach leaves the stored image alone instead of failing.
+  (by @jochumdev)
+
+- **library**: `ActionEnsure` on an image no longer deletes anything. Refreshing
+  is now two steps the caller drives: `OptionResolveSource()` records what the
+  source holds in `ImageState` - its fingerprint and its OCI config - and
+  `ActionDelete` with the new `OptionCache()` drops both the cached and the
+  per-project copy so the next ensure fetches it again.
+  `OptionPull()`/`OptionPullMode(PullAlways)` no longer imply a delete, and an
+  ensure no longer fires `ActionDelete` hooks of its own. (by @jochumdev)
+
 - ic-healthd treats Incus's `instance-resumed` as a start, so a service picked
   back up by `unpause` is watched again at once. Without it the daemon kept
   treating a resumed instance as deliberately stopped until its next resync.

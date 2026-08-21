@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -888,27 +889,126 @@ func TestImageNoCache(t *testing.T) {
 	require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate()))
 }
 
-func TestImagePullDeletes(t *testing.T) {
+// The refresh deletes the image between resolving its source and pulling it
+// back, so anything cleared there is read from the registry a second time.
+func TestImageClearStateKeepsWhatTheSourceHeld(t *testing.T) {
+	t.Parallel()
+	c := NewOfflineClient(t.Context(), "test")
+
+	r, err := c.Resource(KindImage, "docker.io/library/busybox:latest", &ImageConfig{})
+	require.NoError(t, err)
+
+	img, ok := r.(*Image)
+	require.True(t, ok)
+
+	img.updateState(func(s *ImageState) {
+		s.IncusAlias = &incusApi.ImageAliasesEntry{Name: "docker.io/library/busybox:latest"}
+		s.ETag = "an-etag"
+		s.Size = 42
+		s.Cmd = "sh"
+		s.SourceFingerprint = "b0a1"
+	})
+
+	img.clearState()
+
+	state := img.State()
+	require.False(t, img.IsEnsured())
+	assert.Empty(t, state.ETag)
+	assert.Zero(t, state.Size)
+
+	assert.Equal(t, "b0a1", state.SourceFingerprint)
+	assert.Equal(t, "sh", state.Cmd, "the config describes the content, not the fetch")
+}
+
+func TestImageResolveSource(t *testing.T) {
 	t.Parallel()
 	testlib.SkipLocal(t)
-	c := newRandomTestClient(t, "image-pull-delete-")
+	ctx := t.Context()
+	c := newRandomTestClient(t, "image-resolve-source-")
 
 	r, err := c.Resource(KindImage, "docker.io/library/alpine:3.22", &ImageConfig{})
 	require.NoError(t, err)
 
-	require.NoError(t, RunAction(t.Context(), r, ActionEnsure, OptionCreate()))
+	require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate()))
 
 	deletes := 0
 	c.AddHookAfter(func(_ context.Context, action Action, r Resource, _ Options, err error) error {
 		if action == ActionDelete && r.Kind() == KindImage {
 			deletes++
 		}
+
 		return err
 	})
 
-	require.NoError(t, RunAction(t.Context(), r, ActionEnsure, OptionCreate(), OptionPull()))
+	require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate(), OptionResolveSource()))
 
-	assert.Equal(t, 1, deletes)
+	img, ok := r.(*Image)
+	require.True(t, ok)
+
+	state := img.State()
+	require.NotNil(t, state.IncusAlias)
+	require.NotEmpty(t, state.SourceFingerprint)
+
+	// The tag has not moved, so what the registry resolves to must be the
+	// fingerprint the stored image already carries. incusd hashes the layer
+	// digests rather than the manifest, and any other shape here would read as
+	// changed on every run.
+	assert.Equal(t, state.IncusAlias.Target, state.SourceFingerprint)
+	assert.Zero(t, deletes, "resolving a source deletes nothing")
+}
+
+func TestImageDeleteCache(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	tests := []struct {
+		name   string
+		image  string
+		opts   []Option
+		cached bool
+	}{
+		{
+			name:   "a plain delete leaves the cached copy",
+			image:  "docker.io/library/busybox:1.35",
+			cached: true,
+		},
+		{
+			name:  "OptionCache takes the cached copy with it",
+			image: "docker.io/library/busybox:1.34",
+			opts:  []Option{OptionCache()},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+
+			// A cache of its own: deleting out of the shared one would pull an
+			// image from under whatever else is copying it at that moment.
+			cache := newRandomTestClient(t, "image-delete-store-")
+			c := newRandomTestClient(t, "image-delete-cache-")
+
+			r, err := c.Resource(KindImage, tt.image, &ImageConfig{CacheClient: cache})
+			require.NoError(t, err)
+
+			require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate()))
+
+			_, _, err = cache.incus.GetImageAlias(ctx, tt.image, nil)
+			require.NoError(t, err, "the ensure should have left %q in the cache", tt.image)
+
+			require.NoError(t, RunAction(ctx, r, ActionDelete, tt.opts...))
+
+			_, _, err = cache.incus.GetImageAlias(ctx, tt.image, nil)
+			if tt.cached {
+				require.NoError(t, err, "a plain delete must leave the cache alone")
+
+				return
+			}
+
+			require.Error(t, err, "the cached copy must be gone")
+		})
+	}
 }
 
 // ----------------------------------------------------------------------------

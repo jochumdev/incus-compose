@@ -163,6 +163,11 @@ type ImageState struct {
 	// Size is the total image size in bytes as reported by the source server,
 	// resolved best-effort before a download. 0 when unknown.
 	Size int64
+
+	// SourceFingerprint is what the source held at the last OptionResolveSource,
+	// in the shape Incus fingerprints by. Empty when nothing resolved it, and
+	// set means the OCI fields above came from the source rather than the image.
+	SourceFingerprint string
 }
 
 // newImage returns an existing Image resource or creates a new one.
@@ -248,9 +253,14 @@ func (r *Image) State() *ImageState {
 	return r.state.Load()
 }
 
-// clearState forgets the fetched image.
+// clearState forgets the fetch, not the content: the OCI config and the
+// resolved source outlive an image a refresh deletes in order to re-pull it.
 func (r *Image) clearState() {
-	r.state.Store(&ImageState{})
+	r.updateState(func(s *ImageState) {
+		s.IncusAlias = nil
+		s.ETag = ""
+		s.Size = 0
+	})
 }
 
 // updateState swaps in a copy carrying f's edits. The actions are serialized by
@@ -300,7 +310,6 @@ func (r *Image) NativeIncus() bool {
 }
 
 // Ensure retrieves an existing image from cache or copies it if Create option is set.
-// With the Pull option, a cached image is refreshed from its source registry.
 // When ImageConfig.Build is set the image is built locally via podman/docker.
 func (r *Image) Ensure(ctx context.Context, opts ...Option) error {
 	r.mu.Lock()
@@ -324,20 +333,6 @@ func (r *Image) Ensure(ctx context.Context, opts ...Option) error {
 		return r.ensureBuild(ctx, args)
 	}
 
-	// Refreshing takes the same path, create() drops the stale copy under the lock.
-	if args.Pull == PullAlways {
-		_ = r.get(ctx)
-
-		err = r.client.hookBefore(ctx, ActionEnsure, r, args, nil)
-		if err != nil {
-			return err
-		}
-
-		err = r.create(ctx, args)
-
-		return r.client.hookAfter(ctx, ActionEnsure, r, args, err)
-	}
-
 	err = r.client.hookBefore(ctx, ActionEnsure, r, args, nil)
 	if err != nil {
 		return err
@@ -346,6 +341,10 @@ func (r *Image) Ensure(ctx context.Context, opts ...Option) error {
 	// Try to get existing image
 	err = r.get(ctx)
 	if err == nil {
+		if args.ResolveSource {
+			r.readSource(ctx)
+		}
+
 		err = r.client.hookAfter(ctx, ActionEnsure, r, args, err)
 
 		return err
@@ -498,74 +497,57 @@ func (r *Image) get(ctx context.Context) error {
 	return nil
 }
 
-// deleteCached deletes the image from the cache and the project.
-func (r *Image) deleteCached(ctx context.Context, args Options) error {
-	err := r.client.hookAfter(ctx, ActionEnsure, r, args, nil)
-	if err != nil {
-		return err
+// readSource records what the source holds now, so a caller can tell it apart
+// from what is stored. A source it cannot reach leaves the state empty rather
+// than failing: a client that cannot see the registry its server pulls from
+// still has a usable image.
+func (r *Image) readSource(ctx context.Context) {
+	if r.source == nil {
+		return
 	}
 
-	err = r.client.hookBefore(ctx, ActionDelete, r, args, nil)
-	if err != nil {
-		return err
-	}
+	if r.NativeIncus() {
+		fingerprint, err := r.sourceFingerprint(ctx)
+		if err != nil {
+			r.client.LogWarn("Cannot resolve the image on its remote", "resource", r, "error", err)
 
-	// Only a native remote can be asked whether it still holds the same image.
-	var sourceAlias *incusApi.ImageAliasesEntry
-	if r.source != nil && r.source.conn != nil {
-		sourceAlias, _, err = r.source.conn.GetImageAlias(ctx, r.image, nil)
-
-		// Image not found on the source.
-		if err != nil && r.State().IncusAlias == nil {
-			r.client.LogDebug("Image not found on the source", "resource", r)
-			return r.client.hookAfter(ctx, ActionDelete, r, args, nil)
+			return
 		}
+
+		r.updateState(func(s *ImageState) { s.SourceFingerprint = fingerprint })
+
+		return
 	}
 
-	if r.cache != nil {
-		cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
-		if err == nil && (sourceAlias == nil || sourceAlias.Target != cacheAlias.Target) {
-			r.client.LogDebug("Deleting from cache", "resource", r)
-			op, err := r.cache.incus.DeleteImage(ctx, cacheAlias.Target)
-
-			// On the cache the error is ignored.
-			if err = r.client.hookOperation(ctx, ActionDelete, r, args, op, err); err != nil {
-				r.client.LogDebug("Deleting stale cache image for refresh", "error", err)
-			}
-		} else {
-			r.client.LogDebug("Image not found on the cache or it is recent", "resource", r)
-		}
+	if r.source.info.Protocol != "oci" {
+		return
 	}
 
-	err = r.get(ctx)
-	if err != nil {
-		// Project doesn't have the image, ignore this.
-		return r.client.hookAfter(ctx, ActionDelete, r, args, nil)
-	}
-
-	r.client.LogDebug("Deleting from project", "resource", r)
 	conn, err := r.client.Connection()
 	if err != nil {
-		return err
+		return
 	}
 
-	op, err := conn.DeleteImage(ctx, r.State().IncusAlias.Target)
-	if err = r.client.hookOperation(ctx, ActionEnsure, r, args, op, err); err != nil {
-		r.client.LogDebug("deleting stale project image for refresh", "error", err)
-		return r.client.hookAfter(ctx, ActionDelete, r, args, err)
-	}
-
-	err = r.client.hookAfter(ctx, ActionDelete, r, args, err)
+	// An index holds one manifest per architecture, and the one to compare
+	// against is what incusd pulled - which is what the stored image carries.
+	img, _, err := conn.GetImage(ctx, r.State().IncusAlias.Target, nil)
 	if err != nil {
-		return err
+		r.client.LogWarn("Cannot read the stored image", "resource", r, "error", err)
+
+		return
 	}
 
-	err = r.client.hookBefore(ctx, ActionEnsure, r, args, nil)
+	fingerprint, config, err := r.ociResolveSource(ctx, img.Architecture)
 	if err != nil {
-		return err
+		r.client.LogWarn("Cannot resolve the image on its registry", "resource", r, "error", err)
+
+		return
 	}
 
-	return nil
+	r.updateState(func(s *ImageState) {
+		s.SourceFingerprint = fingerprint
+		ociStateFromConfig(s, config)
+	})
 }
 
 func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageAliasesEntry, error) {
@@ -718,15 +700,6 @@ func (r *Image) create(ctx context.Context, args Options) error {
 
 // materialize is hop A: make sure the cache holds the alias, returning it.
 func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageAliasesEntry, error) {
-	if args.Pull == PullAlways {
-		err := r.deleteCached(ctx, args)
-		if err != nil {
-			return nil, err
-		}
-
-		r.clearState()
-	}
-
 	cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
 	if err == nil {
 		// An entry cached before the split still concatenates entrypoint and
@@ -988,7 +961,27 @@ func deleteImage(ctx context.Context, conn *iclient.Connection, fingerprint stri
 	return err
 }
 
-// Delete removes the per-project copy of the image from the active project.
+// deleteCached removes the store's copy, under the per-alias lock so that a
+// concurrent hop A is not pulled out from under.
+func (r *Image) deleteCached(ctx context.Context) error {
+	release, err := r.lockStore(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer release()
+
+	alias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
+	if err != nil {
+		return nil
+	}
+
+	return deleteImage(ctx, r.cache.incus, alias.Target)
+}
+
+// Delete removes the per-project copy of the image from the active project, and
+// with OptionCache the store's copy as well. The cache is only known once the
+// image has been ensured, so an image this process never ensured keeps it.
 func (r *Image) Delete(ctx context.Context, opts ...Option) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1013,6 +1006,19 @@ func (r *Image) Delete(ctx context.Context, opts ...Option) error {
 
 		r.client.resources.Remove(r)
 		return err
+	}
+
+	// The store hit is authoritative for the next Ensure, so an image dropped to
+	// re-fetch it has to go from both copies or the stale one is simply copied back.
+	if options.Cache && r.cache != nil {
+		err := r.deleteCached(ctx)
+		if err != nil {
+			r.clearState()
+
+			r.client.resources.Remove(r)
+
+			return r.client.hookAfter(ctx, ActionDelete, r, options, err)
+		}
 	}
 
 	// Resolve the per-project copy in the active project (not the cache). A

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -26,36 +27,33 @@ const dockerManifestList = "application/vnd.docker.distribution.manifest.list.v2
 func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, fingerprint string, config *ocispec.ImageConfig) error {
 	img, eTag, err := server.GetImage(ctx, fingerprint, nil)
 	if err != nil {
-		return fmt.Errorf("getting image for property update: %w", err)
+		return ErrNotFound.WithText("the image the properties belong to").Wrap(err)
 	}
 
-	if config == nil {
+	state := &ImageState{}
+
+	if config != nil {
+		ociStateFromConfig(state, config)
+	} else {
+		// The presence of oci.volumes is what marks the config as already read.
 		_, stored := img.Properties["oci.volumes"]
 		if stored || r.source == nil || r.source.info.Protocol != "oci" {
 			return nil
 		}
 
-		config, err = r.ociFetchConfig(ctx, img.Architecture)
-		if err != nil {
-			r.client.LogWarn("Cannot read the image config from its registry", "resource", r, "error", err)
+		if r.State().SourceFingerprint != "" {
+			// A refresh read it, deciding whether to re-pull this image.
+			state = r.State()
+		} else {
+			_, fetched, err := r.ociResolveSource(ctx, img.Architecture)
+			if err != nil {
+				r.client.LogWarn("Cannot read the image config from its registry", "resource", r, "error", err)
 
-			return nil
+				return nil
+			}
+
+			ociStateFromConfig(state, fetched)
 		}
-	}
-
-	// A named USER lands as 0 here; oci.uid takes nothing else, and only the
-	// image's own /etc/passwd resolves it, a project away from this one.
-	var uid, gid uint64
-
-	if config.User != "" {
-		user, group, _ := strings.Cut(config.User, ":")
-		uid, _ = strconv.ParseUint(user, 10, 32)
-		gid, _ = strconv.ParseUint(group, 10, 32)
-	}
-
-	cwd := config.WorkingDir
-	if cwd == "" {
-		cwd = "/"
 	}
 
 	props := maps.Clone(img.Properties)
@@ -63,22 +61,7 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 		props = map[string]string{}
 	}
 
-	// The presence of oci.volumes is what marks the config as already read.
-	volumes := strings.Join(slices.Sorted(maps.Keys(config.Volumes)), ",")
-	if volumes == "" {
-		volumes = ","
-	}
-
-	props["oci.uid"] = strconv.FormatUint(uid, 10)
-	props["oci.gid"] = strconv.FormatUint(gid, 10)
-	props["oci.entrypoint"] = shellquote.Join(config.Entrypoint...)
-	props["oci.cmd"] = shellquote.Join(config.Cmd...)
-	props["oci.cwd"] = cwd
-	props["oci.volumes"] = volumes
-
-	if config.User != "" {
-		props[OCIUserKey] = config.User
-	}
+	ociWriteProperties(state, props)
 
 	err = server.UpdateImage(ctx, fingerprint, incusApi.ImagePut{
 		AutoUpdate: img.AutoUpdate,
@@ -88,22 +71,24 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 		Profiles:   img.Profiles,
 	}, eTag)
 	if err != nil {
-		return fmt.Errorf("storing OCI config as image properties: %w", err)
+		return ErrCreate.WithText("storing the OCI config as image properties").Wrap(err)
 	}
 
 	return nil
 }
 
-// ociFetchConfig reads the image's config from its registry.
-func (r *Image) ociFetchConfig(ctx context.Context, arch string) (*ocispec.ImageConfig, error) {
+// ociResolveSource reads the manifest built for arch, picking it out of the
+// index when the reference is multi-arch, and answers both questions it holds:
+// the fingerprint Incus would give the image, and the image's config.
+func (r *Image) ociResolveSource(ctx context.Context, arch string) (string, *ocispec.ImageConfig, error) {
 	repo, err := iclient.NewRepository(r.source.info, r.image)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	desc, rc, err := repo.FetchReference(ctx, repo.Reference.ReferenceOrDefault())
 	if err != nil {
-		return nil, fmt.Errorf("fetching %s: %w", repo.Reference, err)
+		return "", nil, ErrImageSource.WithText("fetching " + repo.Reference.String()).Wrap(err)
 	}
 
 	// ReadAll checks the bytes against the descriptor's size and digest.
@@ -112,18 +97,18 @@ func (r *Image) ociFetchConfig(ctx context.Context, arch string) (*ocispec.Image
 	_ = rc.Close()
 
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", repo.Reference, err)
+		return "", nil, ErrImageSource.WithText("reading " + repo.Reference.String()).Wrap(err)
 	}
 
 	if desc.MediaType == ocispec.MediaTypeImageIndex || desc.MediaType == dockerManifestList {
 		desc, err = ociPickManifest(body, arch)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 
 		body, err = ociFetchDescriptor(ctx, repo, desc)
 		if err != nil {
-			return nil, fmt.Errorf("fetching the %s manifest of %s: %w", arch, repo.Reference, err)
+			return "", nil, ErrImageSource.WithText(fmt.Sprintf("fetching the %s manifest of %s", arch, repo.Reference)).Wrap(err)
 		}
 	}
 
@@ -131,23 +116,30 @@ func (r *Image) ociFetchConfig(ctx context.Context, arch string) (*ocispec.Image
 
 	err = json.Unmarshal(body, &manifest)
 	if err != nil {
-		return nil, fmt.Errorf("decoding the manifest of %s: %w", repo.Reference, err)
+		return "", nil, ErrInvalidFormat.WithText("the manifest of " + repo.Reference.String()).Wrap(err)
+	}
+
+	// incusd hashes the layer digests skopeo reports rather than the manifest
+	// digest, so anything else compares as changed on every run.
+	h := sha256.New()
+	for _, layer := range manifest.Layers {
+		h.Write([]byte(layer.Digest))
 	}
 
 	// docker's config media type differs from OCI's, the document does not.
 	body, err = ociFetchDescriptor(ctx, repo, manifest.Config)
 	if err != nil {
-		return nil, fmt.Errorf("fetching the config of %s: %w", repo.Reference, err)
+		return "", nil, ErrImageSource.WithText("fetching the config of " + repo.Reference.String()).Wrap(err)
 	}
 
 	var image ocispec.Image
 
 	err = json.Unmarshal(body, &image)
 	if err != nil {
-		return nil, fmt.Errorf("decoding the config of %s: %w", repo.Reference, err)
+		return "", nil, ErrInvalidFormat.WithText("the config of " + repo.Reference.String()).Wrap(err)
 	}
 
-	return &image.Config, nil
+	return fmt.Sprintf("%x", h.Sum(nil)), &image.Config, nil
 }
 
 // ociFetchDescriptor reads one manifest or blob the registry already described.
@@ -168,7 +160,7 @@ func ociPickManifest(index []byte, arch string) (ocispec.Descriptor, error) {
 
 	err := json.Unmarshal(index, &idx)
 	if err != nil {
-		return ocispec.Descriptor{}, fmt.Errorf("decoding the image index: %w", err)
+		return ocispec.Descriptor{}, ErrInvalidFormat.WithText("the image index").Wrap(err)
 	}
 
 	want, err := osarch.ArchitectureID(arch)
@@ -189,6 +181,50 @@ func ociPickManifest(index []byte, arch string) (ocispec.Descriptor, error) {
 	}
 
 	return ocispec.Descriptor{}, ErrNoPlatform.WithText(arch)
+}
+
+// ociStateFromConfig reads an image's own OCI config into s.
+func ociStateFromConfig(s *ImageState, config *ocispec.ImageConfig) {
+	// A named USER lands as 0 here; oci.uid takes nothing else, and only the
+	// image's own /etc/passwd resolves it, a project away from this one.
+	s.UID, s.GID = 0, 0
+
+	if config.User != "" {
+		user, group, _ := strings.Cut(config.User, ":")
+		s.UID, _ = strconv.ParseUint(user, 10, 32)
+		s.GID, _ = strconv.ParseUint(group, 10, 32)
+	}
+
+	s.OCIUser = config.User
+	s.Entrypoint = shellquote.Join(config.Entrypoint...)
+	s.Cmd = shellquote.Join(config.Cmd...)
+	s.Volumes = slices.Sorted(maps.Keys(config.Volumes))
+
+	s.Cwd = config.WorkingDir
+	if s.Cwd == "" {
+		s.Cwd = "/"
+	}
+}
+
+// ociWriteProperties writes s' oci.* values into props, mirroring
+// ociReadProperties.
+func ociWriteProperties(s *ImageState, props map[string]string) {
+	props["oci.uid"] = strconv.FormatUint(s.UID, 10)
+	props["oci.gid"] = strconv.FormatUint(s.GID, 10)
+	props["oci.entrypoint"] = s.Entrypoint
+	props["oci.cmd"] = s.Cmd
+	props["oci.cwd"] = s.Cwd
+
+	// The presence of oci.volumes is what marks the config as already read, so
+	// an image declaring none still has to carry the key.
+	props["oci.volumes"] = ","
+	if len(s.Volumes) > 0 {
+		props["oci.volumes"] = strings.Join(s.Volumes, ",")
+	}
+
+	if s.OCIUser != "" {
+		props[OCIUserKey] = s.OCIUser
+	}
 }
 
 // ociReadProperties reads oci.* values into s. An image cached without oci.cmd
