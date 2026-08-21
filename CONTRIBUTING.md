@@ -1,10 +1,11 @@
 # Contributing to incus-compose
 
-Thank you for your interest in contributing! This document outlines the conventions and practices we follow.
+Thank you for your interest in contributing! This document outlines the
+conventions and practices we follow.
 
-This project is destined for the **lxc** org. The org-wide contributing
-policy ([lxc/incus CONTRIBUTING](https://github.com/lxc/incus/blob/main/CONTRIBUTING.md)) applies in full,
-including:
+This project is destined for the **lxc** org. The org-wide contributing policy
+([lxc/incus CONTRIBUTING](https://github.com/lxc/incus/blob/main/CONTRIBUTING.md))
+applies in full, including:
 
 - **License**: Apache 2.0, no copyright assignment. Contributions cannot include
   code licensed under the GPL, AGPL or LGPL.
@@ -12,13 +13,13 @@ including:
   (`git commit -s`), and only a human may sign it. Work done in a maintainer's
   worktree is committed without any trailer; the maintainer signs it on the
   rebase.
-- **AI tooling**: See the org policy. Contributors must fully own their
-  work. AI tools cannot be credited. See also [AGENTS.md](AGENTS.md).
+- **AI tooling**: See the org policy. Contributors must fully own their work. AI
+  tools cannot be credited. See also [AGENTS.md](AGENTS.md).
 
 ## Philosophy
 
-**KISS** is about the solution: solve the problem in front of you, at the size it
-actually has. Not the general case, not the one you expect next quarter. A
+**KISS** is about the solution: solve the problem in front of you, at the size
+it actually has. Not the general case, not the one you expect next quarter. A
 shallow package structure, direct code, working software over perfect
 architecture.
 
@@ -47,8 +48,8 @@ Read the documentation in your own checkout, not the published site: `docs/` is
 a submodule, and a feature branch may carry a version of it that the site does
 not have yet.
 
-Before contributing, you **must** read and understand this document.
-It defines non-negotiable boundaries, including:
+Before contributing, you **must** read and understand this document. It defines
+non-negotiable boundaries, including:
 
 - What incus-compose will and will not implement
 - Where Compose semantics must remain untouched
@@ -87,7 +88,8 @@ incus-compose/
 - `shared/` - Code both binaries use
 - `internal/` - Helpers that must stay ours, such as `internal/testlib`
 - `examples/` - Example projects ready to use with incus-compose
-- `project/` - Compose-spec loading via compose-go, service-to-instance translation
+- `project/` - Compose-spec loading via compose-go, service-to-instance
+  translation
 - Root package - No code at root level (all in packages)
 
 **Don't create**: deep nesting like `pkg/application/container/`, or abstraction
@@ -151,26 +153,26 @@ says it - a mutex in a struct with one lock is `mu`.
 
 Every helper is a jump, and every jump is a frame the reader has to hold while
 reading the caller. Extract only what the reader never has to open: if
-understanding the caller means going into the helper, inline it. A function
-with one caller almost never passes that test.
+understanding the caller means going into the helper, inline it. A function with
+one caller almost never passes that test.
 
 ### Comments
 
-- Every exported function and type gets a doc comment: **one line**, ending
-  with a period.
+- Every exported function and type gets a doc comment: **one line**, ending with
+  a period.
 - A second line needs a damn good reason - a trap the caller cannot infer from
   the signature. Anything longer belongs in `docs/`, the issue, or the commit
   message.
-- Delete comments that restate the code. A self-explanatory line gets no
-  comment at all; that is the common case, not the exception.
+- Delete comments that restate the code. A self-explanatory line gets no comment
+  at all; that is the common case, not the exception.
 - Never explain previous behaviour. That is what `git log` is for.
 - Comments are not safeguards. An API is concurrency-safe because it is
   mutex-free or confined to one goroutine, never because a comment says so.
 
 ### Use of `any`
 
-Avoid using `any` (`interface{}`).
-Prefer a small, explicit interface. Use generics only if they clearly reduce duplication.
+Avoid using `any` (`interface{}`). Prefer a small, explicit interface. Use
+generics only if they clearly reduce duplication.
 
 ### Unused parameters
 
@@ -188,7 +190,8 @@ func (t *logTerminal) Read(p []byte) (int, error) {
 ### CLI environment variables
 
 - Use `INCUS_COMPOSE_*` prefix for configuration env vars
-- Support common standards like [no-color.org](https://no-color.org/) where applicable
+- Support common standards like [no-color.org](https://no-color.org/) where
+  applicable
 
 ### Error Handling
 
@@ -259,16 +262,17 @@ chore(client): rename Resource interface method
 
 ### Changelog
 
-[CHANGELOG.md](CHANGELOG.md) follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Add the entry in the same commit as the change, under the unreleased heading, in
+[CHANGELOG.md](CHANGELOG.md) follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add the entry in the
+same commit as the change, under the unreleased heading, in
 `Added`/`Changed`/`Fixed`, ending with `(by @handle)`.
 
 An entry is needed when a user or a library consumer can observe the difference:
 
 - behaviour, CLI flags, or command output
 - a bug they could have hit, even when the cause was internal
-- anything exported from `client/` or `project/`; prefix those with `**library**:`
-  and spell out breaking changes
+- anything exported from `client/` or `project/`; prefix those with
+  `**library**:` and spell out breaking changes
 
 No entry for contributor docs (`AGENTS.md`, `CONTRIBUTING.md`, `docs/`), dev
 tooling (`justfile`, `scripts/`), tests, or refactors with no observable
@@ -280,9 +284,9 @@ Ensure".
 
 ## Testing
 
-Tiers, fixtures, coverage, and how to drive the CLI from a test are documented in
-[docs/root/architecture/testing.md](docs/root/architecture/testing.md). Read it
-before writing a test.
+Tiers, fixtures, coverage, and how to drive the CLI from a test are documented
+in [docs/root/architecture/testing.md](docs/root/architecture/testing.md). Read
+it before writing a test.
 
 One policy rather than a technique, so it lives here: **do not add mocks.** A
 fake `incus.InstanceServer` encodes a guess about what the daemon returns, and a
