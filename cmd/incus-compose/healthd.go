@@ -19,7 +19,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -367,22 +366,22 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 
 	// The kind matters: the daemon's volume is called ic-healthd too, and
 	// ensuring it from in here would re-enter this hook forever.
-	c.AddHookBefore(func(ctx context.Context, action client.Action, r client.Resource, _ client.Options, err error) error {
+	c.AddHookBefore(func(ctx context.Context, action client.Action, r client.Resource, options client.Options, err error) error {
 		if err != nil || action != client.ActionEnsure || r.Kind() != client.KindInstance || r.IncusName() != inst.IncusName() {
 			return err
 		}
 
-		conn, err := c.Connection()
-		if err != nil {
+		// Everything below builds what a create needs, and healthdEnsure's
+		// lookup pass carries no create - that pass is what fills the state.
+		if !options.Create {
 			return err
 		}
 
-		incusInstance, _, err := conn.GetInstance(ctx, r.IncusName(), nil)
-		if err == nil {
+		if info := inst.State().IncusInstance; info != nil {
 			// No need to setup the instance when we already did that.
-			_, ok := incusInstance.Config["environment.INCUS_COMPOSE_HEALTHD_INCUS"]
+			_, ok := info.Config["environment.INCUS_COMPOSE_HEALTHD_INCUS"]
 			if ok {
-				if drift := healthdConfigDrift(params, incusInstance.Config); len(drift) > 0 {
+				if drift := healthdConfigDrift(params, info.Config); len(drift) > 0 {
 					c.LogWarn("The running ic-healthd was configured by another project, ignoring",
 						"keys", strings.Join(drift, ", "), "instance", r.IncusName())
 				}
@@ -474,26 +473,9 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 		}
 
 		if params.binary != "" {
-			cmd := []string{
-				"sh", "-c",
-				`nohup /usr/local/bin/ic-healthd run > /var/log/ic-healthd.log 2>&1 &`,
-			}
-			execReq := incusApi.InstanceExecPost{
-				Command:     cmd,
-				WaitForWS:   false,
-				Interactive: false,
-			}
-			conn, err := c.Connection()
+			err := inst.Exec(ctx, "sh", "-c",
+				`nohup /usr/local/bin/ic-healthd run > /var/log/ic-healthd.log 2>&1 &`)
 			if err != nil {
-				return err
-			}
-
-			op, err := conn.ExecInstance(ctx, inst.IncusName(), execReq, nil)
-			if err != nil {
-				return err
-			}
-
-			if _, err := iclient.WaitOperation(ctx, op); err != nil {
 				return err
 			}
 		}
@@ -754,28 +736,6 @@ func healthdResolve(p *project.Project, c *client.Client) (*client.Client, *clie
 	}
 
 	return hc, inst, nil
-}
-
-func healthdReload(ctx context.Context, c *client.Client, h *client.Instance) error {
-	req := incusApi.InstanceExecPost{
-		Command:     []string{"sh", "-c", "pids=\"$(pidof ic-healthd)\" && for pid in $pids; do kill -HUP \"$pid\"; done"},
-		WaitForWS:   true,
-		Interactive: false,
-	}
-
-	conn, err := c.Connection()
-	if err != nil {
-		return err
-	}
-
-	op, err := conn.ExecInstance(ctx, h.IncusName(), req, nil)
-	if err != nil {
-		return err
-	}
-
-	_, err = iclient.WaitOperation(ctx, op)
-
-	return err
 }
 
 func newHealthdStatusCommand() *cli.Command {

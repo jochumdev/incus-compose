@@ -256,19 +256,41 @@ func healthdEnsure(ctx context.Context, hc *client.Client, stack *client.Stack, 
 		}
 	}
 
-	// Only creating or replacing the sidecar needs the image. Read it rather
-	// than ensure it, so an unreachable tag cannot fail a daemon that is
-	// already running the one asked for.
-	conn, err := hc.Connection()
+	// Only creating or replacing the sidecar needs the image, so the running one
+	// is read first - an unreachable tag must not fail a daemon already on it.
+	// Not IgnoreError: that one is permanent, and under project scope hc is the
+	// caller's own client, so it would also swallow a create that cannot reach
+	// its image.
+	hc.AddHookAfter(func(_ context.Context, action client.Action, r client.Resource, options client.Options, err error) error {
+		if options.Create || action != client.ActionEnsure || r.IncusName() != hInst.IncusName() {
+			return err
+		}
+
+		if errors.Is(err, client.ErrNotFound) {
+			return nil
+		}
+
+		return err
+	})
+
+	// No create: creating is what needs the image this decides to fetch.
+	lookup := client.NewStack(hc, client.StackWorkers(params.stackWorkers))
+	lookup.Add(hInst)
+
+	err = lookup.ForAction(client.ActionEnsure).Run(ctx, client.ActionEnsure, client.OptionTimeout(params.timeout))
 	if err != nil {
-		hc.LogError("Connecting to the healthd project", "error", err)
+		hc.LogError("Reading the running healthd instance", "error", err)
 		return errLogged.Wrap(err)
 	}
 
-	current, _, err := conn.GetInstance(ctx, hInst.IncusName(), nil)
-	fetchImage := err != nil ||
+	var running string
+	if info := hInst.State().IncusInstance; info != nil {
+		running = info.Config["user.image_alias"]
+	}
+
+	fetchImage := !hInst.IsEnsured() ||
 		params.pull == "always" ||
-		healthdNeedsUpgrade(current.Config["user.image_alias"], wantAlias)
+		healthdNeedsUpgrade(running, wantAlias)
 
 	// The image and the volume only exist to create the sidecar, and the
 	// volume's Start validates itself against the image we did not fetch. One
