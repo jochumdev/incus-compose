@@ -79,11 +79,14 @@ A type holding two unrelated concerns is a design error rather than an untidy
 one; "too many fields" is how it shows up. Each field should have a clear domain
 and ownership.
 
-### A4. Prefer one-goroutine ownership for mutable state
+### A4. Sharing data is expensive
 
-A mutex or a comment is not a substitute for a clear ownership boundary. When
-state crosses goroutines, prefer handing over finished bytes or another value
-whose signature makes ownership clear.
+One owner per piece of data, and when it has to cross, the least of it that will
+do. Every field that crosses is a field whose ownership and failure mode
+somebody has to settle, and keep settled. A mutex, or a doc comment naming an
+owner the code contradicts, is not an ownership boundary. Hand over a value that
+says what changed - across goroutines, where this is sharpest, and between two
+structs that both hold a copy.
 
 ### A5. A function does one job, including construction
 
