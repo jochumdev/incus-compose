@@ -12,8 +12,87 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
 )
+
+// logWriter takes an instance's console output.
+type logWriter func(client.Resource, []byte)
+
+// instanceLog writes an instance's console log to out, then keeps streaming it
+// until the context is canceled when follow is set.
+func instanceLog(ctx context.Context, c *client.Client, inst *client.Instance, out logWriter, follow bool) error {
+	conn, err := c.Connection()
+	if err != nil {
+		return err
+	}
+
+	err = logBuffer(ctx, conn, inst, out)
+	if err != nil || !follow {
+		return err
+	}
+
+	return logStream(ctx, conn, inst, out)
+}
+
+// logBuffer reads the saved console log buffer via GET /console (equivalent to
+// `incus console --show-log`).
+func logBuffer(ctx context.Context, conn *iclient.Connection, inst *client.Instance, out logWriter) error {
+	reader, err := conn.GetInstanceConsoleLog(ctx, inst.IncusName())
+	if err != nil {
+		return client.ErrOperation.WithText("getting console log").Wrap(err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return client.ErrOperation.WithText("reading console log").Wrap(err)
+	}
+
+	out(inst, data)
+
+	return nil
+}
+
+// logStream streams the console until the context is canceled.
+func logStream(ctx context.Context, conn *iclient.Connection, inst *client.Instance, out logWriter) error {
+	req := incusApi.InstanceConsolePost{
+		Type:  "console",
+		Force: true, // Take over existing console connections
+	}
+
+	op, err := conn.ConsoleInstance(ctx, inst.IncusName(), req, &iclient.InstanceConsoleArgs{
+		Output: &logOutput{resource: inst, out: out},
+	})
+	if err != nil {
+		return client.ErrOperation.WithText("connecting to console").Wrap(err)
+	}
+
+	_, err = iclient.WaitOperation(ctx, op)
+
+	// Context cancellation (including timeout) is not an error
+	if ctx.Err() != nil {
+		return nil //nolint:nilerr // caller-initiated cancellation, not a streaming failure
+	}
+
+	if err != nil {
+		return client.ErrOperation.WithText("console streaming").Wrap(err)
+	}
+
+	return nil
+}
+
+// logOutput hands the console stream to out.
+type logOutput struct {
+	resource client.Resource
+	out      logWriter
+}
+
+func (t *logOutput) Write(p []byte) (int, error) {
+	t.out(t.resource, p)
+
+	return len(p), nil
+}
 
 // ANSI color codes for log output.
 var logColors = []string{
@@ -70,7 +149,7 @@ func (f *logHandler) registerService(name string) {
 }
 
 // write handles incoming log data from a resource.
-func (f *logHandler) write(_ client.Action, r client.Resource, data []byte) {
+func (f *logHandler) write(r client.Resource, data []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -126,7 +205,7 @@ func (f *logHandler) flush() {
 }
 
 // startStream begins streaming logs for an instance in a background goroutine.
-func (f *logHandler) startStream(ctx context.Context, inst *client.Instance) {
+func (f *logHandler) startStream(ctx context.Context, c *client.Client, inst *client.Instance) {
 	name := inst.IncusName()
 	if _, running := f.cancels.Load(name); running {
 		return
@@ -138,7 +217,7 @@ func (f *logHandler) startStream(ctx context.Context, inst *client.Instance) {
 	f.cancels.Store(name, cancel)
 
 	go func() {
-		_ = client.RunAction(logCtx, inst, client.ActionLog, client.OptionFollow())
+		_ = instanceLog(logCtx, c, inst, f.write, true)
 		f.cancels.Delete(name)
 	}()
 }
@@ -166,22 +245,13 @@ func (f *logHandler) stopStreams() {
 	})
 }
 
-// logsArgs holds the logs() options, mirroring the logs command's flags.
-type logsArgs struct {
-	Follow bool
-	Writer io.Writer
-}
+// projectInstances resolves the project's instance resources, skipping the ones
+// the client cannot hand back.
+func projectInstances(c *client.Client, p *project.Project) []*client.Instance {
+	names := p.InstanceNames()
+	instances := make([]*client.Instance, 0, len(names))
 
-// logs streams or dumps the project's container logs.
-func logs(ctx context.Context, p *project.Project, c *client.Client, args logsArgs) error {
-	noColor := noColor(ctx)
-
-	formatter := newLogFormatter(args.Writer, noColor)
-	c.Global().SetOutputHandler(formatter.write)
-
-	knownNames := p.InstanceNames()
-	knownInstances := make(map[string]*client.Instance, len(knownNames))
-	for _, name := range knownNames {
+	for _, name := range names {
 		r, err := c.Resource(client.KindInstance, name, &client.InstanceConfig{})
 		if err != nil {
 			continue
@@ -192,13 +262,34 @@ func logs(ctx context.Context, p *project.Project, c *client.Client, args logsAr
 			continue
 		}
 
+		instances = append(instances, inst)
+	}
+
+	return instances
+}
+
+// logsArgs holds the logs() options, mirroring the logs command's flags.
+type logsArgs struct {
+	Instances []*client.Instance
+	Follow    bool
+	Writer    io.Writer
+}
+
+// logs streams or dumps the given instances' logs.
+func logs(ctx context.Context, c *client.Client, args logsArgs) error {
+	noColor := noColor(ctx)
+
+	formatter := newLogFormatter(args.Writer, noColor)
+
+	knownInstances := make(map[string]*client.Instance, len(args.Instances))
+	for _, inst := range args.Instances {
 		knownInstances[inst.IncusName()] = inst
 	}
 
 	if !args.Follow {
 		for _, inst := range knownInstances {
 			formatter.registerService(inst.Name())
-			_ = inst.Log(ctx)
+			_ = instanceLog(ctx, c, inst, formatter.write, false)
 		}
 
 		formatter.flush()
@@ -244,7 +335,7 @@ func logs(ctx context.Context, p *project.Project, c *client.Client, args logsAr
 
 			switch lifecycle.Action {
 			case incusApi.EventLifecycleInstanceStarted:
-				formatter.startStream(ctx, inst)
+				formatter.startStream(ctx, c, inst)
 			case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceDeleted, incusApi.EventLifecycleInstanceShutdown:
 				formatter.stopStream(lifecycle.Name)
 			}
@@ -252,7 +343,7 @@ func logs(ctx context.Context, p *project.Project, c *client.Client, args logsAr
 	}()
 
 	for _, inst := range knownInstances {
-		formatter.startStream(ctx, inst)
+		formatter.startStream(ctx, c, inst)
 	}
 
 	select {
@@ -294,9 +385,10 @@ func newLogsCommand() *cli.Command {
 			}
 			defer func() { _ = c.Done() }()
 
-			return logs(ctx, p, c, logsArgs{
-				Follow: cmd.Bool("follow"),
-				Writer: cmd.Root().Writer,
+			return logs(ctx, c, logsArgs{
+				Instances: projectInstances(c, p),
+				Follow:    cmd.Bool("follow"),
+				Writer:    cmd.Root().Writer,
 			})
 		},
 	}

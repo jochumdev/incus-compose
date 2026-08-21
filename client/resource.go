@@ -43,7 +43,7 @@ type Options struct {
 	// Falls back to Timeout when zero.
 	DependencyTimeout time.Duration
 
-	// Follow enables continuous streaming (for ActionLog).
+	// Follow enables continuous streaming.
 	Follow bool
 
 	// Pull is the pull policy for images (for ActionEnsure).
@@ -113,7 +113,7 @@ func OptionDependencyTimeout(t time.Duration) Option {
 	}
 }
 
-// OptionFollow enables continuous streaming (for ActionLog).
+// OptionFollow enables continuous streaming.
 func OptionFollow() Option {
 	return func(o *Options) {
 		o.Follow = true
@@ -214,9 +214,6 @@ func SupportsAction(r Resource, action Action) bool {
 	case ActionUnpause:
 		_, ok := r.(UnpauseAble)
 		return ok
-	case ActionLog:
-		_, ok := r.(LogAble)
-		return ok
 	case ActionBackup:
 		_, ok := r.(BackupAble)
 		return ok
@@ -261,11 +258,6 @@ func RunAction(ctx context.Context, r Resource, action Action, opts ...Option) e
 			return e.Unpause(ctx, opts...)
 		}
 		return ErrUnsupportedAction.WithAction(ActionUnpause).WithResource(r)
-	case ActionLog:
-		if e, ok := r.(LogAble); ok {
-			return e.Log(ctx, opts...)
-		}
-		return ErrUnsupportedAction.WithAction(ActionLog).WithResource(r)
 	case ActionBackup:
 		e, ok := r.(BackupAble)
 		if ok {

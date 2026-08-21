@@ -412,9 +412,10 @@ func newUpCommand() *cli.Command {
 			logsCtx, stopNotify := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 			defer stopNotify()
 
-			_ = logs(logsCtx, p, c, logsArgs{
-				Follow: true,
-				Writer: cmd.Root().Writer,
+			_ = logs(logsCtx, c, logsArgs{
+				Instances: projectInstances(c, p),
+				Follow:    true,
+				Writer:    cmd.Root().Writer,
 			})
 
 			// The interrupt that ended the log stream should also tear down
