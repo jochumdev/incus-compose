@@ -92,7 +92,7 @@ jobs:
             --junitfile "$REPORTS_DIR/junit.xml" \
             --jsonfile="$REPORTS_DIR/test.json" \
             --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num=10 --jsonfile=$REPORTS_DIR/test.json'" \
-            -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+            -- -race -count=1 -parallel "$TEST_PROCS" -timeout 20m \
                -cover -covermode=atomic -coverpkg ./... -v \
                -args -test.gocoverdir="$INCUS_COMPOSE_TEST_COVERDIR" 2>&1
 
@@ -196,7 +196,7 @@ jobs:
           gotestsum \
             --packages="./examples/..." \
             --junitfile "$REPORTS_DIR/junit.xml" \
-            -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+            -- -race -count=1 -parallel "$TEST_PROCS" -timeout 20m \
                ${{ matrix.args }} 2>&1
 
       - name: Publish test results
