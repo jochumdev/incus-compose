@@ -244,9 +244,6 @@ func healthdEnsure(ctx context.Context, hc *client.Client, stack *client.Stack, 
 	hc.LogDebug("Ensure", "resources", stack.All())
 
 	ensureOpts := []client.Option{client.OptionCreate(), client.OptionTimeout(params.timeout)}
-	if params.pull == "always" {
-		ensureOpts = append(ensureOpts, client.OptionPull())
-	}
 
 	var wantAlias string
 	for _, r := range hResources {
@@ -301,6 +298,15 @@ func healthdEnsure(ctx context.Context, hc *client.Client, stack *client.Stack, 
 		}
 
 		return r.Kind() != client.KindImage && r.Kind() != client.KindStorageVolume
+	}
+
+	// The image and the sidecar ensure in one run below, so a moved tag is
+	// dropped ahead of it rather than in the middle of it.
+	if fetchImage && params.pull == "always" {
+		err = refreshImages(ctx, hc, hResources, params.stackWorkers)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := stack.ForActionF(client.ActionEnsure, needed).Run(ctx, client.ActionEnsure, ensureOpts...); err != nil {

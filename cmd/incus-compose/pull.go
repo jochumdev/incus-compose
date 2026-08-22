@@ -106,6 +106,15 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 
 	downloadTools(ctx, c, args.Init)
 
+	// Only "always" acts on the answer, and "never" may not touch the source at all.
+	if args.Pull == client.PullAlways {
+		err = refreshImages(ctx, c, stack.All(), args.Workers)
+		if err != nil {
+			return err
+		}
+	}
+
+	// The dropped images miss the store now, so this is the plain create path.
 	err = stack.ForAction(client.ActionEnsure).Run(
 		ctx,
 		client.ActionEnsure,
@@ -114,6 +123,74 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 	)
 	if err != nil {
 		c.LogError("Getting resources", "error", err)
+		return errLogged.Wrap(err)
+	}
+
+	return nil
+}
+
+// refreshImages deletes the images their source has moved off, so that the
+// ensure after it creates them from what the source holds now. Anything that is
+// not an image is ignored, so a caller can hand it a whole stack.
+func refreshImages(ctx context.Context, c *client.Client, resources []client.Resource, workers int) error {
+	stack := client.NewStack(c, client.StackWorkers(workers), client.StackFailFast())
+
+	for _, r := range resources {
+		if r.Kind() == client.KindImage {
+			stack.Add(r)
+		}
+	}
+
+	if len(stack.All()) == 0 {
+		return nil
+	}
+
+	err := stack.ForAction(client.ActionEnsure).Run(
+		ctx,
+		client.ActionEnsure,
+		client.OptionCreate(),
+		client.OptionResolveSource(),
+	)
+	if err != nil {
+		c.LogError("Reading the images from their source", "error", err)
+		return errLogged.Wrap(err)
+	}
+
+	stale := []client.Resource{}
+
+	for _, r := range stack.All() {
+		img, ok := r.(*client.Image)
+		if !ok {
+			continue
+		}
+
+		state := img.State()
+
+		// An empty side is a source nothing resolved, or an image this run just
+		// created; neither says what is stored is out of date.
+		if state.SourceFingerprint == "" || state.IncusAlias == nil {
+			continue
+		}
+
+		if state.SourceFingerprint != state.IncusAlias.Target {
+			stale = append(stale, img)
+		}
+	}
+
+	if len(stale) == 0 {
+		return nil
+	}
+
+	c.LogDebug("Refreshing images their source has moved off", "images", stale)
+
+	// Both copies go: the cached one is the store hit the next Ensure would
+	// find, and the project one is what an instance is created from.
+	dropStack := client.NewStack(c, client.StackWorkers(workers), client.StackFailFast())
+	dropStack.Add(stale...)
+
+	err = dropStack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, client.OptionCache())
+	if err != nil {
+		c.LogError("Deleting the images their source has moved off", "error", err)
 		return errLogged.Wrap(err)
 	}
 

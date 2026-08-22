@@ -36,6 +36,9 @@ type Options struct {
 	// Volumes takes an instance's own volumes with it (for ActionDelete).
 	Volumes bool
 
+	// Cache takes an image's cached copy with it (for ActionDelete).
+	Cache bool
+
 	// Timeout for actions (0 = default).
 	Timeout time.Duration
 
@@ -48,6 +51,10 @@ type Options struct {
 
 	// Pull is the pull policy for images (for ActionEnsure).
 	Pull PullMode
+
+	// ResolveSource reads what an image's source holds into its state, changing
+	// nothing (for ActionEnsure).
+	ResolveSource bool
 
 	// Build controls rebuild behavior for build-configured images (for ActionEnsure).
 	Build BuildInfo
@@ -98,6 +105,13 @@ func OptionVolumes() Option {
 	}
 }
 
+// OptionCache deletes an image's cached copy along with the project one.
+func OptionCache() Option {
+	return func(o *Options) {
+		o.Cache = true
+	}
+}
+
 // OptionTimeout sets the timeout for actions.
 func OptionTimeout(t time.Duration) Option {
 	return func(o *Options) {
@@ -129,6 +143,14 @@ func OptionPull() Option {
 func OptionPullMode(m PullMode) Option {
 	return func(o *Options) {
 		o.Pull = m
+	}
+}
+
+// OptionResolveSource records what an image's source holds now in its state,
+// for a caller deciding whether to delete what it has (for ActionEnsure).
+func OptionResolveSource() Option {
+	return func(o *Options) {
+		o.ResolveSource = true
 	}
 }
 

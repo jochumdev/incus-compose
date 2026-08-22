@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -87,6 +88,63 @@ func TestOCIReadProperties(t *testing.T) {
 	}
 }
 
+// A config is flattened into the state, stored as properties, and read back out
+// of them by a later fetch, so the three have to agree.
+func TestOCIStateRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name   string
+		config ocispec.ImageConfig
+		want   ImageState
+	}{
+		{
+			name: "a config declaring everything",
+			config: ocispec.ImageConfig{
+				User:       "999:998",
+				Entrypoint: []string{"docker-entrypoint.sh"},
+				Cmd:        []string{"redis-server", "--appendonly", "yes"},
+				WorkingDir: "/data",
+				Volumes:    map[string]struct{}{"/var/log": {}, "/data": {}},
+			},
+			want: ImageState{
+				UID: 999, GID: 998,
+				OCIUser:    "999:998",
+				Entrypoint: "docker-entrypoint.sh",
+				Cmd:        "redis-server --appendonly yes",
+				Cwd:        "/data",
+				Volumes:    []string{"/data", "/var/log"},
+			},
+		},
+		{
+			name:   "an image declaring nothing still gets a working directory",
+			config: ocispec.ImageConfig{},
+			want:   ImageState{Cwd: "/"},
+		},
+		{
+			// oci.uid takes a number, so a name survives only in its own key.
+			name:   "a named user leaves the ids at zero",
+			config: ocispec.ImageConfig{User: "nobody"},
+			want:   ImageState{OCIUser: "nobody", Cwd: "/"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ImageState{}
+			ociStateFromConfig(&got, &tt.config)
+			assert.Equal(t, tt.want, got)
+
+			props := map[string]string{}
+			ociWriteProperties(&got, props)
+
+			back := ImageState{}
+			ociReadProperties(&back, props)
+			assert.Equal(t, tt.want, back, "what is written to properties must read back the same")
+		})
+	}
+}
+
 func TestOCIPickManifest(t *testing.T) {
 	t.Parallel()
 
@@ -144,11 +202,16 @@ func TestOCIPickManifest(t *testing.T) {
 	})
 }
 
-// ociTestRegistry serves one image over the Distribution API.
-func ociTestRegistry(t *testing.T, blobs map[digest.Digest][]byte, tag digest.Digest) *httptest.Server {
+// ociTestRegistry serves one image over the Distribution API, counting what it
+// was asked for so a caller can tell a second read from a memoised one.
+func ociTestRegistry(t *testing.T, blobs map[digest.Digest][]byte, tag digest.Digest) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
 
+	requests := &atomic.Int64{}
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+
 		want := tag
 		if d := digest.Digest(ociPathDigest(r.URL.Path)); d != "" {
 			want = d
@@ -169,7 +232,7 @@ func ociTestRegistry(t *testing.T, blobs map[digest.Digest][]byte, tag digest.Di
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	return server
+	return server, requests
 }
 
 // ociPathDigest returns the sha256 reference a request names, if it names one.
@@ -213,7 +276,7 @@ func ociTestImage(addr string) *Image {
 	}
 }
 
-func TestOCIFetchConfig(t *testing.T) {
+func TestOCIResolveSource(t *testing.T) {
 	t.Parallel()
 
 	config, err := json.Marshal(ocispec.Image{
@@ -265,9 +328,9 @@ func TestOCIFetchConfig(t *testing.T) {
 	t.Run("a multi-arch tag is followed to the right manifest", func(t *testing.T) {
 		t.Parallel()
 
-		server := ociTestRegistry(t, blobs, indexDigest)
+		server, _ := ociTestRegistry(t, blobs, indexDigest)
 
-		got, err := ociTestImage(server.URL).ociFetchConfig(t.Context(), "x86_64")
+		_, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
 		require.NoError(t, err)
 
 		assert.Equal(t, &ocispec.ImageConfig{
@@ -279,13 +342,28 @@ func TestOCIFetchConfig(t *testing.T) {
 		}, got)
 	})
 
+	// A refresh needs both, and the config hangs off the manifest the fingerprint
+	// was hashed from, so asking for them separately would walk the index twice.
+	t.Run("the fingerprint and the config come from one walk", func(t *testing.T) {
+		t.Parallel()
+
+		server, requests := ociTestRegistry(t, blobs, indexDigest)
+
+		fingerprint, config, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
+		require.NoError(t, err)
+		require.NotEmpty(t, fingerprint)
+		require.NotNil(t, config)
+
+		assert.Equal(t, int64(3), requests.Load(), "the index, the manifest it names, and the config blob")
+	})
+
 	// A single-arch tag answers with the manifest itself, no index to follow.
 	t.Run("a single-arch tag is read directly", func(t *testing.T) {
 		t.Parallel()
 
-		server := ociTestRegistry(t, blobs, manifestDigest)
+		server, _ := ociTestRegistry(t, blobs, manifestDigest)
 
-		got, err := ociTestImage(server.URL).ociFetchConfig(t.Context(), "x86_64")
+		_, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
 		require.NoError(t, err)
 
 		assert.Equal(t, []string{"redis-server"}, got.Cmd)
@@ -294,9 +372,9 @@ func TestOCIFetchConfig(t *testing.T) {
 	t.Run("an architecture the image was not built for", func(t *testing.T) {
 		t.Parallel()
 
-		server := ociTestRegistry(t, blobs, indexDigest)
+		server, _ := ociTestRegistry(t, blobs, indexDigest)
 
-		_, err := ociTestImage(server.URL).ociFetchConfig(t.Context(), "s390x")
+		_, _, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "s390x")
 		require.ErrorIs(t, err, ErrNoPlatform)
 	})
 
@@ -321,12 +399,12 @@ func TestOCIFetchConfig(t *testing.T) {
 
 		bareManifestDigest := digest.FromBytes(bareManifest)
 
-		server := ociTestRegistry(t, map[digest.Digest][]byte{
+		server, _ := ociTestRegistry(t, map[digest.Digest][]byte{
 			bareManifestDigest: bareManifest,
 			bareConfigDigest:   bare,
 		}, bareManifestDigest)
 
-		got, err := ociTestImage(server.URL).ociFetchConfig(t.Context(), "x86_64")
+		_, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
 		require.NoError(t, err)
 
 		assert.Equal(t, &ocispec.ImageConfig{User: "nobody"}, got)
