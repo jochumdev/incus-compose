@@ -12,8 +12,6 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // TestIncusConsoleInstanceRefusesWithoutOutput: there is nowhere to put the
@@ -100,7 +98,7 @@ func TestIncusGetInstanceConsoleLogURL(t *testing.T) {
 // TestIncusConsoleInstanceAgainstRealIncus reads a running instance's console,
 // which is what `incus-compose logs` is built on.
 func TestIncusConsoleInstanceAgainstRealIncus(t *testing.T) {
-	testlib.SkipE2E(t)
+	skipE2E(t)
 	t.Parallel()
 
 	ctx := t.Context()

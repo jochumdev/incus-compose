@@ -11,8 +11,6 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // busyMessage is what incusd sends, verbatim from operationlock. The quotes
@@ -134,7 +132,7 @@ func TestIncusWaitInstanceBusyReturnsWhenNothingHoldsIt(t *testing.T) {
 // TestE2EWaitInstanceBusyWaitsOutAnOperation is the contract against a real
 // server: it returns only once the operation holding the instance is done.
 func TestE2EWaitInstanceBusyWaitsOutAnOperation(t *testing.T) {
-	testlib.SkipE2E(t)
+	skipE2E(t)
 	t.Parallel()
 
 	ctx := t.Context()

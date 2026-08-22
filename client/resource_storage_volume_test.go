@@ -9,8 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -86,7 +84,7 @@ func TestStorageVolumeConfig_CustomPool(t *testing.T) {
 
 func TestStorageVolumeEnsure(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -167,7 +165,7 @@ func TestStorageVolumeEnsure(t *testing.T) {
 
 func TestStorageVolumeEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-idempotent-")
 
@@ -183,7 +181,7 @@ func TestStorageVolumeEnsure_Idempotent(t *testing.T) {
 
 func TestStorageVolumeEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-retry-")
 
@@ -201,7 +199,7 @@ func TestStorageVolumeEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 
 func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-shifted-")
 
@@ -217,7 +215,7 @@ func TestStorageVolumeEnsure_ShiftedVolume_Start(t *testing.T) {
 
 func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-healthd-")
 
@@ -243,7 +241,7 @@ func TestStorageVolumeEnsure_HealthdShiftedVolume(t *testing.T) {
 
 func TestStorageVolumeEnsure_ShiftedVolumeUnensuredImage(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-unensured-")
 
@@ -269,7 +267,7 @@ func TestStorageVolumeEnsure_ShiftedVolumeUnensuredImage(t *testing.T) {
 
 func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-persist-")
 
@@ -293,7 +291,7 @@ func TestStorageVolumeEnsure_ExistsOnNewClient(t *testing.T) {
 
 func TestStorageVolumeDelete(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -334,7 +332,7 @@ func TestStorageVolumeDelete(t *testing.T) {
 
 func TestStorageVolumeHooks(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -454,7 +452,7 @@ func TestStorageVolumeHooks(t *testing.T) {
 }
 
 func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	// One project, one volume name, so every worker races to create it.
@@ -497,7 +495,7 @@ func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
 // path it will be mounted over, which is what docker does for an empty volume.
 func TestStorageVolumePrefetch(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-prefetch-")
@@ -554,7 +552,7 @@ func TestStorageVolumePrefetch(t *testing.T) {
 // leaves an empty volume rather than an error.
 func TestStorageVolumePrefetchMissingPath(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	ctx := t.Context()
 	c := newRandomTestClient(t, "volume-prefetch-missing-")

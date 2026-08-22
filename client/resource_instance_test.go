@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -137,7 +136,7 @@ func TestResolveEntrypoint(t *testing.T) {
 // values: a missing one is added, an existing one keeps what it holds.
 func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "ensure-addmissing-")
 
@@ -192,7 +191,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 // SetHealthCheckingStopped relies on.
 func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "patch-config-")
 
@@ -250,7 +249,7 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 // are kept fresh by the project client's listener; nothing else wakes them.
 func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "clone-events-")
 
@@ -301,7 +300,7 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 // comparison below.
 func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	gc, err := NewTestClient(testContext(t))
@@ -350,7 +349,7 @@ func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
 // writes the intent marker ic-healthd reads, and nothing else.
 func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "stopped-status-")
 
@@ -403,7 +402,7 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 // with no daemon to report, the instance says so.
 func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "nohealthd-status-")
 
@@ -437,7 +436,7 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 // written into the volume, not into the rootfs the mount then hides.
 func TestInstanceFileUnderAVolume(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	ctx := t.Context()
 	c := newRandomTestClient(t, "file-in-volume-")
@@ -514,7 +513,7 @@ func TestInstanceFileUnderAVolume(t *testing.T) {
 // gets one of its own, prefetched, and that a declared mount wins over it.
 func TestInstancePrefetchVolumes(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	ctx := t.Context()
 	c := newRandomTestClient(t, "prefetch-volumes-")
@@ -581,7 +580,7 @@ func TestInstancePrefetchVolumes(t *testing.T) {
 // guards on either side of it.
 func TestInstancePauseUnpause(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	ctx := t.Context()
 	c := newRandomTestClient(t, "pause-")

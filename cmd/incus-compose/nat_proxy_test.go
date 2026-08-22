@@ -16,7 +16,6 @@ import (
 // with the correct configuration (nat=true, wildcard connect address).
 func TestE2ENATProxy(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -52,7 +51,6 @@ func TestE2ENATProxy(t *testing.T) {
 
 func TestE2ENATProxyWithPort(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -92,7 +90,7 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 func TestE2ENATProxyWithPortAndStaticIP(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
-	skipNoExtension(t, shared.Incus73Extension, "nat tests with static ip require at least incus 7.3 or 7.0.2 LTS")
+	testlib.SkipNoExtension(t, shared.Incus73Extension, "nat tests with static ip require at least incus 7.3 or 7.0.2 LTS")
 
 	ctx := t.Context()
 	pn := t.Name()

@@ -20,7 +20,6 @@ import (
 // carrying both an ENTRYPOINT and a CMD.
 func TestE2ECommandReplacesImageCmd(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -53,7 +52,6 @@ func TestE2ECommandReplacesImageCmd(t *testing.T) {
 // TestE2EImageCarriesTheOCISplit checks the properties.
 func TestE2EImageCarriesTheOCISplit(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -86,7 +84,6 @@ func TestE2EImageCarriesTheOCISplit(t *testing.T) {
 // existing cache stays seamless.
 func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -159,7 +156,6 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 // real one, and that down --volumes takes it with the project.
 func TestE2EPrefetchVolumes(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()

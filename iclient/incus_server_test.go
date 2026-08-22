@@ -9,8 +9,6 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func TestIncusServerRequestURLs(t *testing.T) {
@@ -94,7 +92,7 @@ func TestIncusGetConnectionInfoDefaultProject(t *testing.T) {
 }
 
 func TestIncusServerAgainstRealIncus(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
