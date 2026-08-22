@@ -19,15 +19,22 @@ import (
 
 var snapshotter = cupaloy.New(cupaloy.SnapshotSubdirectory(filepath.Join("..", "..", "test", "snapshots", "e2e")))
 
-func skipNo73(t *testing.T, c *client.Client) {
-	if !c.Global().HasExtension(shared.Incus73Extension) {
-		t.Skip("nat tests with static ip require at least incus 7.3 or 7.0.2 LTS")
-	}
-}
-
 func skipNotSameHost(t *testing.T, gc *client.GlobalClient) {
 	if gc.SameHost() != nil {
 		t.Skip("not on the same host")
+	}
+}
+
+func skipNoExtension(t *testing.T, extension, message string) {
+	t.Helper()
+
+	gc, err := client.NewTestClient(t.Context())
+	require.NoError(t, err)
+	c, err := gc.EnsureProject("default")
+	require.NoError(t, err)
+
+	if !c.Global().HasExtension(shared.Incus73Extension) {
+		t.Skip(message)
 	}
 }
 

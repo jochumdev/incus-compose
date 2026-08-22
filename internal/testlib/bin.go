@@ -35,10 +35,7 @@ func ComposeBin(t *testing.T) string {
 
 		binPath = filepath.Join(binDir, "incus-compose")
 
-		args := []string{"build", "-o", binPath}
-		if raceEnabled {
-			args = append(args, "-race")
-		}
+		args := []string{"build", "-o", binPath, "-race"}
 
 		// Without -coverpkg the binary counts package main and nothing else.
 		if os.Getenv(EnvCoverDir) != "" {

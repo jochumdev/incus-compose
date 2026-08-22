@@ -9,19 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/shared"
 )
 
 // fixturePath returns the path to a test fixture.
 func fixturePath(name string) string {
 	return filepath.Join("..", "test", "fixtures", name)
-}
-
-func skipNo73(t *testing.T, c *client.Client) {
-	if !c.Global().HasExtension(shared.Incus73Extension) {
-		t.Skip("nat tests with static ip require at least incus 7.3 or 7.0.2 LTS")
-	}
 }
 
 // TestLoadBasicProject tests basic project loading.

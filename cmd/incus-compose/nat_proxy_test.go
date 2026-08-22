@@ -9,6 +9,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/internal/testlib"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // TestE2ENatProxy verifies that published ports create NAT proxy devices
@@ -90,8 +91,8 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 
 func TestE2ENATProxyWithPortAndStaticIP(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
+	skipNoExtension(t, shared.Incus73Extension, "nat tests with static ip require at least incus 7.3 or 7.0.2 LTS")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -99,8 +100,6 @@ func TestE2ENATProxyWithPortAndStaticIP(t *testing.T) {
 	c := projectClient(ctx, t, pn, client.EnsureProjectWithCreate())
 	conn, err := c.Connection()
 	require.NoError(t, err)
-
-	skipNo73(t, c)
 
 	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:

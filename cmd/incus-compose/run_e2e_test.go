@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/internal/testlib"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // exitCode returns the status a failed RunCompose exited with.
@@ -31,8 +32,8 @@ func exitCode(t *testing.T, err error) int {
 // status for an instance that stopped, and exec reports an exact one.
 func TestE2ERunExitCode(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
+	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -59,8 +60,8 @@ func TestE2ERunExitCode(t *testing.T) {
 // declares it.
 func TestE2ERunOneOffLifecycle(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
+	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -107,8 +108,8 @@ func TestE2ERunOneOffLifecycle(t *testing.T) {
 // that --no-deps leaves them alone.
 func TestE2ERunDependencies(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
+	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -132,8 +133,8 @@ func TestE2ERunDependencies(t *testing.T) {
 // without any service declaring it.
 func TestE2EUpRunDown(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
+	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()

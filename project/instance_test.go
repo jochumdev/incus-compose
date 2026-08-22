@@ -14,6 +14,19 @@ import (
 	"github.com/lxc/incus-compose/shared"
 )
 
+func skipNoExtension(t *testing.T, extension, message string) {
+	t.Helper()
+
+	gc, err := client.NewTestClient(t.Context())
+	require.NoError(t, err)
+	c, err := gc.EnsureProject("default")
+	require.NoError(t, err)
+
+	if !c.Global().HasExtension(shared.Incus73Extension) {
+		t.Skip(message)
+	}
+}
+
 func TestFormatMemoryLimit(t *testing.T) {
 	t.Parallel()
 
@@ -863,7 +876,7 @@ func TestInstanceNetworkDevices(t *testing.T) {
 
 	t.Run("with static ip", func(t *testing.T) {
 		t.Parallel()
-		skipNo73(t, c)
+		skipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
 
 		p := &types.Project{Networks: types.Networks{"frontend": {}}}
 		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
@@ -927,7 +940,7 @@ func TestInstanceNetworkDevices(t *testing.T) {
 
 	t.Run("gateway false allows a static ip on an address-less network", func(t *testing.T) {
 		t.Parallel()
-		skipNo73(t, c)
+		skipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
 
 		p := &types.Project{Networks: types.Networks{
 			"frontend": {},
@@ -966,7 +979,7 @@ func TestInstanceNetworkDevices(t *testing.T) {
 
 	t.Run("a non-internal x-incus-compose key does not force gateway=none", func(t *testing.T) {
 		t.Parallel()
-		skipNo73(t, c)
+		skipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
 
 		p := &types.Project{Networks: types.Networks{
 			"frontend": {Extensions: types.Extensions{"x-incus": map[string]any{
@@ -988,7 +1001,7 @@ func TestInstanceNetworkDevices(t *testing.T) {
 
 	t.Run("internal true still forces gateway=none", func(t *testing.T) {
 		t.Parallel()
-		skipNo73(t, c)
+		skipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
 
 		p := &types.Project{Networks: types.Networks{
 			"frontend": {Extensions: types.Extensions{"x-incus": map[string]any{
@@ -1083,7 +1096,7 @@ func TestInstanceNetworkDevices(t *testing.T) {
 
 	t.Run("static ip on an address-less network is allowed with an explicit nic gateway", func(t *testing.T) {
 		t.Parallel()
-		skipNo73(t, c)
+		skipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
 
 		p := &types.Project{Networks: types.Networks{
 			"frontend": {},
@@ -1145,7 +1158,7 @@ func TestInstanceProxyDevices(t *testing.T) {
 
 	t.Run("published port with nat and static IP", func(t *testing.T) {
 		t.Parallel()
-		skipNo73(t, c)
+		skipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
 
 		service := types.ServiceConfig{Name: "web", Ports: []types.ServicePortConfig{
 			{

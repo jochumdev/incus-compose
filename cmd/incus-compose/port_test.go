@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -156,20 +155,11 @@ func TestE2EPort(t *testing.T) {
 // service publishes nothing, which is the case port-forward exists for.
 func TestE2EPortForward(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
+	skipNoExtension(t, shared.Incus73Extension, "port-forward tests require at least incus 7.3 or 7.0.2 LTS")
 
 	ctx := t.Context()
 	pn := t.Name()
-
-	gc, err := client.NewTestClient(t.Context())
-	require.NoError(t, err)
-	c, err := gc.EnsureProject("default")
-	require.NoError(t, err)
-
-	if !c.Global().HasExtension(shared.Incus73Extension) {
-		t.Skip("port-forward tests require at least incus 7.3 or 7.0.2 LTS")
-	}
 
 	dir := testlib.WriteTempFiles(t, map[string]string{
 		"compose.yaml": `services:
@@ -181,7 +171,7 @@ func TestE2EPortForward(t *testing.T) {
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
-	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
 	tests := []struct {

@@ -27,6 +27,8 @@ func SkipLocal(t *testing.T) {
 func SkipE2E(t *testing.T) {
 	t.Helper()
 
+	SkipLocal(t)
+
 	if os.Getenv(EnvE2E) == "" {
 		t.Skip("long end-to-end test: set " + EnvE2E + "=1, or run `just test-e2e`")
 	}
