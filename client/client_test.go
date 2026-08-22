@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -10,11 +11,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lxc/incus-compose/internal/testlib"
+	"github.com/lxc/incus-compose/shared"
 )
 
+// SkipLocal skips a test that needs a real Incus server.
+func skipLocal(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("INCUS_COMPOSE_TEST_LOCAL") != "" {
+		t.Skip("needs a real Incus: INCUS_COMPOSE_TEST_LOCAL is set, run `just test`")
+	}
+}
+
 func TestMain(m *testing.M) {
-	os.Exit(testlib.Main(m))
+	logger := slog.New(slog.NewTextHandler(
+		os.Stderr,
+		&slog.HandlerOptions{Level: shared.LevelTrace}),
+	)
+
+	slog.SetDefault(logger)
+
+	os.Exit(m.Run())
 }
 
 // testContext returns a context outliving the test, unlike t.Context() which is
@@ -181,7 +198,7 @@ func TestClientResources(t *testing.T) {
 
 func TestClientConnection_IsConnected(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -190,7 +207,7 @@ func TestClientConnection_IsConnected(t *testing.T) {
 
 func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := testContext(t)
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -216,7 +233,7 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 
 func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -232,7 +249,7 @@ func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 
 func TestClientProject_EnsureWithCreate(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := "client-ensure-" + strings.ToLower(RandString(8))
@@ -245,7 +262,7 @@ func TestClientProject_EnsureWithCreate(t *testing.T) {
 
 func TestClientProject_EnsureWithoutCreate_Fails(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -257,7 +274,7 @@ func TestClientProject_EnsureWithoutCreate_Fails(t *testing.T) {
 
 func TestClientProject_NameIsPreserved(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := "client-name-" + strings.ToLower(RandString(8))
@@ -270,7 +287,7 @@ func TestClientProject_NameIsPreserved(t *testing.T) {
 
 func TestClientProject_NameIsSanitized(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 
@@ -285,7 +302,7 @@ func TestClientProject_NameIsSanitized(t *testing.T) {
 
 func TestClientProject_EnsureIdempotent(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 	name := "client-idem-" + strings.ToLower(RandString(8))
@@ -300,7 +317,7 @@ func TestClientProject_EnsureIdempotent(t *testing.T) {
 
 func TestClientProject_DeleteSucceeds(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
@@ -314,7 +331,7 @@ func TestClientProject_DeleteSucceeds(t *testing.T) {
 
 func TestClientProject_HelperCleanupDeletesProject(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	gc, err := NewTestClient(t.Context())
 	require.NoError(t, err)
@@ -332,7 +349,7 @@ func TestClientProject_HelperCleanupDeletesProject(t *testing.T) {
 
 func TestClientProject_DeleteNonExistent_NoError(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)

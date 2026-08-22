@@ -1,9 +1,7 @@
 name: Test E2E
 
 on:
-  push:
-    branches:
-      - main
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -92,7 +90,7 @@ jobs:
             --junitfile "$REPORTS_DIR/junit.xml" \
             --jsonfile="$REPORTS_DIR/test.json" \
             --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num=10 --jsonfile=$REPORTS_DIR/test.json'" \
-            -- -race -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+            -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
                -cover -covermode=atomic -coverpkg ./... -v \
                -args -test.gocoverdir="$INCUS_COMPOSE_TEST_COVERDIR" 2>&1
 
@@ -196,7 +194,7 @@ jobs:
           gotestsum \
             --packages="./examples/..." \
             --junitfile "$REPORTS_DIR/junit.xml" \
-            -- -race -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+            -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
                ${{ matrix.args }} 2>&1
 
       - name: Publish test results
@@ -207,57 +205,3 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/junit.xml
           reporter: java-junit
           fail-on-error: false
-
-  # goreleaser:
-  #   needs: test-example
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: write
-  #     id-token: write
-  #     packages: write
-  #     attestations: write
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v7
-  #       with:
-  #         fetch-depth: 0
-
-  #     - uses: docker/setup-buildx-action@v4.2.0
-  #     - uses: sigstore/cosign-installer@v4.1.2
-
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v6
-  #       with:
-  #         go-version-file: go.mod
-  #         cache: false
-
-  #     - name: ghcr-login
-  #       if: startsWith(github.ref, 'refs/tags/v')
-  #       uses: docker/login-action@v4.3.0
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.repository_owner }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
-
-  #     - name: Run GoReleaser
-  #       uses: goreleaser/goreleaser-action@v7
-  #       if: startsWith(github.ref, 'refs/tags/')
-  #       with:
-  #         # either 'goreleaser' (default) or 'goreleaser-pro'
-  #         distribution: goreleaser
-  #         # 'latest', 'nightly', or a semver
-  #         version: "~> v2"
-  #         args: release --clean
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  #     # After GoReleaser runs, attest all the files in ./dist/checksums.txt:
-  #     - name: Attest Build Provenance for Archives
-  #       uses: actions/attest-build-provenance@v4
-  #       with:
-  #         subject-checksums: ./dist/checksums.txt
-  #     # After GoReleaser runs, attest all the images in ./dist/digests.txt:
-  #     - name: Attest Build Provenance for Docker Images
-  #       uses: actions/attest-build-provenance@v4
-  #       with:
-  #         subject-checksums: ./dist/digests.txt

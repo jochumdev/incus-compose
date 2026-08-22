@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // ----------------------------------------------------------------------------
@@ -60,7 +58,7 @@ func TestProfileIncusName_Sanitized(t *testing.T) {
 
 func TestProfileEnsure(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -133,7 +131,7 @@ func TestProfileEnsure(t *testing.T) {
 
 func TestProfileEnsure_Idempotent(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "profile-idempotent-")
 
@@ -149,7 +147,7 @@ func TestProfileEnsure_Idempotent(t *testing.T) {
 
 func TestProfileEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "profile-retry-")
 
@@ -167,7 +165,7 @@ func TestProfileEnsure_WithoutCreate_ThenWithCreate(t *testing.T) {
 
 func TestProfileEnsure_ExistsOnNewClient(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 	c := newRandomTestClient(t, "profile-persist-")
 
@@ -191,7 +189,7 @@ func TestProfileEnsure_ExistsOnNewClient(t *testing.T) {
 
 func TestProfileDelete(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -232,7 +230,7 @@ func TestProfileDelete(t *testing.T) {
 
 func TestProfileHooks(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	tests := []struct {
@@ -386,7 +384,7 @@ func TestProfileHooks(t *testing.T) {
 }
 
 func TestProfileEnsure_ConcurrentCreate(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	ctx := t.Context()
 
 	// One project, so every worker races for the same profile.

@@ -49,7 +49,6 @@ func hasImage(aliases []string, sub string) bool {
 // verified through the wrapped `incus image list --format=json`.
 func TestE2EPull(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -92,7 +91,6 @@ func TestE2EPull(t *testing.T) {
 // service's image while `pull --with-deps <service>` also follows depends_on.
 func TestE2EPullWithDeps(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -124,7 +122,6 @@ func TestE2EPullWithDeps(t *testing.T) {
 // image that cannot be resolved from any registry.
 func TestE2EPullInvalidImage(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -147,7 +144,6 @@ func TestE2EPullInvalidImage(t *testing.T) {
 // build config; plain pull tries (and fails) to pull them from a registry.
 func TestE2EPullIgnoreBuildable(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()

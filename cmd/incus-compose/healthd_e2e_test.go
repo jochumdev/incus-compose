@@ -55,7 +55,6 @@ func waitHealthy(t *testing.T, c *client.Client, name string) {
 // own, one shared daemon in its own project, and the project marked so the
 // daemon picks it up.
 func TestE2EHealthdGlobalScope(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -98,7 +97,6 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 //
 // Not parallel: it recreates the daemon every other project uses.
 func TestE2EHealthdGlobalComposeNetwork(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -160,7 +158,6 @@ services:
 
 // TestE2EHealthdProjectScope keeps the old topology when asked for it.
 func TestE2EHealthdProjectScope(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -185,7 +182,6 @@ func TestE2EHealthdProjectScope(t *testing.T) {
 // TestE2EHealthdCoexistence is the load-bearing case: a project-scoped daemon
 // and the shared one must both work and neither may watch the other's project.
 func TestE2EHealthdCoexistence(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -247,7 +243,6 @@ func TestE2EHealthdCoexistence(t *testing.T) {
 //
 // Not parallel: it creates and removes the daemon every other project uses.
 func TestE2EHealthdNoComposeFile(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -297,7 +292,6 @@ func TestE2EHealthdNoComposeFile(t *testing.T) {
 //
 // Not parallel: it removes the daemon every other project uses.
 func TestE2EHealthdDownNeedsForce(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -335,7 +329,6 @@ func TestE2EHealthdDownNeedsForce(t *testing.T) {
 // TestE2EHealthdMigratesToGlobal covers the upgrade path: the project sidecar is
 // removed before the project is marked, so the two never overlap.
 func TestE2EHealthdMigratesToGlobal(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -398,7 +391,6 @@ func instanceStatus(t *testing.T, c *client.Client, name string) string {
 // restart policy, whose healthcheck cannot pass while it is frozen. The daemon
 // must leave it alone, and pick it back up once it is resumed.
 func TestE2EPauseSurvivesHealthd(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()

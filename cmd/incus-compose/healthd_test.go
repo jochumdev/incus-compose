@@ -142,7 +142,6 @@ func TestParseHealthdNetwork(t *testing.T) {
 // }
 
 func TestNoHealthdSkipsHealthdInstance(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 	t.Parallel()
 
@@ -172,7 +171,6 @@ func TestNoHealthdSkipsHealthdInstance(t *testing.T) {
 }
 
 func TestNoHealthdWhenNotNeeded(t *testing.T) {
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 	t.Parallel()
 

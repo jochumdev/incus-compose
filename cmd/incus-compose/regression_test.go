@@ -43,7 +43,6 @@ func TestNoDanglingNetworksAfterDown(t *testing.T) {
 // TestE2EStartStopIdempotent checks that running start/stop twice (idempotent) works without errors.
 func TestE2EStartStopIdempotent(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	compose := testlib.Fixture(t, "simple", "compose.yaml")
@@ -84,7 +83,6 @@ func TestE2EStartStopIdempotent(t *testing.T) {
 
 func TestE2ENoImageCache(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	compose := testlib.Fixture(t, "simple", "compose.yaml")

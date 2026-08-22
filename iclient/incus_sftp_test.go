@@ -7,14 +7,12 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // TestIncusVolumeSFTP writes a file into a custom volume and reads it back,
 // which is the path volume seeding and the image lock both take.
 func TestIncusVolumeSFTP(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -72,7 +70,7 @@ func TestIncusVolumeSFTP(t *testing.T) {
 // TestIncusInstanceSFTPNotFound pins the refused-upgrade path: the server's
 // own error comes back, mapped like every other call's.
 func TestIncusInstanceSFTPNotFound(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	conn := testConnection(t)

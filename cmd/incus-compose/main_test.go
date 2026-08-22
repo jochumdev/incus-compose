@@ -14,7 +14,6 @@ import (
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
-	"github.com/lxc/incus-compose/shared"
 )
 
 var snapshotter = cupaloy.New(cupaloy.SnapshotSubdirectory(filepath.Join("..", "..", "test", "snapshots", "e2e")))
@@ -22,19 +21,6 @@ var snapshotter = cupaloy.New(cupaloy.SnapshotSubdirectory(filepath.Join("..", "
 func skipNotSameHost(t *testing.T, gc *client.GlobalClient) {
 	if gc.SameHost() != nil {
 		t.Skip("not on the same host")
-	}
-}
-
-func skipNoExtension(t *testing.T, extension, message string) {
-	t.Helper()
-
-	gc, err := client.NewTestClient(t.Context())
-	require.NoError(t, err)
-	c, err := gc.EnsureProject("default")
-	require.NoError(t, err)
-
-	if !c.Global().HasExtension(shared.Incus73Extension) {
-		t.Skip(message)
 	}
 }
 

@@ -5,8 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func TestIDFields(t *testing.T) {
@@ -48,7 +46,7 @@ www-data:x:33:nginx,www
 // /etc/group know, and leaves numbers alone without reading it at all.
 func TestImageResolveUser(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
+	skipLocal(t)
 
 	ctx := t.Context()
 	c := newRandomTestClient(t, "image-user-")

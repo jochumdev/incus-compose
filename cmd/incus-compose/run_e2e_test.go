@@ -33,7 +33,7 @@ func exitCode(t *testing.T, err error) int {
 func TestE2ERunExitCode(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
-	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
+	testlib.SkipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -61,7 +61,7 @@ func TestE2ERunExitCode(t *testing.T) {
 func TestE2ERunOneOffLifecycle(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
-	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
+	testlib.SkipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -109,7 +109,7 @@ func TestE2ERunOneOffLifecycle(t *testing.T) {
 func TestE2ERunDependencies(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
-	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
+	testlib.SkipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()
@@ -134,7 +134,7 @@ func TestE2ERunDependencies(t *testing.T) {
 func TestE2EUpRunDown(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
-	skipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
+	testlib.SkipNoExtension(t, shared.Incus73Extension, "run tests work best with incus 7.3 or higher")
 
 	ctx := t.Context()
 	pn := t.Name()

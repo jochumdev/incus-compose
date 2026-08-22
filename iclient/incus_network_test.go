@@ -6,8 +6,6 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 func TestIncusNetworkRequests(t *testing.T) {
@@ -106,7 +104,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 }
 
 func TestIncusNetworkAgainstRealIncus(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()

@@ -3,6 +3,11 @@ package testlib
 import (
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // The environment a stage runs in. `just test-local` and `just test-e2e` set one
@@ -41,5 +46,18 @@ func SkipExamples(t *testing.T) {
 
 	if os.Getenv(EnvExamples) == "" {
 		t.Skip("examples test: set " + EnvExamples + "=1, or run `just test-examples`")
+	}
+}
+
+func SkipNoExtension(t *testing.T, extension, message string) {
+	t.Helper()
+
+	gc, err := client.NewTestClient(t.Context())
+	require.NoError(t, err)
+	c, err := gc.EnsureProject("default")
+	require.NoError(t, err)
+
+	if !c.Global().HasExtension(shared.Incus73Extension) {
+		t.Skip(message)
 	}
 }

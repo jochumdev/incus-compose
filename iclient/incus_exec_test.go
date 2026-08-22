@@ -8,8 +8,6 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // TestIncusExecInstanceRefusesInteractive: a PTY needs control and resize
@@ -97,7 +95,7 @@ func testInstance(t *testing.T, conn *Connection, name string, config map[string
 // TestIncusExecInstanceAgainstRealIncus runs a command and reads its output
 // and exit code, which is the whole of what healthd needs.
 func TestIncusExecInstanceAgainstRealIncus(t *testing.T) {
-	testlib.SkipE2E(t)
+	skipE2E(t)
 	t.Parallel()
 
 	ctx := t.Context()

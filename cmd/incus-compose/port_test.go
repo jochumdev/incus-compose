@@ -81,7 +81,6 @@ func TestProxyPorts(t *testing.T) {
 // 8080/8081 on the host and TestE2ENATProxy runs in parallel with this one.
 func TestE2EPort(t *testing.T) {
 	t.Parallel()
-	testlib.SkipLocal(t)
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -156,7 +155,7 @@ func TestE2EPort(t *testing.T) {
 func TestE2EPortForward(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
-	skipNoExtension(t, shared.Incus73Extension, "port-forward tests require at least incus 7.3 or 7.0.2 LTS")
+	testlib.SkipNoExtension(t, shared.Incus73Extension, "port-forward tests require at least incus 7.3 or 7.0.2 LTS")
 
 	ctx := t.Context()
 	pn := t.Name()

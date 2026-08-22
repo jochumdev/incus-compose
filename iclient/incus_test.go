@@ -14,8 +14,6 @@ import (
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // testConnection dials the remote the test environment points at.
@@ -206,7 +204,7 @@ func TestIncusSocketPathFromDir(t *testing.T) {
 }
 
 func TestIncusGetInstanceNames(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	conn := testConnection(t)
@@ -221,7 +219,7 @@ func TestIncusGetInstanceNames(t *testing.T) {
 }
 
 func TestIncusGetInstancesRecursion(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -244,7 +242,7 @@ func TestIncusGetInstancesRecursion(t *testing.T) {
 // TestIncusGetInstanceNotFound pins the error mapping: an API error envelope
 // has to come back as a 404 StatusError, not as a decode failure or a nil.
 func TestIncusGetInstanceNotFound(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -262,7 +260,7 @@ func TestIncusGetInstanceNotFound(t *testing.T) {
 // TestIncusGetInstanceRoundTrip only runs where the remote already has an
 // instance; it checks the single-instance calls agree with the list ones.
 func TestIncusGetInstanceRoundTrip(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	ctx := t.Context()
@@ -294,7 +292,7 @@ func TestIncusGetInstanceRoundTrip(t *testing.T) {
 // TestIncusUnknownProjectIsEmpty pins what the server actually does: an
 // unknown project is an empty collection, not a 404.
 func TestIncusUnknownProjectIsEmpty(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	config, err := ReadConfig("")

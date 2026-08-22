@@ -11,8 +11,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lxc/incus-compose/internal/testlib"
 )
 
 // eventServer serves /1.0/events over a websocket, writing each event it is
@@ -352,7 +350,7 @@ func TestIncusListenEventsScopedEndsOnItsOwnContext(t *testing.T) {
 }
 
 func TestIncusListenEventsAgainstRealIncus(t *testing.T) {
-	testlib.SkipLocal(t)
+	skipLocal(t)
 	t.Parallel()
 
 	conn := testConnection(t)
