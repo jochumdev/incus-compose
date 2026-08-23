@@ -212,10 +212,6 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
 
-	gInfo, err := gc.incus.GetConnectionInfo(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "default", gInfo.Project)
-
 	name := "client-gcdef-" + strings.ToLower(RandString(8))
 	deleteProjectOnCleanup(t, gc, name)
 
@@ -226,9 +222,10 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	gConn, err := project.GlobalConnection()
 	require.NoError(t, err)
 
-	gInfo, err = gConn.GetConnectionInfo(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "default", gInfo.Project)
+	// One connection serves every project; what differs is the project each
+	// call names, and a project client never rescopes the global one.
+	require.Same(t, gc.incus, gConn)
+	require.NotEmpty(t, project.IncusProject())
 }
 
 func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
@@ -242,9 +239,7 @@ func TestClientProject_ImageCacheIsInCacheProfile(t *testing.T) {
 		t.Skipf("Skipping INCUS_COMPOSE_IMAGE_CACHE is empty")
 	}
 
-	gInfo, err := gc.imageCache.incus.GetConnectionInfo(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "incus-compose-tests-cache", gInfo.Project)
+	require.Equal(t, "incus-compose-tests-cache", gc.imageCache.IncusProject())
 }
 
 func TestClientProject_EnsureWithCreate(t *testing.T) {

@@ -12,10 +12,10 @@ import (
 const incusNetworksPath = "/networks"
 
 // GetNetwork returns one network and its ETag.
-func (c *Connection) GetNetwork(ctx context.Context, name string) (*api.Network, string, error) {
+func (c *Connection) GetNetwork(ctx context.Context, project string, name string) (*api.Network, string, error) {
 	network := api.Network{}
 
-	etag, err := c.getStruct(ctx, incusNetworksPath+"/"+url.PathEscape(name), nil, &network)
+	etag, err := c.getStruct(ctx, project, incusNetworksPath+"/"+url.PathEscape(name), nil, &network)
 	if err != nil {
 		return nil, "", err
 	}
@@ -24,10 +24,10 @@ func (c *Connection) GetNetwork(ctx context.Context, name string) (*api.Network,
 }
 
 // GetNetworkNames returns the names of every network.
-func (c *Connection) GetNetworkNames(ctx context.Context) ([]string, error) {
+func (c *Connection) GetNetworkNames(ctx context.Context, project string) ([]string, error) {
 	uris := []string{}
 
-	_, err := c.getStruct(ctx, incusNetworksPath, nil, &uris)
+	_, err := c.getStruct(ctx, project, incusNetworksPath, nil, &uris)
 	if err != nil {
 		return nil, err
 	}
@@ -36,13 +36,13 @@ func (c *Connection) GetNetworkNames(ctx context.Context) ([]string, error) {
 }
 
 // GetNetworks returns every network, each one whole.
-func (c *Connection) GetNetworks(ctx context.Context) ([]api.Network, error) {
+func (c *Connection) GetNetworks(ctx context.Context, project string) ([]api.Network, error) {
 	networks := []api.Network{}
 
 	query := url.Values{}
 	query.Set("recursion", "1")
 
-	_, err := c.getStruct(ctx, incusNetworksPath, query, &networks)
+	_, err := c.getStruct(ctx, project, incusNetworksPath, query, &networks)
 	if err != nil {
 		return nil, err
 	}
@@ -51,22 +51,22 @@ func (c *Connection) GetNetworks(ctx context.Context) ([]api.Network, error) {
 }
 
 // CreateNetwork adds a managed network.
-func (c *Connection) CreateNetwork(ctx context.Context, network api.NetworksPost) error {
-	_, _, err := c.do(ctx, http.MethodPost, incusNetworksPath, nil, network, "")
+func (c *Connection) CreateNetwork(ctx context.Context, project string, network api.NetworksPost) error {
+	_, _, err := c.do(ctx, project, http.MethodPost, incusNetworksPath, nil, network, "")
 
 	return err
 }
 
 // UpdateNetwork replaces a network's configuration.
-func (c *Connection) UpdateNetwork(ctx context.Context, name string, network api.NetworkPut, etag string) error {
-	_, _, err := c.do(ctx, http.MethodPut, incusNetworksPath+"/"+url.PathEscape(name), nil, network, etag)
+func (c *Connection) UpdateNetwork(ctx context.Context, project string, name string, network api.NetworkPut, etag string) error {
+	_, _, err := c.do(ctx, project, http.MethodPut, incusNetworksPath+"/"+url.PathEscape(name), nil, network, etag)
 
 	return err
 }
 
 // DeleteNetwork removes a managed network.
-func (c *Connection) DeleteNetwork(ctx context.Context, name string) error {
-	_, _, err := c.do(ctx, http.MethodDelete, incusNetworksPath+"/"+url.PathEscape(name), nil, nil, "")
+func (c *Connection) DeleteNetwork(ctx context.Context, project string, name string) error {
+	_, _, err := c.do(ctx, project, http.MethodDelete, incusNetworksPath+"/"+url.PathEscape(name), nil, nil, "")
 
 	return err
 }

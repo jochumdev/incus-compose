@@ -101,11 +101,12 @@ func testContainer(t *testing.T, c *client.Client, name string, keys map[string]
 	return inst.IncusName()
 }
 
-// testConn returns the project-scoped Incus connection the actions take.
-func testConn(t *testing.T, c *client.Client) *iclient.Connection {
+// testConn returns the Incus connection the actions take. The project each
+// call names comes from the client beside it.
+func testConn(t *testing.T, _ *client.Client) *iclient.Connection {
 	t.Helper()
 
-	return dialTestRemote(t).WithProject(c.Project())
+	return dialTestRemote(t)
 }
 
 // dialTestRemote dials the remote the test environment points at.

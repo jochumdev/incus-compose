@@ -21,11 +21,11 @@ func TestIncusConsoleInstanceRefusesWithoutOutput(t *testing.T) {
 
 	conn, seen := recordingServer(t, `{}`)
 
-	_, err := conn.ConsoleInstance(t.Context(), "web-1", api.InstanceConsolePost{}, nil)
+	_, err := conn.ConsoleInstance(t.Context(), "myproject", "web-1", api.InstanceConsolePost{}, nil)
 	require.Error(t, err)
 	require.Empty(t, seen.all(), "it must refuse before asking the server")
 
-	_, err = conn.ConsoleInstance(t.Context(), "web-1", api.InstanceConsolePost{}, &InstanceConsoleArgs{})
+	_, err = conn.ConsoleInstance(t.Context(), "myproject", "web-1", api.InstanceConsolePost{}, &InstanceConsoleArgs{})
 	require.Error(t, err)
 	require.Empty(t, seen.all())
 }
@@ -43,9 +43,8 @@ func rawServer(t *testing.T, status int, body string) *Connection {
 	t.Cleanup(server.Close)
 
 	conn, err := NewConnection(&ConfigRemoteInfo{
-		Name:    "raw",
-		Addrs:   []string{server.URL},
-		Project: "myproject",
+		Name:  "raw",
+		Addrs: []string{server.URL},
 	})
 	require.NoError(t, err)
 
@@ -59,7 +58,7 @@ func TestIncusGetInstanceConsoleLogRaw(t *testing.T) {
 
 	conn := rawServer(t, http.StatusOK, "line one\nline two\n")
 
-	reader, err := conn.GetInstanceConsoleLog(t.Context(), "web-1")
+	reader, err := conn.GetInstanceConsoleLog(t.Context(), "myproject", "web-1")
 	require.NoError(t, err)
 
 	defer func() { _ = reader.Close() }()
@@ -77,7 +76,7 @@ func TestIncusGetInstanceConsoleLogError(t *testing.T) {
 	conn := rawServer(t, http.StatusNotFound,
 		`{"type":"error","error_code":404,"error":"Instance not found"}`)
 
-	_, err := conn.GetInstanceConsoleLog(t.Context(), "nope")
+	_, err := conn.GetInstanceConsoleLog(t.Context(), "myproject", "nope")
 	require.Error(t, err)
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404 StatusError, got %v", err)
 	require.Contains(t, err.Error(), "Instance not found")
@@ -88,7 +87,7 @@ func TestIncusGetInstanceConsoleLogURL(t *testing.T) {
 
 	conn, seen := recordingServer(t, `{}`)
 
-	reader, err := conn.GetInstanceConsoleLog(t.Context(), "web-1")
+	reader, err := conn.GetInstanceConsoleLog(t.Context(), "myproject", "web-1")
 	require.NoError(t, err)
 	_ = reader.Close()
 
@@ -105,19 +104,18 @@ func TestIncusConsoleInstanceAgainstRealIncus(t *testing.T) {
 	conn := testConnection(t)
 
 	project := testProject(t, conn, "iclient-console")
-	projectConn := conn.WithProject(project)
 
 	const name = "console-1"
 
 	// Something that keeps writing, so the assertion below cannot pass on an
 	// instance that produced nothing.
-	testInstance(t, projectConn, name, map[string]string{
+	testInstance(t, conn, project, name, map[string]string{
 		"oci.entrypoint": "sh -c 'while true; do echo iclient-console-marker; sleep 1; done'",
 	})
 
 	// The buffer holds whatever was written before the attach, so this is the
 	// same stream read two ways.
-	reader, err := projectConn.GetInstanceConsoleLog(ctx, name)
+	reader, err := conn.GetInstanceConsoleLog(ctx, project, name)
 	require.NoError(t, err)
 
 	_, err = io.ReadAll(reader)
@@ -129,7 +127,7 @@ func TestIncusConsoleInstanceAgainstRealIncus(t *testing.T) {
 	attachCtx, detach := context.WithTimeout(ctx, 30*time.Second)
 	defer detach()
 
-	updates, err := projectConn.ConsoleInstance(attachCtx, name, api.InstanceConsolePost{Force: true},
+	updates, err := conn.ConsoleInstance(attachCtx, project, name, api.InstanceConsolePost{Force: true},
 		&InstanceConsoleArgs{Output: output})
 	require.NoError(t, err)
 

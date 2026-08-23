@@ -66,7 +66,7 @@ func TestImageResolveUser(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, &Owner{UID: 1000, GID: 1001}, owner)
 
-	names, err := conn.GetInstanceNames(ctx, nil)
+	names, err := conn.GetInstanceNames(ctx, c.incusProject, nil)
 	require.NoError(t, err)
 	require.Empty(t, names, "a numeric user must not read the image")
 
@@ -90,14 +90,14 @@ func TestImageResolveUser(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoSuchUser)
 
 	// One instance served every lookup above.
-	names, err = conn.GetInstanceNames(ctx, nil)
+	names, err = conn.GetInstanceNames(ctx, c.incusProject, nil)
 	require.NoError(t, err)
 	require.Len(t, names, 1)
 
 	require.NoError(t, img.Done())
 	require.NoError(t, img.Done(), "Done is called twice on the way out of up")
 
-	names, err = conn.GetInstanceNames(ctx, nil)
+	names, err = conn.GetInstanceNames(ctx, c.incusProject, nil)
 	require.NoError(t, err)
 	assert.Empty(t, names)
 }

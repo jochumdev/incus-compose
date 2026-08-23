@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bradleyjkemp/cupaloy/v2"
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
@@ -390,7 +391,7 @@ func dnsServiceIPs(t *testing.T, c *client.Client, networks []string, service st
 
 	var ips []string
 	for _, name := range networks {
-		net, _, err := conn.GetNetwork(t.Context(), name)
+		net, _, err := conn.GetNetwork(t.Context(), incusApi.ProjectDefaultName, name)
 		require.NoError(t, err, "for network %q", name)
 		netIps, _, _ := client.DNSmasqParse(net.Config["raw.dnsmasq"])
 		ips = append(ips, netIps[service]...)
@@ -478,7 +479,7 @@ func TestDNSCnameAliasAcrossProjects(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	net, _, err := conn.GetNetwork(ctx, networkName)
+	net, _, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, networkName)
 	require.NoError(t, err)
 
 	snapshotter.SnapshotT(t, testlib.Strip(testlib.StripIPv6Lines(net.Config["raw.dnsmasq"])))

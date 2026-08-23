@@ -165,7 +165,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 	require.True(t, ok)
 
 	// Stand in for ic-healthd reporting, and for a key nobody declared.
-	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(), map[string]string{
+	require.NoError(t, conn.PatchInstanceConfig(ctx, c.incusProject, inst.IncusName(), map[string]string{
 		HealthStatusKey: HealthStatusHealthy,
 		"user.theirs":   "set-by-hand",
 	}))
@@ -176,7 +176,7 @@ func TestInstanceEnsureAddsMissingConfigOnly(t *testing.T) {
 
 	require.NoError(t, RunAction(ctx, inst, ActionEnsure))
 
-	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
+	got, _, err := conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "true", got.Config["user.added.later"], "a declared key the instance lacks must be added")
@@ -221,18 +221,18 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	before, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
+	before, _, err := conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, before.Description, "fixture needs a description to detect wiping")
 	require.NotEmpty(t, before.Devices, "fixture needs devices to detect wiping")
 
 	// Stand in for ic-healthd writing its own key.
-	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(),
+	require.NoError(t, conn.PatchInstanceConfig(ctx, c.incusProject, inst.IncusName(),
 		map[string]string{HealthStatusKey: HealthStatusHealthy}))
 
 	require.NoError(t, inst.SetHealthCheckingStopped(ctx, false))
 
-	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
+	got, _, err := conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "false", got.Config[HealthStoppedKey], "the key we asked for must be written")
@@ -280,7 +280,7 @@ func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {
 	go func() {
 		time.Sleep(2 * time.Second)
 
-		_ = conn.PatchInstanceConfig(ctx, inst.IncusName(),
+		_ = conn.PatchInstanceConfig(ctx, c.incusProject, inst.IncusName(),
 			map[string]string{HealthStatusKey: HealthStatusHealthy})
 	}()
 
@@ -335,7 +335,7 @@ func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
 
 	conn, err := c.Connection()
 	require.NoError(t, err)
-	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(),
+	require.NoError(t, conn.PatchInstanceConfig(ctx, c.incusProject, inst.IncusName(),
 		map[string]string{HealthStatusKey: HealthStatusHealthy}))
 
 	local := &InstanceState{}
@@ -373,18 +373,18 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
+	got, _, err := conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Empty(t, got.Config[HealthStatusKey],
 		"with a daemon to report, the instance is created without a status of its own")
 
 	// Stand in for ic-healthd having reported on it.
-	require.NoError(t, conn.PatchInstanceConfig(ctx, inst.IncusName(),
+	require.NoError(t, conn.PatchInstanceConfig(ctx, c.incusProject, inst.IncusName(),
 		map[string]string{HealthStatusKey: HealthStatusHealthy}))
 
 	require.NoError(t, inst.SetHealthCheckingStopped(ctx, true))
 
-	got, _, err = conn.GetInstance(ctx, inst.IncusName(), nil)
+	got, _, err = conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Equal(t, "true", got.Config[HealthStoppedKey], "the marker is what a stop writes")
 	require.Equal(t, HealthStatusHealthy, got.Config[HealthStatusKey],
@@ -392,7 +392,7 @@ func TestInstanceStoppedLeavesTheStatusAlone(t *testing.T) {
 
 	require.NoError(t, inst.SetHealthCheckingStopped(ctx, false))
 
-	got, _, err = conn.GetInstance(ctx, inst.IncusName(), nil)
+	got, _, err = conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Equal(t, "false", got.Config[HealthStoppedKey])
 	require.Equal(t, HealthStatusHealthy, got.Config[HealthStatusKey])
@@ -426,7 +426,7 @@ func TestInstanceWithoutHealthdReportsUnknown(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	got, _, err := conn.GetInstance(ctx, inst.IncusName(), nil)
+	got, _, err := conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
 	require.NoError(t, err)
 	require.Equal(t, shared.HealthStatusUnknown, got.Config[HealthStatusKey])
 	require.Empty(t, got.Config[HealthStoppedKey], "there is no daemon to hold back")
@@ -500,7 +500,7 @@ func TestInstanceFileUnderAVolume(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	ic, err := conn.GetInstanceFileSFTP(ctx, inst.IncusName())
+	ic, err := conn.GetInstanceFileSFTP(ctx, c.incusProject, inst.IncusName())
 	require.NoError(t, err)
 
 	defer func() { _ = ic.Close() }()

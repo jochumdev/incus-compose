@@ -64,7 +64,7 @@ func (r *Image) deleteReader(name string) error {
 	// The run may already be canceled, and the instance still has to go.
 	ctx := context.WithoutCancel(r.client.ctx)
 
-	op, err := conn.DeleteInstance(ctx, name)
+	op, err := conn.DeleteInstance(ctx, r.client.incusProject, name)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (r *Image) createReader(ctx context.Context) (string, *sftp.Client, error) 
 
 	name := "ic-seed-" + SanitizeIncusName(RandString(16), MaxIncusNameLen-8)
 
-	op, err := conn.CreateInstance(ctx, incusApi.InstancesPost{
+	op, err := conn.CreateInstance(ctx, r.client.incusProject, incusApi.InstancesPost{
 		Name: name,
 		Type: incusApi.InstanceTypeContainer,
 		Source: incusApi.InstanceSource{
@@ -113,7 +113,7 @@ func (r *Image) createReader(ctx context.Context) (string, *sftp.Client, error) 
 		retry.Delay(2*time.Second),
 		retry.LastErrorOnly(true),
 	).Do(func() (*sftp.Client, error) {
-		return conn.GetInstanceFileSFTP(ctx, name)
+		return conn.GetInstanceFileSFTP(ctx, r.client.incusProject, name)
 	})
 	if err != nil {
 		r.client.WarnError(func() error { return r.deleteReader(name) },

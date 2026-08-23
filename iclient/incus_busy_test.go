@@ -35,7 +35,7 @@ func TestIncusBusyErrorOnASyncResponse(t *testing.T) {
 	conn, err := NewConnection(&ConfigRemoteInfo{Name: "busy", Addrs: []string{server.URL}})
 	require.NoError(t, err)
 
-	_, _, err = conn.GetInstanceState(t.Context(), "web-1")
+	_, _, err = conn.GetInstanceState(t.Context(), "myproject", "web-1")
 
 	require.ErrorIs(t, err, ErrInstanceBusy)
 	require.Contains(t, err.Error(), busyMessage, "the server's own wording must survive")
@@ -101,16 +101,15 @@ func TestIncusWaitInstanceBusyHonoursTheContext(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	conn, err := NewConnection(&ConfigRemoteInfo{
-		Name:    "busy",
-		Addrs:   []string{server.URL},
-		Project: "myproject",
+		Name:  "busy",
+		Addrs: []string{server.URL},
 	})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 
-	err = conn.WaitInstanceBusy(ctx, "web-1")
+	err = conn.WaitInstanceBusy(ctx, "myproject", "web-1")
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -125,7 +124,7 @@ func TestIncusWaitInstanceBusyReturnsWhenNothingHoldsIt(t *testing.T) {
 		"id":"op-1","class":"task","status_code":103,
 		"resources":{"instances":["/1.0/instances/other-1"]}}]}`)
 
-	require.NoError(t, conn.WaitInstanceBusy(t.Context(), "web-1"))
+	require.NoError(t, conn.WaitInstanceBusy(t.Context(), "myproject", "web-1"))
 	require.Len(t, seen.all(), 1, "a free instance costs one listing and no operation wait")
 }
 
@@ -139,21 +138,20 @@ func TestE2EWaitInstanceBusyWaitsOutAnOperation(t *testing.T) {
 	conn := testConnection(t)
 
 	project := testProject(t, conn, "iclient-busy")
-	projectConn := conn.WithProject(project)
 
 	const name = "busy-1"
 
-	testInstance(t, projectConn, name, nil)
+	testInstance(t, conn, project, name, nil)
 
 	// Fired without waiting, so the lock is held while the call below runs.
-	_, err := projectConn.UpdateInstanceState(ctx, name,
+	_, err := conn.UpdateInstanceState(ctx, project, name,
 		api.InstanceStatePut{Action: "stop", Force: true, Timeout: -1}, "")
 	require.NoError(t, err)
 
-	require.NoError(t, projectConn.WaitInstanceBusy(ctx, name))
+	require.NoError(t, conn.WaitInstanceBusy(ctx, project, name))
 
 	// An instance still stopping answers "Invalid PID -1" rather than a status.
-	state, _, err := projectConn.GetInstanceState(ctx, name)
+	state, _, err := conn.GetInstanceState(ctx, project, name)
 	require.NoError(t, err,
 		"WaitInstanceBusy returned while the stop was still running, leaving the instance mid-transition")
 	require.Equal(t, "Stopped", state.Status,

@@ -13,7 +13,7 @@ func (c *Connection) GetServer(ctx context.Context) (*api.Server, string, error)
 	server := api.Server{}
 
 	// The root of the API is /1.0 itself.
-	etag, err := c.getStruct(ctx, "", nil, &server)
+	etag, err := c.getStruct(ctx, "", "", nil, &server)
 	if err != nil {
 		return nil, "", err
 	}
@@ -39,11 +39,6 @@ func (c *Connection) GetConnectionInfo(ctx context.Context) (*ConnectionInfo, er
 		Protocol:    "incus",
 		URL:         c.baseURL,
 		SocketPath:  c.socketPath,
-		Project:     c.project,
-	}
-
-	if info.Project == "" {
-		info.Project = api.ProjectDefaultName
 	}
 
 	server, _, err := c.GetServer(ctx)

@@ -19,7 +19,7 @@ func TestInstanceExecReportsTheExitCode(t *testing.T) {
 
 	c := testProject(t, "healthd-exec-")
 	name := testContainer(t, c, "web", nil, true)
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 
 	tests := []struct {
 		name string
@@ -33,7 +33,7 @@ func TestInstanceExecReportsTheExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			code, _, _, err := instanceExec(t.Context(), conn, name, tt.cmd)
+			code, _, _, err := instanceExec(t.Context(), conn, project, name, tt.cmd)
 
 			require.NoError(t, err, "a command that ran is not an error, whatever it returned")
 			require.Equal(t, tt.want, code)
@@ -50,7 +50,7 @@ func TestInstanceExecCapturesOutput(t *testing.T) {
 	c := testProject(t, "healthd-exec-out-")
 	name := testContainer(t, c, "web", nil, true)
 
-	code, stdout, stderr, err := instanceExec(t.Context(), testConn(t, c), name,
+	code, stdout, stderr, err := instanceExec(t.Context(), testConn(t, c), c.Project(), name,
 		[]string{"/bin/sh", "-c", "echo to-stdout; echo to-stderr >&2; exit 3"})
 
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestInstanceExecHonoursTheContext(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, _, err := instanceExec(ctx, testConn(t, c), name, []string{"/bin/sh", "-c", "sleep 300"})
+		_, _, _, err := instanceExec(ctx, testConn(t, c), c.Project(), name, []string{"/bin/sh", "-c", "sleep 300"})
 		done <- err
 	}()
 
@@ -93,7 +93,7 @@ func TestInstanceCheckActionVerdicts(t *testing.T) {
 
 	c := testProject(t, "healthd-check-")
 	name := testContainer(t, c, "web", nil, true)
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 
 	tests := []struct {
 		name    string
@@ -110,7 +110,7 @@ func TestInstanceCheckActionVerdicts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := instanceCheckAction(t.Context(), conn, name, &instanceConfig{
+			res := instanceCheckAction(t.Context(), conn, project, name, &instanceConfig{
 				test:    tt.test,
 				timeout: 30 * time.Second,
 			})
@@ -137,7 +137,7 @@ func TestInstanceCheckActionNotRunning(t *testing.T) {
 	c := testProject(t, "healthd-check-down-")
 	name := testContainer(t, c, "web", nil, false)
 
-	res := instanceCheckAction(t.Context(), testConn(t, c), name, &instanceConfig{
+	res := instanceCheckAction(t.Context(), testConn(t, c), c.Project(), name, &instanceConfig{
 		test:    []string{"CMD", "/bin/true"},
 		timeout: 30 * time.Second,
 	})
@@ -154,17 +154,17 @@ func TestInstanceRestartActionRestarts(t *testing.T) {
 
 	c := testProject(t, "healthd-restart-")
 	name := testContainer(t, c, "web", nil, true)
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 
-	before, _, err := conn.GetInstanceState(t.Context(), name)
+	before, _, err := conn.GetInstanceState(t.Context(), project, name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Running, before.StatusCode)
 
-	res := instanceRestartAction(t.Context(), conn, name)
+	res := instanceRestartAction(t.Context(), conn, project, name)
 	require.Equal(t, instanceResultRestarted, res.kind)
 	require.NoError(t, res.err)
 
-	after, _, err := conn.GetInstanceState(t.Context(), name)
+	after, _, err := conn.GetInstanceState(t.Context(), project, name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Running, after.StatusCode)
 	require.NotEqual(t, before.StartedAt, after.StartedAt, "the instance must actually have been replaced")
@@ -178,12 +178,12 @@ func TestInstanceRestartActionStartsAStoppedInstance(t *testing.T) {
 
 	c := testProject(t, "healthd-restart-down-")
 	name := testContainer(t, c, "web", nil, false)
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 
-	res := instanceRestartAction(t.Context(), conn, name)
+	res := instanceRestartAction(t.Context(), conn, project, name)
 	require.NoError(t, res.err)
 
-	state, _, err := conn.GetInstanceState(t.Context(), name)
+	state, _, err := conn.GetInstanceState(t.Context(), project, name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Running, state.StatusCode)
 }
@@ -196,13 +196,13 @@ func TestInstanceRestartActionRefusesAnIntentionalStop(t *testing.T) {
 
 	c := testProject(t, "healthd-restart-marked-")
 	name := testContainer(t, c, "web", map[string]string{shared.HealthStoppedKey: "true"}, false)
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 
-	res := instanceRestartAction(t.Context(), conn, name)
+	res := instanceRestartAction(t.Context(), conn, project, name)
 
 	require.ErrorIs(t, res.err, ErrIntentionallyStopped)
 
-	state, _, err := conn.GetInstanceState(t.Context(), name)
+	state, _, err := conn.GetInstanceState(t.Context(), project, name)
 	require.NoError(t, err)
 	require.Equal(t, incusApi.Stopped, state.StatusCode,
 		"a deliberately stopped instance must stay stopped")
@@ -219,11 +219,11 @@ func TestPatchInstanceConfigWritesOnlyItsKeys(t *testing.T) {
 		shared.HealthKeyPrefix + "test": `["CMD","/bin/true"]`,
 		"user.keep.me":                  "untouched",
 	}, false)
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 
-	require.NoError(t, writeInstanceStatus(t.Context(), conn, name, shared.HealthStatusUnhealthy))
+	require.NoError(t, writeInstanceStatus(t.Context(), conn, project, name, shared.HealthStatusUnhealthy))
 
-	inst, _, err := conn.GetInstance(t.Context(), name, nil)
+	inst, _, err := conn.GetInstance(t.Context(), project, name, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, shared.HealthStatusUnhealthy, inst.Config[shared.HealthStatusKey])
@@ -250,7 +250,7 @@ func TestDiscoverInstanceReadsTheLiveKeys(t *testing.T) {
 	}), true)
 
 	results := make(chan instanceResult, 1)
-	discoverOne(t.Context(), testConn(t, c), results, name)
+	discoverOne(t.Context(), testConn(t, c), c.Project(), results, name)
 
 	res := <-results
 	require.NoError(t, res.err)

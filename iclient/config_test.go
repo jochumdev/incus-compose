@@ -97,7 +97,6 @@ remotes:
 	// The last working address is tried first.
 	require.Equal(t, []string{"https://two:8443", "https://one:8443"}, info.Addrs)
 
-	require.Equal(t, "apps", info.Project)
 	require.Equal(t, "CERT", info.ClientCert)
 	require.Equal(t, "KEY", info.ClientKey)
 	require.Equal(t, "SERVER", info.ServerCert)
@@ -148,9 +147,10 @@ remotes: {}
 	require.Empty(t, info.ServerCert)
 }
 
-func TestRemoteInfosDefaultsAndOverride(t *testing.T) {
+func TestRemoteInfosDefault(t *testing.T) {
 	t.Parallel()
 
+	// `project` is no field of ours any more; a config carrying one still parses.
 	path := writeConfig(t, `
 default-remote: srv
 remotes:
@@ -166,13 +166,6 @@ remotes:
 	info, err := c.RemoteInfos("")
 	require.NoError(t, err)
 	require.Equal(t, "srv", info.Name)
-	require.Equal(t, "apps", info.Project)
-
-	c.ProjectOverride = "other"
-
-	info, err = c.RemoteInfos("srv")
-	require.NoError(t, err)
-	require.Equal(t, "other", info.Project)
 }
 
 func TestRemoteInfosUnknown(t *testing.T) {

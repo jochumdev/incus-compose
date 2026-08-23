@@ -20,7 +20,7 @@ func writeVolumeMarker(t *testing.T, c *client.Client, volume string, content st
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.Config().DefaultStoragePool, "custom", volume)
+	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.IncusProject(), c.Config().DefaultStoragePool, "custom", volume)
 	require.NoError(t, err)
 	defer func() { _ = sc.Close() }()
 
@@ -39,7 +39,7 @@ func readVolumeMarker(t *testing.T, c *client.Client, volume string) string {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.Config().DefaultStoragePool, "custom", volume)
+	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.IncusProject(), c.Config().DefaultStoragePool, "custom", volume)
 	require.NoError(t, err)
 	defer func() { _ = sc.Close() }()
 

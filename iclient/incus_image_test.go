@@ -70,9 +70,6 @@ func TestIncusImagePullAndCopy(t *testing.T) {
 	cache := testProject(t, conn, "iclient-cache")
 	target := testProject(t, conn, "iclient-target")
 
-	cacheConn := conn.WithProject(cache)
-	targetConn := conn.WithProject(target)
-
 	// The remote comes from the Incus configuration, so this follows whatever
 	// mirror docker.io is pointed at rather than reaching the registry direct.
 	config, err := ReadConfig("")
@@ -87,7 +84,7 @@ func TestIncusImagePullAndCopy(t *testing.T) {
 	pullCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	updates, err := cacheConn.CreateImage(pullCtx, api.ImagesPost{
+	updates, err := conn.CreateImage(pullCtx, cache, api.ImagesPost{
 		Source: &api.ImagesPostSource{
 			ImageSource: api.ImageSource{
 				Alias:       "library/alpine:latest",
@@ -106,23 +103,23 @@ func TestIncusImagePullAndCopy(t *testing.T) {
 	fingerprint := operationFingerprint(t, pulled)
 	require.NotEmpty(t, fingerprint)
 
-	image, _, err := cacheConn.GetImage(ctx, fingerprint, nil)
+	image, _, err := conn.GetImage(ctx, cache, fingerprint, nil)
 	require.NoError(t, err)
 	require.Equal(t, fingerprint, image.Fingerprint)
 
 	// Hop B: cache project to the target project. CopyImage owns the secret a
 	// private image needs.
-	updates, err = targetConn.CopyImage(ctx, cacheConn, fingerprint, nil)
+	updates, err = conn.CopyImage(ctx, target, conn, cache, fingerprint, nil)
 	require.NoError(t, err)
 
 	waitOperation(t, updates)
 
-	copied, _, err := targetConn.GetImage(ctx, fingerprint, nil)
+	copied, _, err := conn.GetImage(ctx, target, fingerprint, nil)
 	require.NoError(t, err)
 	require.Equal(t, fingerprint, copied.Fingerprint, "the copy keeps the fingerprint")
 
 	// The cache still holds it: a copy is not a move.
-	_, _, err = cacheConn.GetImage(ctx, fingerprint, nil)
+	_, _, err = conn.GetImage(ctx, cache, fingerprint, nil)
 	require.NoError(t, err)
 }
 
@@ -262,7 +259,7 @@ func TestIncusCreateImageRefusesWithoutMetadata(t *testing.T) {
 
 	conn, seen := recordingServer(t, `{}`)
 
-	_, err := conn.CreateImage(t.Context(), api.ImagesPost{}, &ImageCreateArgs{
+	_, err := conn.CreateImage(t.Context(), "myproject", api.ImagesPost{}, &ImageCreateArgs{
 		RootfsFile: strings.NewReader("root"),
 	})
 	require.Error(t, err)
@@ -279,7 +276,6 @@ func TestIncusCreateImageUploadAgainstRealIncus(t *testing.T) {
 	conn := testConnection(t)
 
 	project := testProject(t, conn, "iclient-upload")
-	projectConn := conn.WithProject(project)
 
 	server, _, err := conn.GetServer(ctx)
 	require.NoError(t, err)
@@ -294,7 +290,7 @@ func TestIncusCreateImageUploadAgainstRealIncus(t *testing.T) {
 
 	const alias = "iclient-uploaded"
 
-	updates, err := projectConn.CreateImage(ctx, api.ImagesPost{
+	updates, err := conn.CreateImage(ctx, project, api.ImagesPost{
 		Aliases:  []api.ImageAlias{{Name: alias}},
 		ImagePut: api.ImagePut{Public: true, Properties: map[string]string{"iclient.test": "yes"}},
 	}, &ImageCreateArgs{
@@ -311,11 +307,11 @@ func TestIncusCreateImageUploadAgainstRealIncus(t *testing.T) {
 	require.NotEmpty(t, fingerprint)
 
 	// Only a lookup by alias notices an upload whose headers went missing.
-	resolved, _, err := projectConn.GetImageAlias(ctx, alias, nil)
+	resolved, _, err := conn.GetImageAlias(ctx, project, alias, nil)
 	require.NoError(t, err, "the upload did not carry its aliases")
 	require.Equal(t, fingerprint, resolved.Target)
 
-	image, etag, err := projectConn.GetImage(ctx, fingerprint, nil)
+	image, etag, err := conn.GetImage(ctx, project, fingerprint, nil)
 	require.NoError(t, err)
 	require.Equal(t, "iclient upload test", image.Properties["description"],
 		"the server reads the metadata out of the uploaded tarball")
@@ -324,16 +320,16 @@ func TestIncusCreateImageUploadAgainstRealIncus(t *testing.T) {
 
 	// Proves the image is usable and not merely accepted: a conditional update
 	// needs the ETag the upload's own read handed back.
-	require.NoError(t, projectConn.UpdateImage(ctx, fingerprint, api.ImagePut{
+	require.NoError(t, conn.UpdateImage(ctx, project, fingerprint, api.ImagePut{
 		Properties: image.Properties,
 		Public:     false,
 	}, etag))
 
-	updates, err = projectConn.DeleteImage(ctx, fingerprint)
+	updates, err = conn.DeleteImage(ctx, project, fingerprint)
 	require.NoError(t, err)
 
 	waitOperation(t, updates)
 
-	_, _, err = projectConn.GetImage(ctx, fingerprint, nil)
+	_, _, err = conn.GetImage(ctx, project, fingerprint, nil)
 	require.Error(t, err)
 }

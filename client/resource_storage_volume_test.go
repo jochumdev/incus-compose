@@ -537,13 +537,13 @@ func TestStorageVolumePrefetch(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	names, err := conn.GetInstanceNames(ctx, nil)
+	names, err := conn.GetInstanceNames(ctx, c.incusProject, nil)
 	require.NoError(t, err)
 	assert.Len(t, names, 1, "the instance the image is read through stays up for the run")
 
 	require.NoError(t, c.Done())
 
-	names, err = conn.GetInstanceNames(ctx, nil)
+	names, err = conn.GetInstanceNames(ctx, c.incusProject, nil)
 	require.NoError(t, err)
 	assert.Empty(t, names, "Client.Done must remove the instance the image was read through")
 }

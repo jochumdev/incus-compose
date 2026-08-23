@@ -33,11 +33,10 @@ const (
 	incusExpectContinueTimeout = 30 * time.Second
 )
 
-// Connection talks the Incus REST API to one project of one daemon.
+// Connection talks the Incus REST API to one daemon.
 type Connection struct {
 	http      *http.Client
 	baseURL   string
-	project   string
 	userAgent string
 
 	// Reported by GetConnectionInfo; socketPath is empty over TLS.
@@ -59,7 +58,6 @@ func NewConnection(info *ConfigRemoteInfo) (*Connection, error) {
 	}
 
 	c := &Connection{
-		project:      info.Project,
 		userAgent:    info.UserAgent,
 		serverCert:   info.ServerCert,
 		events:       &incusEvents{},
@@ -127,33 +125,23 @@ func incusTransport() *http.Transport {
 	}
 }
 
-// WithProject returns a copy scoped to another project, sharing the transport
-// and therefore its connection pool and TLS session cache.
+// WithMaxIdleConns returns a copy that keeps at most conns idle connections,
+// perHost of them to any one host. The copy starts with a pool of its own,
+// because resizing a live one under in-flight requests is a race.
 //
 // Nothing has to be handed back. A Connection is not a resource with a lifetime
 // of its own: what it holds is a transport, and an abandoned one closes its idle
 // sockets after incusIdleConnTimeout and is then collected. Callers drop
 // connections; they do not close them.
-func (c *Connection) WithProject(project string) *Connection {
+func (c *Connection) WithMaxIdleConns(conns int, perHost int) *Connection {
 	clone := *c
-	clone.project = project
 
 	// Listeners are never inherited: a copy that listens gets a socket of its own.
 	clone.events = &incusEvents{}
 
-	return &clone
-}
-
-// WithMaxIdleConns returns a copy that keeps at most conns idle connections,
-// perHost of them to any one host. The copy starts with a pool of its own,
-// because resizing a live one under in-flight requests is a race.
-func (c *Connection) WithMaxIdleConns(conns int, perHost int) *Connection {
-	clone := *c
-	clone.events = &incusEvents{}
-
 	transport, ok := c.http.Transport.(*http.Transport)
 	if !ok {
-		// Nothing to retune, so the copy shares c's pool as a WithProject copy does.
+		// Nothing to retune, so the copy shares c's pool.
 		return &clone
 	}
 
@@ -203,15 +191,15 @@ func incusSocketPath(addr string) string {
 	return socket
 }
 
-// uriFor renders a path under /1.0 with the connection's project applied.
-func (c *Connection) uriFor(path string, query url.Values) string {
-	// incusd refuses a request carrying both a project and all-projects.
-	if c.project != "" && query.Get("all-projects") == "" {
+// uriFor renders a path under /1.0 in project. An empty project sends none,
+// which incusd reads as the default project.
+func uriFor(project string, path string, query url.Values) string {
+	if project != "" {
 		if query == nil {
 			query = url.Values{}
 		}
 
-		query.Set("project", c.project)
+		query.Set("project", project)
 	}
 
 	uri := "/1.0" + path
@@ -222,10 +210,10 @@ func (c *Connection) uriFor(path string, query url.Values) string {
 	return uri
 }
 
-// do runs one request against /1.0 with the connection's project applied, and
-// returns the decoded envelope plus the ETag a conditional update needs.
-func (c *Connection) do(ctx context.Context, method string, path string, query url.Values, body any, etag string) (*api.Response, string, error) {
-	return c.doPath(ctx, method, c.uriFor(path, query), body, etag)
+// do runs one request against /1.0 in project, and returns the decoded envelope
+// plus the ETag a conditional update needs.
+func (c *Connection) do(ctx context.Context, project string, method string, path string, query url.Values, body any, etag string) (*api.Response, string, error) {
+	return c.doPath(ctx, method, uriFor(project, path, query), body, etag)
 }
 
 // doPath is do without the /1.0 prefix or the project, for a caller that has
@@ -291,8 +279,8 @@ func (c *Connection) send(ctx context.Context, method string, path string, body 
 
 // doRaw hands back the undecoded body of a /1.0 endpoint that answers with
 // something other than an API envelope. The caller closes it.
-func (c *Connection) doRaw(ctx context.Context, method string, path string, query url.Values) (io.ReadCloser, error) {
-	req, err := c.request(ctx, method, c.uriFor(path, query), nil)
+func (c *Connection) doRaw(ctx context.Context, project string, method string, path string, query url.Values) (io.ReadCloser, error) {
+	req, err := c.request(ctx, method, uriFor(project, path, query), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -355,9 +343,9 @@ func resourceNames(collection string, uris []string) ([]string, error) {
 	return names, nil
 }
 
-// getStruct GETs path and unmarshals the response metadata into target.
-func (c *Connection) getStruct(ctx context.Context, path string, query url.Values, target any) (string, error) {
-	resp, etag, err := c.do(ctx, http.MethodGet, path, query, nil, "")
+// getStruct GETs path in project and unmarshals the response metadata into target.
+func (c *Connection) getStruct(ctx context.Context, project string, path string, query url.Values, target any) (string, error) {
+	resp, etag, err := c.do(ctx, project, http.MethodGet, path, query, nil, "")
 	if err != nil {
 		return "", err
 	}

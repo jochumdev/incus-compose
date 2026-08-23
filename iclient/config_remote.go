@@ -17,9 +17,6 @@ type ConfigRemoteInfo struct {
 	Protocol string
 	AuthType string
 
-	// Project is the remote's own, unless ProjectOverride is set.
-	Project string
-
 	// Username and Password reach an "oci" registry, from its credentials
 	// helper or else from its address. They are deliberately not left in
 	// Addrs, which is logged and formatted into errors.
@@ -65,14 +62,9 @@ func (c *Config) RemoteInfos(remote string) (*ConfigRemoteInfo, error) {
 		Addrs:     r.rollingAddrs(),
 		Protocol:  r.Protocol,
 		AuthType:  r.AuthType,
-		Project:   r.Project,
 		Public:    r.Public,
 		KeepAlive: r.KeepAlive,
 		UserAgent: c.UserAgent,
-	}
-
-	if c.ProjectOverride != "" {
-		info.Project = c.ProjectOverride
 	}
 
 	if len(info.Addrs) == 0 {

@@ -42,8 +42,9 @@ type Client struct {
 	healthd string
 
 	// Cache for healthdTarget, which may point at another project.
-	healthdConn *iclient.Connection
-	healthdName string
+	healthdConn    *iclient.Connection
+	healthdProject string
+	healthdName    string
 
 	// Resource storage
 	resources ResourceStore
@@ -80,7 +81,7 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool) (*
 		project:      name,
 		incusProject: incusName,
 		created:      created,
-		incus:        c.incus.WithProject(incusName),
+		incus:        c.incus,
 		imageCache:   c.imageCache,
 		logger:       c.logger.With("project", name),
 
@@ -237,7 +238,8 @@ func (c *Client) WarnError(f func() error, message string) {
 	}
 }
 
-// Connection returns the project-scoped Incus connection, safe for concurrent use.
+// Connection returns the Incus connection, safe for concurrent use. Every
+// project-scoped call on it takes IncusProject.
 func (c *Client) Connection() (*iclient.Connection, error) {
 	if c.incus == nil {
 		return nil, ErrDisconnected
@@ -417,7 +419,7 @@ func (c *Client) FindHealthd() (string, error) {
 		return "", ErrNotFound.WithText(": within FindHealthd")
 	}
 
-	instances, err := c.incus.GetInstances(c.ctx, nil)
+	instances, err := c.incus.GetInstances(c.ctx, c.incusProject, nil)
 	if err != nil {
 		return "", ErrUnknown.Wrap(fmt.Errorf("listing instances: %w", err))
 	}
@@ -438,12 +440,12 @@ func (c *Client) FindHealthd() (string, error) {
 // HealthdRunning reports whether the daemon watching this project is up,
 // looking wherever the project's stored scope says it lives.
 func (c *Client) HealthdRunning() (bool, error) {
-	conn, name, err := c.healthdTarget()
+	conn, project, name, err := c.healthdTarget()
 	if err != nil {
 		return false, err
 	}
 
-	inst, _, err := conn.GetInstance(c.ctx, name, nil)
+	inst, _, err := conn.GetInstance(c.ctx, project, name, nil)
 	if err != nil {
 		return false, fmt.Errorf("getting the healthd %q instance state: %w", name, err)
 	}
@@ -455,34 +457,35 @@ func (c *Client) HealthdRunning() (bool, error) {
 	return inst.StatusCode == incusApi.Running, nil
 }
 
-// healthdTarget locates the daemon watching this project. Every instance start
+// healthdTarget locates the daemon watching this project, and the project it
+// runs in, which is not this one under the global scope. Every instance start
 // asks, so the answer is cached; it cannot change while a command runs.
-func (c *Client) healthdTarget() (*iclient.Connection, string, error) {
+func (c *Client) healthdTarget() (*iclient.Connection, string, string, error) {
 	c.healthdMu.Lock()
-	cachedConn, cachedName := c.healthdConn, c.healthdName
+	cachedConn, cachedProject, cachedName := c.healthdConn, c.healthdProject, c.healthdName
 	c.healthdMu.Unlock()
 
 	if cachedConn != nil {
-		return cachedConn, cachedName, nil
+		return cachedConn, cachedProject, cachedName, nil
 	}
 
 	if c.incus == nil {
-		return nil, "", ErrNotFound.WithText(": within healthdTarget")
+		return nil, "", "", ErrNotFound.WithText(": within healthdTarget")
 	}
 
 	cfg, err := c.globalClient.ProjectConfig(c.project)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
-	conn := c.incus
+	conn, project := c.incus, c.incusProject
 	if cfg[shared.HealthScopeKey] == shared.HealthScopeGlobal {
-		conn = c.globalClient.incus.WithProject(c.config.SystemProject)
+		conn, project = c.globalClient.incus, c.config.SystemProject
 	}
 
-	instances, err := conn.GetInstances(c.ctx, nil)
+	instances, err := conn.GetInstances(c.ctx, project, nil)
 	if err != nil {
-		return nil, "", ErrUnknown.Wrap(fmt.Errorf("listing instances: %w", err))
+		return nil, "", "", ErrUnknown.Wrap(fmt.Errorf("listing instances: %w", err))
 	}
 
 	for _, inst := range instances {
@@ -491,13 +494,13 @@ func (c *Client) healthdTarget() (*iclient.Connection, string, error) {
 		}
 
 		c.healthdMu.Lock()
-		c.healthdConn, c.healthdName = conn, inst.Name
+		c.healthdConn, c.healthdProject, c.healthdName = conn, project, inst.Name
 		c.healthdMu.Unlock()
 
-		return conn, inst.Name, nil
+		return conn, project, inst.Name, nil
 	}
 
-	return nil, "", ErrNotFound.WithText(": within healthdTarget")
+	return nil, "", "", ErrNotFound.WithText(": within healthdTarget")
 }
 
 // InstanceExists reports whether an instance with the given name exists in Incus.
@@ -506,7 +509,7 @@ func (c *Client) InstanceExists(name string) (bool, error) {
 		return false, nil
 	}
 
-	_, _, err := c.incus.GetInstance(c.ctx, SanitizeIncusName(name, -1), nil)
+	_, _, err := c.incus.GetInstance(c.ctx, c.incusProject, SanitizeIncusName(name, -1), nil)
 	return err == nil, nil
 }
 
@@ -516,7 +519,7 @@ func (c *Client) ResolveImageFingerprint(fingerprint string) string {
 	if fingerprint == "" {
 		return ""
 	}
-	img, _, err := c.globalClient.incus.GetImage(c.ctx, fingerprint, nil)
+	img, _, err := c.globalClient.incus.GetImage(c.ctx, incusApi.ProjectDefaultName, fingerprint, nil)
 	if err == nil && img != nil && len(img.Aliases) > 0 {
 		return img.Aliases[0].Name
 	}

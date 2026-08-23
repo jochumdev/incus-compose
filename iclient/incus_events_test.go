@@ -79,9 +79,8 @@ func pingingEventServer(t *testing.T, send <-chan api.Event, every time.Duration
 	t.Cleanup(server.Close)
 
 	conn, err := NewConnection(&ConfigRemoteInfo{
-		Name:    "events",
-		Addrs:   []string{server.URL},
-		Project: "myproject",
+		Name:  "events",
+		Addrs: []string{server.URL},
 	})
 	require.NoError(t, err)
 
@@ -96,7 +95,7 @@ func TestIncusListenEvents(t *testing.T) {
 
 	conn, seen := eventServer(t, send)
 
-	events, err := conn.ListenEvents(t.Context(), []string{"lifecycle", "operation"}, false)
+	events, err := conn.ListenEvents(t.Context(), "myproject", []string{"lifecycle", "operation"})
 	require.NoError(t, err)
 
 	send <- api.Event{Type: "lifecycle", Project: "myproject"}
@@ -114,7 +113,8 @@ func TestIncusListenEvents(t *testing.T) {
 	require.Equal(t, "myproject", req.query("project"))
 }
 
-// TestIncusListenEventsAllProjects: the project is dropped, not combined.
+// TestIncusListenEventsAllProjects: this form sends no project of its own,
+// which is what keeps incusd from refusing the pair.
 func TestIncusListenEventsAllProjects(t *testing.T) {
 	t.Parallel()
 
@@ -123,7 +123,7 @@ func TestIncusListenEventsAllProjects(t *testing.T) {
 
 	conn, seen := eventServer(t, send)
 
-	_, err := conn.ListenEvents(t.Context(), []string{"lifecycle"}, true)
+	_, err := conn.ListenEventsAllProjects(t.Context(), []string{"lifecycle"})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
@@ -147,10 +147,10 @@ func TestIncusListenEventsOwnFilter(t *testing.T) {
 
 	conn, seen := eventServer(t, send)
 
-	_, err := conn.ListenEvents(t.Context(), []string{"lifecycle"}, false)
+	_, err := conn.ListenEvents(t.Context(), "myproject", []string{"lifecycle"})
 	require.NoError(t, err)
 
-	_, err = conn.ListenEvents(t.Context(), []string{"operation"}, false)
+	_, err = conn.ListenEvents(t.Context(), "myproject", []string{"operation"})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
@@ -174,7 +174,7 @@ func TestIncusListenEventsClosesOnSilence(t *testing.T) {
 	conn, _ := eventServer(t, send)
 	conn.eventSilence = 200 * time.Millisecond
 
-	events, err := conn.ListenEvents(t.Context(), nil, false)
+	events, err := conn.ListenEvents(t.Context(), "myproject", nil)
 	require.NoError(t, err)
 
 	select {
@@ -197,7 +197,7 @@ func TestIncusListenEventsPingSurvivesSilence(t *testing.T) {
 	conn, _ := pingingEventServer(t, send, 50*time.Millisecond)
 	conn.eventSilence = 300 * time.Millisecond
 
-	events, err := conn.ListenEvents(t.Context(), nil, false)
+	events, err := conn.ListenEvents(t.Context(), "myproject", nil)
 	require.NoError(t, err)
 
 	select {
@@ -220,7 +220,7 @@ func TestIncusListenEventsClosesOnContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	events, err := conn.ListenEvents(ctx, nil, false)
+	events, err := conn.ListenEvents(ctx, "myproject", nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, incus.events.len())
 
@@ -253,7 +253,7 @@ func TestIncusListenEventsCancelImmediately(t *testing.T) {
 	for range 20 {
 		ctx, cancel := context.WithCancel(t.Context())
 
-		events, err := conn.ListenEvents(ctx, nil, false)
+		events, err := conn.ListenEvents(ctx, "myproject", nil)
 		require.NoError(t, err)
 
 		cancel()
@@ -285,7 +285,7 @@ func TestIncusListenEventsCancelWhileDelivering(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	events, err := conn.ListenEvents(ctx, nil, false)
+	events, err := conn.ListenEvents(ctx, "myproject", nil)
 	require.NoError(t, err)
 
 	// Fill past the buffer without reading a single one.
@@ -315,10 +315,10 @@ func TestIncusListenEventsCancelWhileDelivering(t *testing.T) {
 	}
 }
 
-// TestIncusListenEventsScopedEndsOnItsOwnContext: a project-scoped copy is a
-// view on the parent's transport, but its listeners are its own and end with the
-// context they were opened on, not with the parent's.
-func TestIncusListenEventsScopedEndsOnItsOwnContext(t *testing.T) {
+// TestIncusListenEventsCopyEndsOnItsOwnContext: a retuned copy is a view on the
+// parent, but its listeners are its own and end with the context they were
+// opened on, not with the parent's.
+func TestIncusListenEventsCopyEndsOnItsOwnContext(t *testing.T) {
 	t.Parallel()
 
 	send := make(chan api.Event)
@@ -326,11 +326,11 @@ func TestIncusListenEventsScopedEndsOnItsOwnContext(t *testing.T) {
 
 	conn, _ := eventServer(t, send)
 
-	scoped := conn.WithProject("second")
+	scoped := conn.WithMaxIdleConns(4, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	events, err := scoped.ListenEvents(ctx, nil, false)
+	events, err := scoped.ListenEvents(ctx, "myproject", nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, scoped.events.len())
 	require.Equal(t, 0, conn.events.len(), "a copy's listener is not the parent's")
@@ -357,7 +357,7 @@ func TestIncusListenEventsAgainstRealIncus(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	events, err := conn.ListenEvents(ctx, []string{"lifecycle"}, false)
+	events, err := conn.ListenEvents(ctx, "", []string{"lifecycle"})
 	require.NoError(t, err)
 
 	cancel()

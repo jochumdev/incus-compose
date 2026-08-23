@@ -18,7 +18,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{"name":"br0"}`)
 
-		network, etag, err := conn.GetNetwork(ctx, "br0")
+		network, etag, err := conn.GetNetwork(ctx, "myproject", "br0")
 		require.NoError(t, err)
 		require.Equal(t, "br0", network.Name)
 		require.Equal(t, "test-etag", etag, "GetNetwork must return the ETag header")
@@ -33,7 +33,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `["/1.0/networks/br0","/1.0/networks/ic-abc"]`)
 
-		names, err := conn.GetNetworkNames(ctx)
+		names, err := conn.GetNetworkNames(ctx, "myproject")
 		require.NoError(t, err)
 		require.Equal(t, []string{"br0", "ic-abc"}, names)
 		require.Equal(t, []string{"/1.0/networks?project=myproject"}, seen.uris())
@@ -44,7 +44,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `[{"name":"br0","project":"default","managed":true}]`)
 
-		networks, err := conn.GetNetworks(ctx)
+		networks, err := conn.GetNetworks(ctx, "myproject")
 		require.NoError(t, err)
 		require.Len(t, networks, 1)
 		require.Equal(t, "br0", networks[0].Name)
@@ -58,7 +58,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		require.NoError(t, conn.CreateNetwork(ctx, api.NetworksPost{Name: "br0"}))
+		require.NoError(t, conn.CreateNetwork(ctx, "myproject", api.NetworksPost{Name: "br0"}))
 
 		req := seen.all()[0]
 		require.Equal(t, http.MethodPost, req.method)
@@ -71,7 +71,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		err := conn.UpdateNetwork(ctx, "br0", api.NetworkPut{Description: "d"}, "the-etag")
+		err := conn.UpdateNetwork(ctx, "myproject", "br0", api.NetworkPut{Description: "d"}, "the-etag")
 		require.NoError(t, err)
 
 		req := seen.all()[0]
@@ -85,7 +85,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		require.NoError(t, conn.DeleteNetwork(ctx, "br0"))
+		require.NoError(t, conn.DeleteNetwork(ctx, "myproject", "br0"))
 
 		req := seen.all()[0]
 		require.Equal(t, http.MethodDelete, req.method)
@@ -97,7 +97,7 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		_, _, err := conn.GetNetwork(ctx, "a/b")
+		_, _, err := conn.GetNetwork(ctx, "myproject", "a/b")
 		require.NoError(t, err)
 		require.Equal(t, []string{"/1.0/networks/a%2Fb?project=myproject"}, seen.uris())
 	})
@@ -110,7 +110,7 @@ func TestIncusNetworkAgainstRealIncus(t *testing.T) {
 	ctx := t.Context()
 	conn := testConnection(t)
 
-	names, err := conn.GetNetworkNames(ctx)
+	names, err := conn.GetNetworkNames(ctx, "")
 	require.NoError(t, err)
 
 	for _, name := range names {
@@ -121,10 +121,10 @@ func TestIncusNetworkAgainstRealIncus(t *testing.T) {
 		t.Skip("no network on the remote to read")
 	}
 
-	network, _, err := conn.GetNetwork(ctx, names[0])
+	network, _, err := conn.GetNetwork(ctx, "", names[0])
 	require.NoError(t, err)
 	require.Equal(t, names[0], network.Name)
 
-	_, _, err = conn.GetNetwork(ctx, "ic-iclient-no-such-network")
+	_, _, err = conn.GetNetwork(ctx, "", "ic-iclient-no-such-network")
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404, got %v", err)
 }

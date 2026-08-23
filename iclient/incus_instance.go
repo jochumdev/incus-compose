@@ -26,10 +26,6 @@ func incusInstancesQuery(args GetInstancesArgs, recursion string) url.Values {
 		v.Set("recursion", recursion)
 	}
 
-	if args.AllProjects {
-		v.Set("all-projects", "true")
-	}
-
 	filter := incusFilter(args.Filters)
 	if filter != "" {
 		v.Set("filter", filter)
@@ -70,7 +66,7 @@ func incusInstancePath(name string, suffix ...string) string {
 
 // GetInstance returns one instance and its ETag. Without args.Full the state,
 // snapshots and backups are zero.
-func (c *Connection) GetInstance(ctx context.Context, name string, args *GetInstanceArgs) (*api.InstanceFull, string, error) {
+func (c *Connection) GetInstance(ctx context.Context, project string, name string, args *GetInstanceArgs) (*api.InstanceFull, string, error) {
 	if args == nil {
 		args = &GetInstanceArgs{}
 	}
@@ -84,7 +80,7 @@ func (c *Connection) GetInstance(ctx context.Context, name string, args *GetInst
 		query.Set("recursion", "1")
 	}
 
-	etag, err := c.getStruct(ctx, incusInstancePath(name), query, &instance)
+	etag, err := c.getStruct(ctx, project, incusInstancePath(name), query, &instance)
 	if err != nil {
 		return nil, "", err
 	}
@@ -92,15 +88,15 @@ func (c *Connection) GetInstance(ctx context.Context, name string, args *GetInst
 	return &instance, etag, nil
 }
 
-// GetInstances returns the instances the arguments select.
-func (c *Connection) GetInstances(ctx context.Context, args *GetInstancesArgs) ([]api.InstanceFull, error) {
+// GetInstances returns the instances of project the arguments select.
+func (c *Connection) GetInstances(ctx context.Context, project string, args *GetInstancesArgs) ([]api.InstanceFull, error) {
 	if args == nil {
 		args = &GetInstancesArgs{}
 	}
 
 	instances := []api.InstanceFull{}
 
-	_, err := c.getStruct(ctx, incusInstancesPath, incusInstancesQuery(*args, incusRecursion(args.Full)), &instances)
+	_, err := c.getStruct(ctx, project, incusInstancesPath, incusInstancesQuery(*args, incusRecursion(args.Full)), &instances)
 	if err != nil {
 		return nil, err
 	}
@@ -108,21 +104,38 @@ func (c *Connection) GetInstances(ctx context.Context, args *GetInstancesArgs) (
 	return instances, nil
 }
 
-// GetInstanceNames returns the names of the instances the arguments select.
-// AllProjects is refused, a bare name not being unique across projects.
-func (c *Connection) GetInstanceNames(ctx context.Context, args *GetInstancesArgs) ([]string, error) {
+// GetInstancesAllProjects returns the instances of every project the
+// certificate may see.
+func (c *Connection) GetInstancesAllProjects(ctx context.Context, args *GetInstancesArgs) ([]api.InstanceFull, error) {
 	if args == nil {
 		args = &GetInstancesArgs{}
 	}
 
-	if args.AllProjects {
-		return nil, fmt.Errorf("listing instance names across projects: %w", ErrConnectionUnsupported)
+	query := incusInstancesQuery(*args, incusRecursion(args.Full))
+	query.Set("all-projects", "true")
+
+	instances := []api.InstanceFull{}
+
+	// No project: incusd refuses a request carrying both.
+	_, err := c.getStruct(ctx, "", incusInstancesPath, query, &instances)
+	if err != nil {
+		return nil, err
+	}
+
+	return instances, nil
+}
+
+// GetInstanceNames returns the names of the instances of project the arguments
+// select. There is no all-projects form: a bare name is not unique across them.
+func (c *Connection) GetInstanceNames(ctx context.Context, project string, args *GetInstancesArgs) ([]string, error) {
+	if args == nil {
+		args = &GetInstancesArgs{}
 	}
 
 	// Without recursion the collection is a list of resource URLs.
 	uris := []string{}
 
-	_, err := c.getStruct(ctx, incusInstancesPath, incusInstancesQuery(*args, ""), &uris)
+	_, err := c.getStruct(ctx, project, incusInstancesPath, incusInstancesQuery(*args, ""), &uris)
 	if err != nil {
 		return nil, err
 	}
@@ -131,26 +144,26 @@ func (c *Connection) GetInstanceNames(ctx context.Context, args *GetInstancesArg
 }
 
 // CreateInstance creates an instance and follows the operation.
-func (c *Connection) CreateInstance(ctx context.Context, instance api.InstancesPost) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, http.MethodPost, incusInstancesPath, instance, "")
+func (c *Connection) CreateInstance(ctx context.Context, project string, instance api.InstancesPost) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, project, http.MethodPost, incusInstancesPath, instance, "")
 }
 
 // DeleteInstance removes an instance and follows the operation.
-func (c *Connection) DeleteInstance(ctx context.Context, name string) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, http.MethodDelete, incusInstancePath(name), nil, "")
+func (c *Connection) DeleteInstance(ctx context.Context, project string, name string) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, project, http.MethodDelete, incusInstancePath(name), nil, "")
 }
 
 // UpdateInstanceState starts, stops or restarts an instance and follows the
 // operation.
-func (c *Connection) UpdateInstanceState(ctx context.Context, name string, state api.InstanceStatePut, etag string) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, http.MethodPut, incusInstancePath(name, "/state"), state, etag)
+func (c *Connection) UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut, etag string) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, project, http.MethodPut, incusInstancePath(name, "/state"), state, etag)
 }
 
 // GetInstanceState returns the runtime state of one instance.
-func (c *Connection) GetInstanceState(ctx context.Context, name string) (*api.InstanceState, string, error) {
+func (c *Connection) GetInstanceState(ctx context.Context, project string, name string) (*api.InstanceState, string, error) {
 	state := api.InstanceState{}
 
-	etag, err := c.getStruct(ctx, incusInstancePath(name, "/state"), nil, &state)
+	etag, err := c.getStruct(ctx, project, incusInstancePath(name, "/state"), nil, &state)
 	if err != nil {
 		return nil, "", err
 	}
@@ -163,10 +176,10 @@ func (c *Connection) GetInstanceState(ctx context.Context, name string) (*api.In
 //
 // Incus takes that lock in the driver, inside the operation, so a write issued
 // while it is held is accepted and then fails from the operation.
-func (c *Connection) WaitInstanceBusy(ctx context.Context, name string) error {
+func (c *Connection) WaitInstanceBusy(ctx context.Context, project string, name string) error {
 	// Outside the default project the operation's resource URL carries
 	// ?project=, and matching a bare path reports every instance as free.
-	instanceURL := api.NewURL().Path("1.0", "instances", name).Project(c.project).String()
+	instanceURL := api.NewURL().Path("1.0", "instances", name).Project(project).String()
 
 	for {
 		err := ctx.Err()
@@ -174,7 +187,7 @@ func (c *Connection) WaitInstanceBusy(ctx context.Context, name string) error {
 			return err
 		}
 
-		operations, err := c.GetOperations(ctx)
+		operations, err := c.GetOperations(ctx, project)
 		if err != nil {
 			return fmt.Errorf("listing the operations on %q: %w", name, err)
 		}
@@ -198,7 +211,7 @@ func (c *Connection) WaitInstanceBusy(ctx context.Context, name string) error {
 		}
 
 		// How it ended is the business of whoever started it; this only waits.
-		_, err = c.WaitOperationID(ctx, holder.ID)
+		_, err = c.WaitOperationID(ctx, project, holder.ID)
 		if err != nil {
 			// Gone between the listing and here means it has finished.
 			if api.StatusErrorCheck(err, http.StatusNotFound) {
@@ -213,12 +226,12 @@ func (c *Connection) WaitInstanceBusy(ctx context.Context, name string) error {
 // PatchInstanceConfig merges keys into an instance's config, leaving the rest
 // of the instance alone. No cluster target is sent; instance config is
 // cluster-wide state.
-func (c *Connection) PatchInstanceConfig(ctx context.Context, name string, config map[string]string) error {
+func (c *Connection) PatchInstanceConfig(ctx context.Context, project string, name string, config map[string]string) error {
 	patch := struct {
 		Config map[string]string `json:"config"`
 	}{Config: config}
 
-	_, _, err := c.do(ctx, http.MethodPatch, incusInstancePath(name), nil, patch, "")
+	_, _, err := c.do(ctx, project, http.MethodPatch, incusInstancePath(name), nil, patch, "")
 
 	return err
 }

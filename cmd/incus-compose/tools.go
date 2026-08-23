@@ -42,7 +42,7 @@ func ensureTools(ctx context.Context, c *client.Client, sys *client.Client, imag
 
 	// The architecture is whatever the pull resolved to, which is the server's,
 	// which is the one every instance here runs on.
-	info, _, err := conn.GetImage(ctx, fingerprint, nil)
+	info, _, err := conn.GetImage(ctx, sys.IncusProject(), fingerprint, nil)
 	if err != nil {
 		return nil, "", client.ErrNotFound.WithText("reading the helpers image").Wrap(err)
 	}
@@ -219,7 +219,7 @@ func copyTools(ctx context.Context, c *client.Client, sys *client.Client, master
 		req.Source.Location = source.Location
 	}
 
-	copyOp, err := conn.CopyStoragePoolVolume(ctx, vol.Config.Pool, req)
+	copyOp, err := conn.CopyStoragePoolVolume(ctx, c.IncusProject(), vol.Config.Pool, req)
 	if err == nil {
 		_, err = iclient.WaitOperation(ctx, copyOp)
 	}

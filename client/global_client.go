@@ -353,8 +353,7 @@ func (c *GlobalClient) Connect() error {
 		return errors.New("provide a ProvidedConnection")
 	}
 
-	// Force "default" project for global client - project-scoped clients are created via EnsureProject.
-	incus := c.config.ProvidedConnection.WithProject("default")
+	incus := c.config.ProvidedConnection
 
 	info, err := incus.GetConnectionInfo(c.ctx)
 	if err != nil {
@@ -417,7 +416,7 @@ func (c *GlobalClient) Connection() (*iclient.Connection, error) {
 // detectStoragePool prefers the storage pool used by the default profile's
 // root disk device, falling back to the first storage pool on the server.
 func (c *GlobalClient) detectStoragePool() error {
-	profile, _, err := c.incus.GetProfile(c.ctx, "default")
+	profile, _, err := c.incus.GetProfile(c.ctx, incusApi.ProjectDefaultName, "default")
 	if err == nil {
 		for _, device := range profile.Devices {
 			if device["type"] == "disk" && device["path"] == "/" && device["pool"] != "" {
@@ -883,7 +882,7 @@ func (c *GlobalClient) SetProgressHandler(handler func(action Action, r Resource
 // The addresses are returned without CIDR notation.
 // Addresses for which the network config key is absent or set to "none" are omitted.
 func (c *GlobalClient) NetworkBridgeIPs(networkName string) (ipv4 []string, ipv6 []string, err error) {
-	network, _, err := c.incus.GetNetwork(c.ctx, networkName)
+	network, _, err := c.incus.GetNetwork(c.ctx, incusApi.ProjectDefaultName, networkName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting network %s: %w", networkName, err)
 	}

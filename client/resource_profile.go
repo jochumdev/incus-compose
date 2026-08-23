@@ -168,7 +168,7 @@ func (r *Profile) get(ctx context.Context) error {
 		return err
 	}
 
-	profile, eTag, err := conn.GetProfile(ctx, r.incusName)
+	profile, eTag, err := conn.GetProfile(ctx, r.client.incusProject, r.incusName)
 	if err != nil {
 		r.clearState()
 		return ErrNotFound.Wrap(err)
@@ -207,11 +207,11 @@ func (r *Profile) create(ctx context.Context) error {
 		return err
 	}
 
-	if err := conn.CreateProfile(ctx, postArgs); err != nil {
+	if err := conn.CreateProfile(ctx, r.client.incusProject, postArgs); err != nil {
 		return fmt.Errorf("creating profile %s: %w", r.Name(), err)
 	}
 
-	profile, eTag, err := conn.GetProfile(ctx, r.incusName)
+	profile, eTag, err := conn.GetProfile(ctx, r.client.incusProject, r.incusName)
 	if err != nil {
 		return fmt.Errorf("fetching created profile %s: %w", r.Name(), err)
 	}
@@ -232,13 +232,14 @@ func (r *Profile) sourceProfile(ctx context.Context) (*incusApi.Profile, error) 
 		sourceServer = gConn
 	}
 
-	if r.Config.SourceProject != "" {
-		sourceServer = sourceServer.WithProject(r.Config.SourceProject)
+	sourceProject := r.Config.SourceProject
+	if sourceProject == "" {
+		sourceProject = incusApi.ProjectDefaultName
 	}
 
-	sourceProfile, _, err := sourceServer.GetProfile(ctx, r.Config.SourceProfile)
+	sourceProfile, _, err := sourceServer.GetProfile(ctx, sourceProject, r.Config.SourceProfile)
 	if err != nil {
-		return nil, fmt.Errorf("getting source profile %s:%s: %w", r.Config.SourceProject, r.Config.SourceProfile, err)
+		return nil, fmt.Errorf("getting source profile %s:%s: %w", sourceProject, r.Config.SourceProfile, err)
 	}
 
 	return sourceProfile, nil
@@ -287,7 +288,7 @@ func (r *Profile) updateFromSource(ctx context.Context) error {
 		return err
 	}
 
-	if err := conn.UpdateProfile(ctx, r.incusName, profilePut, state.ETag); err != nil {
+	if err := conn.UpdateProfile(ctx, r.client.incusProject, r.incusName, profilePut, state.ETag); err != nil {
 		return fmt.Errorf("updating profile %s from source %s:%s: %w", r.Name(), r.Config.SourceProject, r.Config.SourceProfile, err)
 	}
 
@@ -343,7 +344,7 @@ func (r *Profile) Delete(ctx context.Context, opts ...Option) error {
 	}
 
 	// Do the actual work
-	err = conn.DeleteProfile(ctx, r.incusName)
+	err = conn.DeleteProfile(ctx, r.client.incusProject, r.incusName)
 	err = r.client.hookAfter(ctx, ActionDelete, r, options, err)
 
 	r.clearState()

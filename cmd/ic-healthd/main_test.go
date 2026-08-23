@@ -286,7 +286,7 @@ func TestDiscoverProjectSelectsWatchableInstances(t *testing.T) {
 	testContainer(t, c, "plain", nil, false)
 
 	results := make(chan instanceResult, 32)
-	discoverProject(t.Context(), testConn(t, c), results)
+	discoverProject(t.Context(), testConn(t, c), c.Project(), results)
 
 	got := map[string]error{}
 

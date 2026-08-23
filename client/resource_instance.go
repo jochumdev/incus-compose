@@ -418,7 +418,7 @@ func (r *Instance) fetch(ctx context.Context, state *InstanceState) error {
 
 	// Fresh instance. The ETag covers the editable config only, not StatusCode,
 	// so it cannot be used to skip this.
-	instance, etag, err := conn.GetInstance(ctx, r.incusName, nil)
+	instance, etag, err := conn.GetInstance(ctx, r.client.incusProject, r.incusName, nil)
 	if err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ func (r *Instance) fetch(ctx context.Context, state *InstanceState) error {
 		}
 	}
 
-	newState.IncusInstanceState, _, err = conn.GetInstanceState(ctx, r.incusName)
+	newState.IncusInstanceState, _, err = conn.GetInstanceState(ctx, r.client.incusProject, r.incusName)
 	if err != nil {
 		return err
 	}
@@ -637,7 +637,7 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 	}
 
 	// Get image info from project
-	incusImage, _, err := conn.GetImage(ctx, imageState.IncusAlias.Target, nil)
+	incusImage, _, err := conn.GetImage(ctx, r.client.incusProject, imageState.IncusAlias.Target, nil)
 	if err != nil {
 		return ErrNotFound.WithText("getting image").Wrap(err)
 	}
@@ -671,7 +671,7 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 		},
 	}
 
-	op, err := conn.CreateInstance(ctx, req)
+	op, err := conn.CreateInstance(ctx, r.client.incusProject, req)
 	if err := r.client.hookOperation(ctx, ActionEnsure, r, options, op, err); err != nil {
 		return err
 	}
@@ -898,7 +898,7 @@ func (r *Instance) waitBusyOperation(ctx context.Context) error {
 		return err
 	}
 
-	err = conn.WaitInstanceBusy(ctx, r.incusName)
+	err = conn.WaitInstanceBusy(ctx, r.client.incusProject, r.incusName)
 	if err != nil {
 		return ErrOperation.WithText("waiting for a pending instance operation").Wrap(err)
 	}
@@ -1046,7 +1046,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 		retry.Delay(10*time.Second),
 		retry.LastErrorOnly(true),
 	).Do(func() (*sftp.Client, error) {
-		return conn.GetInstanceFileSFTP(ctx, r.incusName)
+		return conn.GetInstanceFileSFTP(ctx, r.client.incusProject, r.incusName)
 	})
 	if err != nil {
 		return ErrCreate.WithText("connecting to instance SFTP").Wrap(err)
@@ -1083,7 +1083,7 @@ func (r *Instance) start(ctx context.Context, options Options) error {
 	}
 
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
+		op, err := conn.UpdateInstanceState(ctx, r.client.incusProject, r.incusName, incusApi.InstanceStatePut{
 			Action:  "start",
 			Timeout: options.incusTimeout(),
 		}, "")
@@ -1125,7 +1125,7 @@ func (r *Instance) PushFiles(ctx context.Context, sftpConn *sftp.Client) error {
 			return err
 		}
 
-		sftpConn, err = conn.GetInstanceFileSFTP(ctx, r.incusName)
+		sftpConn, err = conn.GetInstanceFileSFTP(ctx, r.client.incusProject, r.incusName)
 		if err != nil {
 			return ErrCreate.WithText("connecting to instance SFTP").Wrap(err)
 		}
@@ -1251,7 +1251,7 @@ func (r *Instance) volumeSFTP(ctx context.Context, open map[string]*sftp.Client,
 		return nil, err
 	}
 
-	sc, err = conn.GetStoragePoolVolumeFileSFTP(ctx, dev.Config.Disk.StorageVolumeConfig.Pool, "custom", dev.Config.Disk.Source)
+	sc, err = conn.GetStoragePoolVolumeFileSFTP(ctx, r.client.incusProject, dev.Config.Disk.StorageVolumeConfig.Pool, "custom", dev.Config.Disk.Source)
 	if err != nil {
 		return nil, ErrCreate.WithText("connecting to volume SFTP for " + device).Wrap(err)
 	}
@@ -1603,7 +1603,7 @@ func (r *Instance) requestStop(ctx context.Context, options Options, force bool)
 	}
 
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
+		op, err := conn.UpdateInstanceState(ctx, r.client.incusProject, r.incusName, incusApi.InstanceStatePut{
 			Action:  "stop",
 			Force:   force,
 			Timeout: options.incusTimeout(),
@@ -1703,7 +1703,7 @@ func (r *Instance) freeze(ctx context.Context, action Action, options Options) e
 	}
 
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := conn.UpdateInstanceState(ctx, r.incusName, incusApi.InstanceStatePut{
+		op, err := conn.UpdateInstanceState(ctx, r.client.incusProject, r.incusName, incusApi.InstanceStatePut{
 			Action: incusAction,
 		}, "")
 		if err != nil {
@@ -1753,7 +1753,7 @@ func (r *Instance) Exec(ctx context.Context, command ...string) error {
 		return err
 	}
 
-	op, err := conn.ExecInstance(ctx, r.incusName, incusApi.InstanceExecPost{Command: command}, nil)
+	op, err := conn.ExecInstance(ctx, r.client.incusProject, r.incusName, incusApi.InstanceExecPost{Command: command}, nil)
 	if err != nil {
 		return err
 	}
@@ -1771,7 +1771,7 @@ func (r *Instance) patchConfig(ctx context.Context, config map[string]string) er
 	}
 
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		return struct{}{}, conn.PatchInstanceConfig(ctx, r.IncusName(), config)
+		return struct{}{}, conn.PatchInstanceConfig(ctx, r.client.incusProject, r.IncusName(), config)
 	})
 	if err != nil {
 		return err
@@ -1840,7 +1840,7 @@ func (r *Instance) Delete(ctx context.Context, opts ...Option) error {
 
 	// Do the delete
 	_, err = retryBusy(ctx, r, func() (struct{}, error) {
-		op, err := conn.DeleteInstance(ctx, r.incusName)
+		op, err := conn.DeleteInstance(ctx, r.client.incusProject, r.incusName)
 
 		return struct{}{}, r.client.hookOperation(ctx, ActionDelete, r, options, op, err)
 	})
@@ -1855,7 +1855,7 @@ func (r *Instance) Delete(ctx context.Context, opts ...Option) error {
 	// Replicas share one volume, so every delete but the last finds it in use.
 	if options.Volumes {
 		for _, dev := range r.prefetchDevices() {
-			err := conn.DeleteStoragePoolVolume(ctx, dev["pool"], "custom", dev["source"])
+			err := conn.DeleteStoragePoolVolume(ctx, r.client.incusProject, dev["pool"], "custom", dev["source"])
 			if err != nil && !errors.Is(err, iclient.ErrVolumeInUse) {
 				r.client.LogWarn("Failed to delete a volume the instance brought up",
 					"resource", r, "volume", dev["source"], "error", err)

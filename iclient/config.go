@@ -23,7 +23,6 @@ type ConfigRemote struct {
 	LastWorkingAddr string           `yaml:"last_working_address,omitempty"`
 	AuthType        string           `yaml:"auth_type,omitempty"`
 	KeepAlive       int              `yaml:"keepalive,omitempty"`
-	Project         string           `yaml:"project,omitempty"`
 	Protocol        string           `yaml:"protocol,omitempty"`
 	CredHelper      string           `yaml:"credentials_helper,omitempty"`
 	Public          bool             `yaml:"public"`
@@ -88,9 +87,6 @@ type Config struct {
 	// ConfigDir is where the configuration was read from; the certificate
 	// paths hang off it.
 	ConfigDir string `yaml:"-"`
-
-	// ProjectOverride beats a remote's own Project.
-	ProjectOverride string `yaml:"-"`
 
 	// UserAgent is sent with every request.
 	UserAgent string `yaml:"-"`

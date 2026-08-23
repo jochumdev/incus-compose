@@ -76,7 +76,7 @@ func BackupSnapshots(ctx context.Context, bc *Client, pool string, volume string
 		return nil, err
 	}
 
-	names, err := conn.GetStoragePoolVolumeSnapshotNames(ctx, pool, "custom", volume)
+	names, err := conn.GetStoragePoolVolumeSnapshotNames(ctx, bc.incusProject, pool, "custom", volume)
 	if incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 		return nil, nil
 	}
@@ -95,7 +95,7 @@ func BackupVolumeUsage(ctx context.Context, bc *Client, pool string, volume stri
 		return 0, err
 	}
 
-	state, err := conn.GetStoragePoolVolumeState(ctx, pool, "custom", volume)
+	state, err := conn.GetStoragePoolVolumeState(ctx, bc.incusProject, pool, "custom", volume)
 	if incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 		return 0, nil
 	}
@@ -117,7 +117,7 @@ func BackupDeleteSnapshot(ctx context.Context, bc *Client, pool string, volume s
 		return err
 	}
 
-	op, err := conn.DeleteStoragePoolVolumeSnapshot(ctx, pool, "custom", volume, snapshot)
+	op, err := conn.DeleteStoragePoolVolumeSnapshot(ctx, bc.incusProject, pool, "custom", volume, snapshot)
 	if incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 		return nil
 	}

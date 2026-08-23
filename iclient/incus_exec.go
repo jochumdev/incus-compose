@@ -29,7 +29,7 @@ type InstanceExecArgs struct {
 //
 // The channel closes once the output has drained and the operation has
 // finished, so ranging over it to the end is enough.
-func (c *Connection) ExecInstance(ctx context.Context, name string, exec api.InstanceExecPost, args *InstanceExecArgs) (<-chan api.Operation, error) {
+func (c *Connection) ExecInstance(ctx context.Context, project string, name string, exec api.InstanceExecPost, args *InstanceExecArgs) (<-chan api.Operation, error) {
 	if args == nil {
 		args = &InstanceExecArgs{}
 	}
@@ -41,7 +41,7 @@ func (c *Connection) ExecInstance(ctx context.Context, name string, exec api.Ins
 	// Without this the server runs the command detached, with no descriptors to read.
 	exec.WaitForWS = true
 
-	updates, err := c.asyncOperation(ctx, http.MethodPost, incusInstancePath(name, "/exec"), exec, "")
+	updates, err := c.asyncOperation(ctx, project, http.MethodPost, incusInstancePath(name, "/exec"), exec, "")
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (c *Connection) ExecInstance(ctx context.Context, name string, exec api.Ins
 			continue
 		}
 
-		socket, err := c.dialOperation(streamCtx, started.ID, secret)
+		socket, err := c.dialOperation(streamCtx, project, started.ID, secret)
 		if err != nil {
 			closeStreams()
 
@@ -119,7 +119,7 @@ func (c *Connection) ExecInstance(ctx context.Context, name string, exec api.Ins
 }
 
 // dialOperation opens one of an operation's websockets.
-func (c *Connection) dialOperation(ctx context.Context, id string, secret string) (*websocket.Conn, error) {
+func (c *Connection) dialOperation(ctx context.Context, project string, id string, secret string) (*websocket.Conn, error) {
 	transport, ok := c.http.Transport.(*http.Transport)
 	if !ok {
 		return nil, fmt.Errorf("unexpected transport %T", c.http.Transport)
@@ -128,8 +128,8 @@ func (c *Connection) dialOperation(ctx context.Context, id string, secret string
 	query := url.Values{}
 	query.Set("secret", secret)
 
-	if c.project != "" {
-		query.Set("project", c.project)
+	if project != "" {
+		query.Set("project", project)
 	}
 
 	dialer := websocket.Dialer{

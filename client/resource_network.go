@@ -250,7 +250,7 @@ func (r *Network) get(ctx context.Context) error {
 		return err
 	}
 
-	network, eTag, err := conn.GetNetwork(ctx, r.incusName)
+	network, eTag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
 	if err != nil {
 		r.clearState()
 		return ErrNotFound.Wrap(err)
@@ -282,7 +282,7 @@ func (r *Network) create(ctx context.Context) error {
 		return err
 	}
 
-	if err := conn.CreateNetwork(ctx, req); err != nil {
+	if err := conn.CreateNetwork(ctx, incusApi.ProjectDefaultName, req); err != nil {
 		return fmt.Errorf("creating network %q: %w", r.Name(), err)
 	}
 
@@ -293,7 +293,7 @@ func (r *Network) create(ctx context.Context) error {
 	defer cancel()
 	interval := 100 * time.Millisecond
 	for {
-		nw, eTag, err := conn.GetNetwork(ctx, r.incusName)
+		nw, eTag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
 		if err == nil {
 			if nw.Status == incusApi.NetworkStatusCreated || nw.Status == "Created" {
 				r.state.Store(&NetworkState{IncusNetwork: nw, ETag: eTag})
@@ -384,7 +384,7 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	err = conn.DeleteNetwork(ctx, r.incusName)
+	err = conn.DeleteNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
 	r.clearState()
 
 	r.client.resources.Remove(r)
@@ -405,7 +405,7 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 		return err
 	}
 
-	net, etag, err := conn.GetNetwork(ctx, r.incusName)
+	net, etag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
 	if err != nil {
 		return fmt.Errorf("reading network %q: %w", r.Name(), err)
 	}
@@ -487,7 +487,7 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 		put.Config["raw.dnsmasq"] = raw
 	}
 
-	if err := conn.UpdateNetwork(ctx, r.incusName, put, etag); err != nil {
+	if err := conn.UpdateNetwork(ctx, incusApi.ProjectDefaultName, r.incusName, put, etag); err != nil {
 		return fmt.Errorf("updating dnsmasq records for network %q: %w", r.Name(), err)
 	}
 

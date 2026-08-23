@@ -24,8 +24,8 @@ import (
 const dockerManifestList = "application/vnd.docker.distribution.manifest.list.v2+json"
 
 // ociStoreConfig writes an image's OCI config into its properties.
-func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, fingerprint string, config *ocispec.ImageConfig) error {
-	img, eTag, err := server.GetImage(ctx, fingerprint, nil)
+func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, project string, fingerprint string, config *ocispec.ImageConfig) error {
+	img, eTag, err := server.GetImage(ctx, project, fingerprint, nil)
 	if err != nil {
 		return ErrNotFound.WithText("the image the properties belong to").Wrap(err)
 	}
@@ -63,7 +63,7 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 
 	ociWriteProperties(state, props)
 
-	err = server.UpdateImage(ctx, fingerprint, incusApi.ImagePut{
+	err = server.UpdateImage(ctx, project, fingerprint, incusApi.ImagePut{
 		AutoUpdate: img.AutoUpdate,
 		Properties: props,
 		Public:     img.Public,

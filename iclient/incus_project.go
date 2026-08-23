@@ -15,7 +15,7 @@ const incusProjectsPath = "/projects"
 func (c *Connection) GetProject(ctx context.Context, name string) (*api.Project, string, error) {
 	project := api.Project{}
 
-	etag, err := c.getStruct(ctx, incusProjectsPath+"/"+url.PathEscape(name), nil, &project)
+	etag, err := c.getStruct(ctx, "", incusProjectsPath+"/"+url.PathEscape(name), nil, &project)
 	if err != nil {
 		return nil, "", err
 	}
@@ -30,7 +30,7 @@ func (c *Connection) GetProjects(ctx context.Context) ([]api.Project, error) {
 	query := url.Values{}
 	query.Set("recursion", "1")
 
-	_, err := c.getStruct(ctx, incusProjectsPath, query, &projects)
+	_, err := c.getStruct(ctx, "", incusProjectsPath, query, &projects)
 	if err != nil {
 		return nil, err
 	}
@@ -40,21 +40,21 @@ func (c *Connection) GetProjects(ctx context.Context) ([]api.Project, error) {
 
 // CreateProject adds a project.
 func (c *Connection) CreateProject(ctx context.Context, project api.ProjectsPost) error {
-	_, _, err := c.do(ctx, http.MethodPost, incusProjectsPath, nil, project, "")
+	_, _, err := c.do(ctx, "", http.MethodPost, incusProjectsPath, nil, project, "")
 
 	return err
 }
 
 // UpdateProject replaces a project's configuration.
 func (c *Connection) UpdateProject(ctx context.Context, name string, project api.ProjectPut, etag string) error {
-	_, _, err := c.do(ctx, http.MethodPut, incusProjectsPath+"/"+url.PathEscape(name), nil, project, etag)
+	_, _, err := c.do(ctx, "", http.MethodPut, incusProjectsPath+"/"+url.PathEscape(name), nil, project, etag)
 
 	return err
 }
 
 // RenameProject renames a project and follows the operation.
 func (c *Connection) RenameProject(ctx context.Context, name string, project api.ProjectPost) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, http.MethodPost, incusProjectsPath+"/"+url.PathEscape(name), project, "")
+	return c.asyncOperation(ctx, "", http.MethodPost, incusProjectsPath+"/"+url.PathEscape(name), project, "")
 }
 
 // DeleteProject removes a project, which Incus refuses while it holds anything
@@ -72,7 +72,7 @@ func (c *Connection) DeleteProject(ctx context.Context, name string, args *Delet
 		query.Set("force", "1")
 	}
 
-	_, _, err := c.do(ctx, http.MethodDelete, incusProjectsPath+"/"+url.PathEscape(name), query, nil, "")
+	_, _, err := c.do(ctx, "", http.MethodDelete, incusProjectsPath+"/"+url.PathEscape(name), query, nil, "")
 
 	return err
 }
