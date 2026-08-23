@@ -112,6 +112,11 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		devices = append(devices, oneOffDevice(oneOff))
 	}
 
+	profiles, err := serviceExtraProfiles(service)
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
+
 	secrets, err := instanceSecrets(p, service)
 	if err != nil {
 		errs = errors.Join(errs, err)
@@ -140,6 +145,7 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		Resources:     slices.Clone(resources),
 		Extensions:    config,
 		Devices:       devices,
+		Profiles:      profiles,
 		Files:         files,
 		Dependencies:  instanceDependencyWaits(p, service, options),
 		Entrypoint:    service.Entrypoint,
@@ -1315,6 +1321,34 @@ func serviceExtraDevices(service types.ServiceConfig) ([]client.InstanceDevice, 
 	}
 
 	return devices, nil
+}
+
+// serviceExtraProfiles extracts the x-incus-compose.profiles list from a
+// compose service. It becomes the instance's full Incus profile list - same
+// semantics as `incus launch --profile`, so a list that omits "default"
+// leaves the instance without it.
+func serviceExtraProfiles(service types.ServiceConfig) ([]string, error) {
+	var raw map[string]any
+	ok, err := service.Extensions.Get("x-incus-compose", &raw)
+	if !ok || err != nil {
+		return nil, nil //nolint:nilerr // missing/malformed extension means no extra profiles
+	}
+
+	profilesRaw, ok := raw["profiles"].([]any)
+	if !ok || len(profilesRaw) == 0 {
+		return nil, nil
+	}
+
+	profiles := make([]string, 0, len(profilesRaw))
+	for _, p := range profilesRaw {
+		name, ok := p.(string)
+		if !ok {
+			return nil, fmt.Errorf("x-incus-compose.profiles: entry %v must be a string", p)
+		}
+		profiles = append(profiles, name)
+	}
+
+	return profiles, nil
 }
 
 // checkEntrypoint rejects a service whose entrypoint and command are both

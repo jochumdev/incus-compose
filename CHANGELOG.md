@@ -13,6 +13,13 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Added
 
+- `services.{name}.x-incus-compose.profiles`: set the instance's full Incus
+  profile list on create, verbatim - same semantics as `incus launch
+  --profile`, so a list that omits `default` leaves the instance without it.
+  Until now nothing in compose could express profile *membership*: `x-incus`
+  merges into the instance's config map, and `profiles` is a field on the
+  instance struct, not a config key. (by @alien43)
+
 - `run SERVICE [COMMAND]` starts a one-off instance from a service and exits
   with the command's own status, as `docker compose run` does. Incus reports no
   exit status for an instance that stopped, so the instance runs a helper that
