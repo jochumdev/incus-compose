@@ -64,27 +64,41 @@ func (e *incusEvents) len() int {
 	return len(e.cancels)
 }
 
-// ListenEvents opens an event socket of this connection's own and returns the
-// events it carries. Closing ctx closes the channel.
+// ListenEvents opens an event socket of this connection's own for project, and
+// returns the events it carries. Closing ctx closes the channel.
 //
-// With allProjects the connection's project is not sent at all, and the server
-// answers with every project the certificate is allowed to see.
-func (c *Connection) ListenEvents(ctx context.Context, types []string, allProjects bool) (<-chan api.Event, error) {
+// An empty project listens on the default one, which is how incusd reads a
+// socket that names none.
+func (c *Connection) ListenEvents(ctx context.Context, project string, types []string) (<-chan api.Event, error) {
+	query := url.Values{}
+	if project != "" {
+		query.Set("project", project)
+	}
+
+	return c.listenEvents(ctx, types, query)
+}
+
+// ListenEventsAllProjects listens on every project the certificate may see.
+//
+// The server takes a different path for this: it builds a permission checker
+// instead of authorizing one project, so the socket keeps serving projects that
+// did not exist when it opened.
+func (c *Connection) ListenEventsAllProjects(ctx context.Context, types []string) (<-chan api.Event, error) {
+	query := url.Values{}
+	query.Set("all-projects", "true")
+
+	return c.listenEvents(ctx, types, query)
+}
+
+// listenEvents dials the event socket and pumps it into a channel.
+func (c *Connection) listenEvents(ctx context.Context, types []string, query url.Values) (<-chan api.Event, error) {
 	transport, ok := c.http.Transport.(*http.Transport)
 	if !ok {
 		return nil, fmt.Errorf("listening for events: unexpected transport %T", c.http.Transport)
 	}
 
-	query := url.Values{}
 	if len(types) > 0 {
 		query.Set("type", strings.Join(types, ","))
-	}
-
-	switch {
-	case allProjects:
-		query.Set("all-projects", "true")
-	case c.project != "":
-		query.Set("project", c.project)
 	}
 
 	uri := c.eventsURL(query)

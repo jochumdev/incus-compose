@@ -365,7 +365,7 @@ func TestImageDelete(t *testing.T) {
 			require.NoError(t, RunAction(ctx, r, ActionDelete, OptionForce()))
 
 			if tt.ensure {
-				alias, _, _ := c.incus.GetImageAlias(ctx, r.(*Image).IncusName(), nil)
+				alias, _, _ := c.incus.GetImageAlias(ctx, c.incusProject, r.(*Image).IncusName(), nil)
 				require.Nil(t, alias, "image should be gone after Delete")
 			}
 		})
@@ -667,16 +667,16 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	require.NotNil(t, img.cache)
 
 	// Another project prunes the cache entry out from under us.
-	cacheAlias, _, err := img.cache.incus.GetImageAlias(ctx, img.incusName, nil)
+	cacheAlias, _, err := img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.incusName, nil)
 	require.NoError(t, err)
 
-	op, err := img.cache.incus.DeleteImage(ctx, cacheAlias.Target)
+	op, err := img.cache.incus.DeleteImage(ctx, img.cache.incusProject, cacheAlias.Target)
 	require.NoError(t, err)
 
 	_, err = iclient.WaitOperation(ctx, op)
 	require.NoError(t, err)
 
-	_, _, err = img.cache.incus.GetImageAlias(ctx, img.incusName, nil)
+	_, _, err = img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.incusName, nil)
 	require.Error(t, err)
 
 	// The project still holds it, so Ensure must answer from there.
@@ -684,7 +684,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	require.True(t, r.IsEnsured())
 
 	// A refill would mean it went looking past its own project.
-	_, _, err = img.cache.incus.GetImageAlias(ctx, img.incusName, nil)
+	_, _, err = img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.incusName, nil)
 	require.Error(t, err, "ensure repopulated the cache instead of using the project copy")
 }
 
@@ -993,12 +993,12 @@ func TestImageDeleteCache(t *testing.T) {
 
 			require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate()))
 
-			_, _, err = cache.incus.GetImageAlias(ctx, tt.image, nil)
+			_, _, err = cache.incus.GetImageAlias(ctx, cache.incusProject, tt.image, nil)
 			require.NoError(t, err, "the ensure should have left %q in the cache", tt.image)
 
 			require.NoError(t, RunAction(ctx, r, ActionDelete, tt.opts...))
 
-			_, _, err = cache.incus.GetImageAlias(ctx, tt.image, nil)
+			_, _, err = cache.incus.GetImageAlias(ctx, cache.incusProject, tt.image, nil)
 			if tt.cached {
 				require.NoError(t, err, "a plain delete must leave the cache alone")
 

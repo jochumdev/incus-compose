@@ -18,7 +18,7 @@ func TestIncusProfileRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{"name":"default"}`)
 
-		profile, _, err := conn.GetProfile(ctx, "default")
+		profile, _, err := conn.GetProfile(ctx, "myproject", "default")
 		require.NoError(t, err)
 		require.Equal(t, "default", profile.Name)
 
@@ -32,7 +32,7 @@ func TestIncusProfileRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		require.NoError(t, conn.CreateProfile(ctx, api.ProfilesPost{Name: "web"}))
+		require.NoError(t, conn.CreateProfile(ctx, "myproject", api.ProfilesPost{Name: "web"}))
 
 		req := seen.all()[0]
 		require.Equal(t, http.MethodPost, req.method)
@@ -45,7 +45,7 @@ func TestIncusProfileRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		err := conn.UpdateProfile(ctx, "web", api.ProfilePut{Description: "d"}, "the-etag")
+		err := conn.UpdateProfile(ctx, "myproject", "web", api.ProfilePut{Description: "d"}, "the-etag")
 		require.NoError(t, err)
 
 		req := seen.all()[0]
@@ -59,7 +59,7 @@ func TestIncusProfileRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		require.NoError(t, conn.DeleteProfile(ctx, "web"))
+		require.NoError(t, conn.DeleteProfile(ctx, "myproject", "web"))
 
 		req := seen.all()[0]
 		require.Equal(t, http.MethodDelete, req.method)
@@ -75,11 +75,11 @@ func TestIncusProfileAgainstRealIncus(t *testing.T) {
 	conn := testConnection(t)
 
 	// Every project has a default profile.
-	profile, etag, err := conn.GetProfile(ctx, "default")
+	profile, etag, err := conn.GetProfile(ctx, "", "default")
 	require.NoError(t, err)
 	require.Equal(t, "default", profile.Name)
 	require.NotEmpty(t, etag, "GetProfile must return the ETag header")
 
-	_, _, err = conn.GetProfile(ctx, "ic-iclient-no-such-profile")
+	_, _, err = conn.GetProfile(ctx, "", "ic-iclient-no-such-profile")
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404, got %v", err)
 }

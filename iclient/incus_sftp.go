@@ -19,24 +19,24 @@ const incusSFTPMaxPacket = 128 * 1024
 
 // GetInstanceFileSFTP returns an SFTP connection to an instance's filesystem.
 // The caller closes it; holding one open keeps the forkfile process alive.
-func (c *Connection) GetInstanceFileSFTP(ctx context.Context, instanceName string) (*sftp.Client, error) {
-	return c.sftpClient(ctx, incusInstancePath(instanceName, "/sftp"))
+func (c *Connection) GetInstanceFileSFTP(ctx context.Context, project string, instanceName string) (*sftp.Client, error) {
+	return c.sftpClient(ctx, project, incusInstancePath(instanceName, "/sftp"))
 }
 
 // GetStoragePoolVolumeFileSFTP returns an SFTP connection to a custom volume.
 // The caller closes it; holding one open keeps the volume mounted, and
 // deleting the volume does not wait for that.
-func (c *Connection) GetStoragePoolVolumeFileSFTP(ctx context.Context, pool string, volType string, volName string) (*sftp.Client, error) {
+func (c *Connection) GetStoragePoolVolumeFileSFTP(ctx context.Context, project string, pool string, volType string, volName string) (*sftp.Client, error) {
 	path := "/storage-pools/" + url.PathEscape(pool) +
 		"/volumes/" + url.PathEscape(volType) +
 		"/" + url.PathEscape(volName) + "/sftp"
 
-	return c.sftpClient(ctx, path)
+	return c.sftpClient(ctx, project, path)
 }
 
 // sftpClient upgrades a connection to SFTP and speaks the protocol over it.
-func (c *Connection) sftpClient(ctx context.Context, path string) (*sftp.Client, error) {
-	conn, err := c.upgradeConn(ctx, path, "sftp")
+func (c *Connection) sftpClient(ctx context.Context, project string, path string) (*sftp.Client, error) {
+	conn, err := c.upgradeConn(ctx, project, path, "sftp")
 	if err != nil {
 		return nil, err
 	}
@@ -59,15 +59,15 @@ func (c *Connection) sftpClient(ctx context.Context, path string) (*sftp.Client,
 
 // upgradeConn dials the server and trades an HTTP request for a raw stream.
 // This is not a websocket, and cannot go through the http.Client and its pool.
-func (c *Connection) upgradeConn(ctx context.Context, path string, protocol string) (net.Conn, error) {
+func (c *Connection) upgradeConn(ctx context.Context, project string, path string, protocol string) (net.Conn, error) {
 	transport, ok := c.http.Transport.(*http.Transport)
 	if !ok {
 		return nil, fmt.Errorf("unexpected transport %T", c.http.Transport)
 	}
 
 	query := url.Values{}
-	if c.project != "" {
-		query.Set("project", c.project)
+	if project != "" {
+		query.Set("project", project)
 	}
 
 	uri, err := url.Parse(c.baseURL + "/1.0" + path)

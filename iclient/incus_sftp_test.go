@@ -25,22 +25,21 @@ func TestIncusVolumeSFTP(t *testing.T) {
 	pool := pools[0]
 
 	project := testProject(t, conn, "iclient-sftp")
-	projectConn := conn.WithProject(project)
 
 	const volume = "iclient-sftp-volume"
 
-	err = projectConn.CreateStoragePoolVolume(ctx, pool, api.StorageVolumesPost{
+	err = conn.CreateStoragePoolVolume(ctx, project, pool, api.StorageVolumesPost{
 		Name: volume,
 		Type: "custom",
 	})
 	require.NoError(t, err)
 
 	// The volume goes with the project, so no separate cleanup.
-	stored, _, err := projectConn.GetStoragePoolVolume(ctx, pool, "custom", volume, nil)
+	stored, _, err := conn.GetStoragePoolVolume(ctx, project, pool, "custom", volume, nil)
 	require.NoError(t, err)
 	require.Equal(t, volume, stored.Name)
 
-	client, err := projectConn.GetStoragePoolVolumeFileSFTP(ctx, pool, "custom", volume)
+	client, err := conn.GetStoragePoolVolumeFileSFTP(ctx, project, pool, "custom", volume)
 	require.NoError(t, err)
 
 	defer func() { _ = client.Close() }()
@@ -75,7 +74,7 @@ func TestIncusInstanceSFTPNotFound(t *testing.T) {
 
 	conn := testConnection(t)
 
-	_, err := conn.GetInstanceFileSFTP(t.Context(), "ic-iclient-does-not-exist")
+	_, err := conn.GetInstanceFileSFTP(t.Context(), "", "ic-iclient-does-not-exist")
 	require.Error(t, err)
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404 StatusError, got %v", err)
 }

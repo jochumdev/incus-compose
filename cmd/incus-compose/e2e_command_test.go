@@ -115,12 +115,10 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	conn, err := gc.Connection()
 	require.NoError(t, err)
 
-	cache := conn.WithProject(cacheProject)
-
-	cached, _, err := cache.GetImageAlias(ctx, alias, nil)
+	cached, _, err := conn.GetImageAlias(ctx, cacheProject, alias, nil)
 	require.NoError(t, err, "the pull above should have left %q in the cache", alias)
 
-	img, eTag, err := cache.GetImage(ctx, cached.Target, nil)
+	img, eTag, err := conn.GetImage(ctx, cacheProject, cached.Target, nil)
 	require.NoError(t, err)
 
 	// What an incus-compose before the split left behind.
@@ -129,7 +127,7 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	delete(props, "oci.cmd")
 	delete(props, "oci.volumes")
 
-	require.NoError(t, cache.UpdateImage(ctx, cached.Target, incusApi.ImagePut{
+	require.NoError(t, conn.UpdateImage(ctx, cacheProject, cached.Target, incusApi.ImagePut{
 		AutoUpdate: img.AutoUpdate,
 		Properties: props,
 		Public:     img.Public,
@@ -146,7 +144,7 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 		"an aged cache entry still resolved command: the old way")
 
 	// And the entry itself is current again, so the next project reuses it.
-	img, _, err = cache.GetImage(ctx, cached.Target, nil)
+	img, _, err = conn.GetImage(ctx, cacheProject, cached.Target, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "docker-entrypoint.sh", img.Properties["oci.entrypoint"])
 	assert.Equal(t, "memcached", img.Properties["oci.cmd"])

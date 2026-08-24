@@ -18,7 +18,7 @@ func (c *Connection) GetCertificates(ctx context.Context) ([]api.Certificate, er
 	query := url.Values{}
 	query.Set("recursion", "1")
 
-	_, err := c.getStruct(ctx, incusCertificatesPath, query, &certificates)
+	_, err := c.getStruct(ctx, "", incusCertificatesPath, query, &certificates)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (c *Connection) GetCertificates(ctx context.Context) ([]api.Certificate, er
 // With certificate.TrustToken set this is the registration call, the one
 // request a client makes before it is trusted.
 func (c *Connection) CreateCertificate(ctx context.Context, certificate api.CertificatesPost) error {
-	_, _, err := c.do(ctx, http.MethodPost, incusCertificatesPath, nil, certificate, "")
+	_, _, err := c.do(ctx, "", http.MethodPost, incusCertificatesPath, nil, certificate, "")
 
 	return err
 }
@@ -43,12 +43,12 @@ func (c *Connection) CreateCertificate(ctx context.Context, certificate api.Cert
 func (c *Connection) CreateCertificateToken(ctx context.Context, certificate api.CertificatesPost) (<-chan api.Operation, error) {
 	certificate.Token = true
 
-	return c.asyncOperation(ctx, http.MethodPost, incusCertificatesPath, certificate, "")
+	return c.asyncOperation(ctx, "", http.MethodPost, incusCertificatesPath, certificate, "")
 }
 
 // DeleteCertificate removes a certificate from the trust store.
 func (c *Connection) DeleteCertificate(ctx context.Context, fingerprint string) error {
-	_, _, err := c.do(ctx, http.MethodDelete, incusCertificatesPath+"/"+url.PathEscape(fingerprint), nil, nil, "")
+	_, _, err := c.do(ctx, "", http.MethodDelete, incusCertificatesPath+"/"+url.PathEscape(fingerprint), nil, nil, "")
 
 	return err
 }

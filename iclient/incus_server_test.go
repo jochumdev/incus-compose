@@ -1,13 +1,10 @@
 package iclient
 
 import (
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 
-	"github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,8 +23,8 @@ func TestIncusServerRequestURLs(t *testing.T) {
 		require.Equal(t, []string{"instance_get_full"}, server.APIExtensions)
 		require.Equal(t, "test-etag", etag)
 
-		// The root of the API, with the project still applied.
-		require.Equal(t, []string{"/1.0?project=myproject"}, seen.uris())
+		// The root of the API, which is server-level and carries no project.
+		require.Equal(t, []string{"/1.0"}, seen.uris())
 	})
 
 	t.Run("RawQuery is verbatim", func(t *testing.T) {
@@ -66,29 +63,12 @@ func TestIncusGetConnectionInfo(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "incus", info.Protocol)
-	require.Equal(t, "myproject", info.Project)
 	require.Equal(t, "node1", info.Target)
 	require.Empty(t, info.SocketPath, "an http remote has no socket")
 
 	// A wildcard address names no host, so it is dropped.
 	require.Contains(t, info.Addresses, "https://10.0.0.5:8443")
 	require.NotContains(t, info.Addresses, "https://:8443")
-}
-
-func TestIncusGetConnectionInfoDefaultProject(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"type":"sync","status_code":200,"metadata":{}}`)
-	}))
-	t.Cleanup(server.Close)
-
-	conn, err := NewConnection(&ConfigRemoteInfo{Name: "noproject", Addrs: []string{server.URL}})
-	require.NoError(t, err)
-
-	info, err := conn.GetConnectionInfo(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, api.ProjectDefaultName, info.Project)
 }
 
 func TestIncusServerAgainstRealIncus(t *testing.T) {

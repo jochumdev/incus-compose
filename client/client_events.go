@@ -17,7 +17,7 @@ func addEventHook(c *Client) {
 		// Its own context, so Done ends the listener without touching the client's.
 		listenCtx, stop := context.WithCancel(c.ctx)
 
-		events, err := c.incus.ListenEvents(listenCtx, []string{incusApi.EventTypeLifecycle}, false)
+		events, err := c.incus.ListenEvents(listenCtx, c.incusProject, []string{incusApi.EventTypeLifecycle})
 		if err != nil {
 			stop()
 			return fmt.Errorf("opening an event listener: %w", err)

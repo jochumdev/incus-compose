@@ -24,7 +24,7 @@ func (r *StorageVolume) SFTP(ctx context.Context) (*sftp.Client, error) {
 		return nil, err
 	}
 
-	return conn.GetStoragePoolVolumeFileSFTP(ctx, r.Config.Pool, "custom", r.incusName)
+	return conn.GetStoragePoolVolumeFileSFTP(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName)
 }
 
 // VolumeLock is an advisory lock on a file inside a StorageVolume; release it with Unlock.

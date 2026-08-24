@@ -17,7 +17,7 @@ func TestIncusExecInstanceRefusesInteractive(t *testing.T) {
 
 	conn, seen := recordingServer(t, `{}`)
 
-	_, err := conn.ExecInstance(t.Context(), "web-1", api.InstanceExecPost{
+	_, err := conn.ExecInstance(t.Context(), "myproject", "web-1", api.InstanceExecPost{
 		Command:     []string{"true"},
 		Interactive: true,
 	}, nil)
@@ -26,8 +26,8 @@ func TestIncusExecInstanceRefusesInteractive(t *testing.T) {
 	require.Empty(t, seen.all(), "it must refuse before asking the server")
 }
 
-// testInstance brings up a container of its own, carrying config.
-func testInstance(t *testing.T, conn *Connection, name string, config map[string]string) {
+// testInstance brings up a container of its own in project, carrying config.
+func testInstance(t *testing.T, conn *Connection, project string, name string, config map[string]string) {
 	t.Helper()
 
 	ctx := t.Context()
@@ -49,7 +49,7 @@ func testInstance(t *testing.T, conn *Connection, name string, config map[string
 
 	// Straight from the registry: incusd pulls the image as part of creating
 	// the instance, so this needs no separate image step.
-	updates, err := conn.CreateInstance(createCtx, api.InstancesPost{
+	updates, err := conn.CreateInstance(createCtx, project, api.InstancesPost{
 		Name: name,
 		Type: api.InstanceTypeContainer,
 		InstancePut: api.InstancePut{
@@ -73,21 +73,21 @@ func testInstance(t *testing.T, conn *Connection, name string, config map[string
 
 	t.Cleanup(func() {
 		// Registered after the project's cleanup, so it runs before it.
-		stop, err := conn.UpdateInstanceState(context.Background(), name,
+		stop, err := conn.UpdateInstanceState(context.Background(), project, name,
 			api.InstanceStatePut{Action: "stop", Force: true, Timeout: -1}, "")
 		if err == nil {
 			_, _ = WaitOperation(context.Background(), stop)
 		}
 	})
 
-	updates, err = conn.UpdateInstanceState(ctx, name,
+	updates, err = conn.UpdateInstanceState(ctx, project, name,
 		api.InstanceStatePut{Action: "start", Timeout: -1}, "")
 	require.NoError(t, err)
 
 	_, err = WaitOperation(ctx, updates)
 	require.NoError(t, err)
 
-	state, _, err := conn.GetInstanceState(ctx, name)
+	state, _, err := conn.GetInstanceState(ctx, project, name)
 	require.NoError(t, err)
 	require.Equal(t, "Running", state.Status)
 }
@@ -102,16 +102,15 @@ func TestIncusExecInstanceAgainstRealIncus(t *testing.T) {
 	conn := testConnection(t)
 
 	project := testProject(t, conn, "iclient-exec")
-	projectConn := conn.WithProject(project)
 
 	const name = "exec-1"
 
-	testInstance(t, projectConn, name, nil)
+	testInstance(t, conn, project, name, nil)
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 
-	updates, err := projectConn.ExecInstance(ctx, name, api.InstanceExecPost{
+	updates, err := conn.ExecInstance(ctx, project, name, api.InstanceExecPost{
 		Command: []string{"sh", "-c", "echo out; echo err >&2; exit 7"},
 	}, &InstanceExecArgs{Stdout: stdout, Stderr: stderr})
 	require.NoError(t, err)

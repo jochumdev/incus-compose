@@ -188,7 +188,7 @@ func newPsCommand() *cli.Command {
 					return
 				}
 
-				instances, err := incus.GetInstances(ctx, &iclient.GetInstancesArgs{Full: true})
+				instances, err := incus.GetInstances(ctx, c.IncusProject(), &iclient.GetInstancesArgs{Full: true})
 				if err != nil {
 					// Non-fatal: if we cannot list instances, skip orphan inclusion.
 					c.LogDebug("Listing instances for orphans failed", "error", err)

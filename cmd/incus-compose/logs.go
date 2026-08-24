@@ -27,18 +27,18 @@ func instanceLog(ctx context.Context, c *client.Client, inst *client.Instance, o
 		return err
 	}
 
-	err = logBuffer(ctx, conn, inst, out)
+	err = logBuffer(ctx, conn, c.IncusProject(), inst, out)
 	if err != nil || !follow {
 		return err
 	}
 
-	return logStream(ctx, conn, inst, out)
+	return logStream(ctx, conn, c.IncusProject(), inst, out)
 }
 
 // logBuffer reads the saved console log buffer via GET /console (equivalent to
 // `incus console --show-log`).
-func logBuffer(ctx context.Context, conn *iclient.Connection, inst *client.Instance, out logWriter) error {
-	reader, err := conn.GetInstanceConsoleLog(ctx, inst.IncusName())
+func logBuffer(ctx context.Context, conn *iclient.Connection, project string, inst *client.Instance, out logWriter) error {
+	reader, err := conn.GetInstanceConsoleLog(ctx, project, inst.IncusName())
 	if err != nil {
 		return client.ErrOperation.WithText("getting console log").Wrap(err)
 	}
@@ -55,13 +55,13 @@ func logBuffer(ctx context.Context, conn *iclient.Connection, inst *client.Insta
 }
 
 // logStream streams the console until the context is canceled.
-func logStream(ctx context.Context, conn *iclient.Connection, inst *client.Instance, out logWriter) error {
+func logStream(ctx context.Context, conn *iclient.Connection, project string, inst *client.Instance, out logWriter) error {
 	req := incusApi.InstanceConsolePost{
 		Type:  "console",
 		Force: true, // Take over existing console connections
 	}
 
-	op, err := conn.ConsoleInstance(ctx, inst.IncusName(), req, &iclient.InstanceConsoleArgs{
+	op, err := conn.ConsoleInstance(ctx, project, inst.IncusName(), req, &iclient.InstanceConsoleArgs{
 		Output: &logOutput{resource: inst, out: out},
 	})
 	if err != nil {
@@ -305,7 +305,7 @@ func logs(ctx context.Context, c *client.Client, args logsArgs) error {
 	listenCtx, stopListening := context.WithCancel(ctx)
 	defer stopListening()
 
-	events, err := conn.ListenEvents(listenCtx, []string{incusApi.EventTypeLifecycle}, false)
+	events, err := conn.ListenEvents(listenCtx, c.IncusProject(), []string{incusApi.EventTypeLifecycle})
 	if err != nil {
 		c.LogError("Subscribing to events", "error", err)
 		return errLogged.Wrap(err)

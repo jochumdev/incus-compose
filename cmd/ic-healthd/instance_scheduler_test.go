@@ -26,6 +26,7 @@ const absenceGrace = 500 * time.Millisecond
 type scheduler struct {
 	ctx       context.Context
 	conn      *iclient.Connection
+	project   string
 	pool      *pools
 	instances map[string]*instance
 	results   chan instanceResult
@@ -50,6 +51,7 @@ func newSchedulerWithPools(t *testing.T, workers, restartWorkers int) *scheduler
 	return &scheduler{
 		ctx:       t.Context(),
 		conn:      refusedConn(t),
+		project:   "healthd-scheduler",
 		pool:      pool,
 		instances: map[string]*instance{},
 		results:   make(chan instanceResult, 32),
@@ -84,15 +86,15 @@ func (s *scheduler) running(t *testing.T, inst *instance, state instanceState, d
 }
 
 func (s *scheduler) run() time.Time {
-	return runInstanceActions(s.ctx, s.conn, s.pool, s.instances, s.results)
+	return runInstanceActions(s.ctx, s.conn, s.project, s.pool, s.instances, s.results)
 }
 
 func (s *scheduler) result(res instanceResult) {
-	handleInstanceResult(s.ctx, s.conn, s.instances, s.results, res)
+	handleInstanceResult(s.ctx, s.conn, s.project, s.instances, s.results, res)
 }
 
 func (s *scheduler) event(action instanceEventAction, name string) {
-	handleInstanceEvent(s.ctx, s.conn, s.instances, s.results, instanceEvent{Action: action, Instance: name})
+	handleInstanceEvent(s.ctx, s.conn, s.project, s.instances, s.results, instanceEvent{Action: action, Instance: name})
 }
 
 // next returns the result the loop would have received.
@@ -756,11 +758,11 @@ func TestStatusResultForgetsAFailedWrite(t *testing.T) {
 	s := newScheduler(t)
 	inst := s.add("web-1", testConfig())
 
-	reportStatus(s.ctx, s.conn, s.results, inst, shared.HealthStatusUnhealthy)
+	reportStatus(s.ctx, s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
 	require.Equal(t, shared.HealthStatusUnhealthy, inst.status,
 		"the value is recorded before the write lands, so two writes cannot invert")
 
-	reportStatus(s.ctx, s.conn, s.results, inst, shared.HealthStatusUnhealthy)
+	reportStatus(s.ctx, s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
 
 	res := s.next(t)
 	require.Equal(t, instanceResultStatus, res.kind)
@@ -772,7 +774,7 @@ func TestStatusResultForgetsAFailedWrite(t *testing.T) {
 
 	require.Empty(t, inst.status, "a failed write must be retried, so it may not stay recorded")
 
-	reportStatus(s.ctx, s.conn, s.results, inst, shared.HealthStatusUnhealthy)
+	reportStatus(s.ctx, s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
 	require.Equal(t, instanceResultStatus, s.next(t).kind, "the same verdict must be written again")
 }
 

@@ -40,7 +40,7 @@ func waitHealthy(t *testing.T, c *client.Client, name string) {
 
 	var status string
 	require.Eventuallyf(t, func() bool {
-		inst, _, err := conn.GetInstance(t.Context(), name, nil)
+		inst, _, err := conn.GetInstance(t.Context(), c.IncusProject(), name, nil)
 		if err != nil {
 			return false
 		}
@@ -83,7 +83,7 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 	conn, err := hc.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, globalHealthdName, nil)
+	inst, _, err := conn.GetInstance(ctx, hc.IncusProject(), globalHealthdName, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "disk", inst.Devices["root"]["type"])
 	assert.Equal(t, globalHealthdNetwork, inst.Devices["eth0"]["network"])
@@ -148,7 +148,7 @@ services:
 	conn, err := hc.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, globalHealthdName, nil)
+	inst, _, err := conn.GetInstance(ctx, hc.IncusProject(), globalHealthdName, nil)
 	require.NoError(t, err)
 	assert.Equal(t, plannedNetworkNames(ctx, t, pn, compose), []string{inst.Devices["eth0"]["network"]})
 
@@ -381,7 +381,7 @@ func instanceStatus(t *testing.T, c *client.Client, name string) string {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(t.Context(), name, nil)
+	inst, _, err := conn.GetInstance(t.Context(), c.IncusProject(), name, nil)
 	require.NoError(t, err)
 
 	return inst.Status

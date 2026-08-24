@@ -647,7 +647,7 @@ func oneOffInstances(ctx context.Context, c *client.Client) ([]incusApi.Instance
 		return nil, err
 	}
 
-	instances, err := conn.GetInstances(ctx, nil)
+	instances, err := conn.GetInstances(ctx, c.IncusProject(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +680,7 @@ func removeOneOffs(ctx context.Context, c *client.Client, timeout time.Duration)
 
 	for _, inst := range instances {
 		if inst.StatusCode == incusApi.Running || inst.StatusCode == incusApi.Frozen {
-			op, err := conn.UpdateInstanceState(ctx, inst.Name, incusApi.InstanceStatePut{
+			op, err := conn.UpdateInstanceState(ctx, c.IncusProject(), inst.Name, incusApi.InstanceStatePut{
 				Action:  "stop",
 				Force:   true,
 				Timeout: int(timeout.Seconds()),
@@ -694,7 +694,7 @@ func removeOneOffs(ctx context.Context, c *client.Client, timeout time.Duration)
 			}
 		}
 
-		op, err := conn.DeleteInstance(ctx, inst.Name)
+		op, err := conn.DeleteInstance(ctx, c.IncusProject(), inst.Name)
 		if err == nil {
 			_, err = iclient.WaitOperation(ctx, op)
 		}

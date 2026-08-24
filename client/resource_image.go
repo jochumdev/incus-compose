@@ -444,7 +444,6 @@ func (r *Image) pullRequest(fingerprint string) incusApi.ImagesPost {
 			Type:        "image",
 			Mode:        "pull",
 			Fingerprint: fingerprint,
-			Project:     r.source.info.Project,
 		},
 	}
 }
@@ -456,12 +455,12 @@ func (r *Image) sourceFingerprint(ctx context.Context) (string, error) {
 		return r.image, nil
 	}
 
-	alias, _, err := r.source.conn.GetImageAlias(ctx, r.image, nil)
+	alias, _, err := r.source.conn.GetImageAlias(ctx, "", r.image, nil)
 	if err != nil {
 		return "", ErrNotFound.WithText("image not found on source").Wrap(err)
 	}
 
-	image, _, err := r.source.conn.GetImage(ctx, alias.Target, nil)
+	image, _, err := r.source.conn.GetImage(ctx, "", alias.Target, nil)
 	if err != nil {
 		return "", ErrNotFound.WithText("resolved alias not found on source").Wrap(err)
 	}
@@ -478,7 +477,7 @@ func (r *Image) get(ctx context.Context) error {
 	}
 
 	// Check if image alias exists in cache
-	alias, eTag, err := conn.GetImageAlias(ctx, r.incusName, nil)
+	alias, eTag, err := conn.GetImageAlias(ctx, r.client.incusProject, r.incusName, nil)
 	if err != nil {
 		r.clearState()
 		return ErrNotFound.Wrap(err)
@@ -486,7 +485,7 @@ func (r *Image) get(ctx context.Context) error {
 
 	next := &ImageState{IncusAlias: alias, ETag: eTag}
 
-	img, _, err := conn.GetImage(ctx, alias.Target, nil)
+	img, _, err := conn.GetImage(ctx, r.client.incusProject, alias.Target, nil)
 	if err == nil {
 		next.Size = img.Size
 		ociReadProperties(next, img.Properties)
@@ -530,7 +529,7 @@ func (r *Image) readSource(ctx context.Context) {
 
 	// An index holds one manifest per architecture, and the one to compare
 	// against is what incusd pulled - which is what the stored image carries.
-	img, _, err := conn.GetImage(ctx, r.State().IncusAlias.Target, nil)
+	img, _, err := conn.GetImage(ctx, r.client.incusProject, r.State().IncusAlias.Target, nil)
 	if err != nil {
 		r.client.LogWarn("Cannot read the stored image", "resource", r, "error", err)
 
@@ -560,7 +559,7 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 		return nil, err
 	}
 
-	op, err := r.cache.incus.CreateImage(ctx, r.pullRequest(fingerprint), nil)
+	op, err := r.cache.incus.CreateImage(ctx, r.cache.incusProject, r.pullRequest(fingerprint), nil)
 	if err == nil {
 		err = r.client.hookOperation(ctx, ActionEnsure, r, args, op, nil)
 	}
@@ -580,7 +579,7 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 		retry.DelayType(retry.FixedDelay),
 		retry.LastErrorOnly(true),
 	).Do(func() (*incusApi.ImageAliasesEntry, error) {
-		alias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
+		alias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
 		return alias, err
 	})
 	if err != nil {
@@ -588,7 +587,7 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 	}
 
 	// Extract oci informations with a temporary instance.
-	err = r.ociStoreConfig(ctx, r.cache.incus, cacheAlias.Target, nil)
+	err = r.ociStoreConfig(ctx, r.cache.incus, r.cache.incusProject, cacheAlias.Target, nil)
 	if err != nil {
 		return nil, ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 	}
@@ -599,7 +598,7 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 // copyToProject is hop B: copy the cached image into the active project,
 // carrying the OCI properties extracted when it landed in the cache.
 func (r *Image) copyToProject(ctx context.Context, args Options, cacheAlias *incusApi.ImageAliasesEntry) error {
-	img, _, err := r.cache.incus.GetImage(ctx, cacheAlias.Target, nil)
+	img, _, err := r.cache.incus.GetImage(ctx, r.cache.incusProject, cacheAlias.Target, nil)
 	if err != nil {
 		return ErrCreate.WithText("cannot resolve the image from cache after copy")
 	}
@@ -614,7 +613,7 @@ func (r *Image) copyToProject(ctx context.Context, args Options, cacheAlias *inc
 		return err
 	}
 
-	op, err := conn.CopyImage(ctx, r.cache.incus, cacheAlias.Target, &iclient.ImageCopyArgs{
+	op, err := conn.CopyImage(ctx, r.client.incusProject, r.cache.incus, r.cache.incusProject, cacheAlias.Target, &iclient.ImageCopyArgs{
 		Aliases: []incusApi.ImageAlias{{Name: r.incusName}},
 		Mode:    "pull",
 	})
@@ -700,11 +699,11 @@ func (r *Image) create(ctx context.Context, args Options) error {
 
 // materialize is hop A: make sure the cache holds the alias, returning it.
 func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageAliasesEntry, error) {
-	cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
+	cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
 	if err == nil {
 		// An entry cached before the split still concatenates entrypoint and
 		// command, so reading the config again upgrades it where it lies.
-		err = r.ociStoreConfig(ctx, r.cache.incus, cacheAlias.Target, nil)
+		err = r.ociStoreConfig(ctx, r.cache.incus, r.cache.incusProject, cacheAlias.Target, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -719,13 +718,13 @@ func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageA
 	cacheAlias, cacheErr := r.copyToCache(ctx, args)
 	if cacheErr != nil && errors.Is(cacheErr, ErrNotFound) {
 		// A concurrent copy may still have published the alias.
-		cacheAlias, _, err = r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
+		cacheAlias, _, err = r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
 		if err != nil {
 			return nil, ErrNotFound.WithText("on cache and source").Wrap(cacheErr)
 		}
 
 		// Extract oci informations with a temporary instance.
-		err = r.ociStoreConfig(ctx, r.cache.incus, cacheAlias.Target, nil)
+		err = r.ociStoreConfig(ctx, r.cache.incus, r.cache.incusProject, cacheAlias.Target, nil)
 		if err != nil {
 			return nil, ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 		}
@@ -758,7 +757,7 @@ func (r *Image) createDirect(ctx context.Context, args Options) error {
 		return err
 	}
 
-	op, err := conn.CreateImage(ctx, r.pullRequest(fingerprint), nil)
+	op, err := conn.CreateImage(ctx, r.client.incusProject, r.pullRequest(fingerprint), nil)
 	if err != nil {
 		r.client.LogWarn("Creating a copy operation failed", "resource", r, "error", err)
 	} else {
@@ -769,13 +768,13 @@ func (r *Image) createDirect(ctx context.Context, args Options) error {
 		}
 	}
 
-	targetAlias, _, err := conn.GetImageAlias(ctx, r.incusName, nil)
+	targetAlias, _, err := conn.GetImageAlias(ctx, r.client.incusProject, r.incusName, nil)
 	if err != nil {
 		return ErrNotFound.WithText("on project after copy").Wrap(err)
 	}
 
 	// Extract oci informations with a temporary instance.
-	err = r.ociStoreConfig(ctx, conn, targetAlias.Target, nil)
+	err = r.ociStoreConfig(ctx, conn, r.client.incusProject, targetAlias.Target, nil)
 	if err != nil {
 		return ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 	}
@@ -814,7 +813,7 @@ func (r *Image) ensureBuild(ctx context.Context, args Options) error {
 
 	// Hop A: the store already holds it, so copy rather than rebuild.
 	if r.cache != nil && args.Build.Mode != BuildForce {
-		cacheAlias, _, storeErr := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
+		cacheAlias, _, storeErr := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
 		if storeErr == nil {
 			r.client.LogDebug("Copying the built image from the cache", "resource", r)
 
@@ -881,22 +880,22 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 
 	// Without a usable cache the project is the import target, and hop B is a no-op.
 	cached := r.cache != nil && !buildCfg.NoCache
-	target := conn
+	target, targetProject := conn, r.client.incusProject
 	targetName := "project"
 	if cached {
-		target = r.cache.incus
+		target, targetProject = r.cache.incus, r.cache.incusProject
 		targetName = "cache"
 	}
 
-	stale, _, err := target.GetImageAlias(ctx, r.incusName, nil)
+	stale, _, err := target.GetImageAlias(ctx, targetProject, r.incusName, nil)
 	if err == nil {
-		err = deleteImage(ctx, target, stale.Target)
+		err = deleteImage(ctx, target, targetProject, stale.Target)
 		if err != nil {
 			return ErrCreate.WithText("while removing the image from the " + targetName).Wrap(err)
 		}
 	}
 
-	op, err := target.CreateImage(ctx, incusApi.ImagesPost{
+	op, err := target.CreateImage(ctx, targetProject, incusApi.ImagesPost{
 		Aliases: []incusApi.ImageAlias{{Name: r.incusName}},
 	}, &iclient.ImageCreateArgs{
 		MetaFile:   meta,
@@ -909,14 +908,14 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 		return ErrCreate.WithText("importing built image on " + targetName).Wrap(err)
 	}
 
-	built, eTag, err := target.GetImageAlias(ctx, r.incusName, nil)
+	built, eTag, err := target.GetImageAlias(ctx, targetProject, r.incusName, nil)
 	if err != nil {
 		return ErrCreate.WithText("fetching alias after build").Wrap(err)
 	}
 
 	// The builder already said what the entrypoint and command are, so a built
 	// image needs no registry to read its own config back from.
-	err = r.ociStoreConfig(ctx, target, built.Target, ociCfg)
+	err = r.ociStoreConfig(ctx, target, targetProject, built.Target, ociCfg)
 	if err != nil {
 		return err
 	}
@@ -928,9 +927,9 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 	r.created = true
 
 	if cached {
-		projectAlias, _, aliasErr := conn.GetImageAlias(ctx, r.incusName, nil)
+		projectAlias, _, aliasErr := conn.GetImageAlias(ctx, r.client.incusProject, r.incusName, nil)
 		if aliasErr == nil {
-			err = deleteImage(ctx, conn, projectAlias.Target)
+			err = deleteImage(ctx, conn, r.client.incusProject, projectAlias.Target)
 			if err != nil {
 				return ErrCreate.WithText("while removing the image from the project").Wrap(err)
 			}
@@ -950,8 +949,8 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 }
 
 // deleteImage removes an image and waits for the removal to land.
-func deleteImage(ctx context.Context, conn *iclient.Connection, fingerprint string) error {
-	op, err := conn.DeleteImage(ctx, fingerprint)
+func deleteImage(ctx context.Context, conn *iclient.Connection, project string, fingerprint string) error {
+	op, err := conn.DeleteImage(ctx, project, fingerprint)
 	if err != nil {
 		return err
 	}
@@ -971,12 +970,12 @@ func (r *Image) deleteCached(ctx context.Context) error {
 
 	defer release()
 
-	alias, _, err := r.cache.incus.GetImageAlias(ctx, r.incusName, nil)
+	alias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
 	if err != nil {
 		return nil
 	}
 
-	return deleteImage(ctx, r.cache.incus, alias.Target)
+	return deleteImage(ctx, r.cache.incus, r.cache.incusProject, alias.Target)
 }
 
 // Delete removes the per-project copy of the image from the active project, and
@@ -1028,7 +1027,7 @@ func (r *Image) Delete(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	alias, _, err := conn.GetImageAlias(ctx, r.incusName, nil)
+	alias, _, err := conn.GetImageAlias(ctx, r.client.incusProject, r.incusName, nil)
 	if err != nil || alias == nil {
 		r.clearState()
 
@@ -1037,7 +1036,7 @@ func (r *Image) Delete(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, ActionDelete, r, options, err)
 	}
 
-	op, err := conn.DeleteImage(ctx, alias.Target)
+	op, err := conn.DeleteImage(ctx, r.client.incusProject, alias.Target)
 
 	err = r.client.hookOperation(ctx, ActionDelete, r, options, op, err)
 	r.clearState()

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -103,7 +104,7 @@ func TestE2EEntrypointReplacesImageEntrypoint(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, "backend1-1", nil)
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "backend1-1", nil)
 	require.NoError(t, err)
 
 	// The busybox entrypoint is "sh"; an append would prefix it here. The shell
@@ -377,7 +378,7 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 	for _, name := range networks {
 		conn, err := c.Connection()
 		require.NoError(t, err)
-		_, _, err = conn.GetNetwork(ctx, name)
+		_, _, err = conn.GetNetwork(ctx, incusApi.ProjectDefaultName, name)
 		require.NoError(t, err, "for network %q", name)
 	}
 
@@ -388,7 +389,7 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 	for _, name := range networks {
 		conn, err := c.Connection()
 		require.NoError(t, err)
-		_, _, err = conn.GetNetwork(ctx, name)
+		_, _, err = conn.GetNetwork(ctx, incusApi.ProjectDefaultName, name)
 		require.Error(t, err, "for network %q", name)
 	}
 }
@@ -655,7 +656,7 @@ func TestE2EExternalNetwork(t *testing.T) {
 	conn, err := gc.Connection()
 	require.NoError(t, err)
 
-	_, _, err = conn.GetNetwork(ctx, "incusbr0")
+	_, _, err = conn.GetNetwork(ctx, incusApi.ProjectDefaultName, "incusbr0")
 	if err != nil {
 		t.Skipf("No incusbr0: %v", err)
 	}
@@ -994,7 +995,7 @@ func TestE2EUpPullAlwaysRecreates(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, "web-1", nil)
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 
 	created := inst.Config["volatile.base_image"]
@@ -1007,7 +1008,7 @@ func TestE2EUpPullAlwaysRecreates(t *testing.T) {
 		},
 	})
 
-	inst, _, err = conn.GetInstance(ctx, "web-1", nil)
+	inst, _, err = conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 	assert.Equal(t, created, inst.Config["volatile.base_image"], "only --pull always recreates")
 
@@ -1018,7 +1019,7 @@ func TestE2EUpPullAlwaysRecreates(t *testing.T) {
 		},
 	})
 
-	inst, _, err = conn.GetInstance(ctx, "web-1", nil)
+	inst, _, err = conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, created, inst.Config["volatile.base_image"], "the replaced image must reach the instance")
 	assert.Equal(t, "Running", inst.Status)
@@ -1032,7 +1033,7 @@ func TestE2EUpPullAlwaysRecreates(t *testing.T) {
 		},
 	})
 
-	inst, _, err = conn.GetInstance(ctx, "web-1", nil)
+	inst, _, err = conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 	assert.Equal(t, pulled, inst.Config["volatile.base_image"], "an unchanged image must not recreate")
 }

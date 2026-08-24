@@ -85,9 +85,8 @@ func newOperationServer(t *testing.T, op api.Operation) (*Connection, *operation
 	})
 
 	conn, err := NewConnection(&ConfigRemoteInfo{
-		Name:    "operations",
-		Addrs:   []string{server.URL},
-		Project: "myproject",
+		Name:  "operations",
+		Addrs: []string{server.URL},
 	})
 	require.NoError(t, err)
 
@@ -106,7 +105,7 @@ func TestIncusAsyncOperationSubscribesFirst(t *testing.T) {
 
 	conn, server := newOperationServer(t, running("op-1"))
 
-	updates, err := conn.DeleteInstance(t.Context(), "web-1")
+	updates, err := conn.DeleteInstance(t.Context(), "myproject", "web-1")
 	require.NoError(t, err)
 	require.NotNil(t, updates)
 
@@ -114,6 +113,27 @@ func TestIncusAsyncOperationSubscribesFirst(t *testing.T) {
 	require.GreaterOrEqual(t, len(seen), 2)
 	require.Equal(t, "/1.0/events", seen[0].url.Path, "the listener must open before the request")
 	require.Equal(t, "/1.0/instances/web-1", seen[1].url.Path)
+}
+
+// TestIncusAsyncOperationListensOnTheCallsProject is the whole reason project
+// is threaded down to async: incusd drops an operation event whose project is
+// not the listener's, so a listener anywhere else leaves the caller blocked on
+// updates that never come.
+func TestIncusAsyncOperationListensOnTheCallsProject(t *testing.T) {
+	t.Parallel()
+
+	conn, server := newOperationServer(t, running("op-1"))
+
+	_, err := conn.DeleteInstance(t.Context(), "second", "web-1")
+	require.NoError(t, err)
+
+	seen := server.all()
+	require.GreaterOrEqual(t, len(seen), 2)
+
+	require.Equal(t, "/1.0/events", seen[0].url.Path)
+	require.Equal(t, "second", seen[0].url.Query().Get("project"),
+		"the listener must be scoped to the project the operation runs in")
+	require.Equal(t, "second", seen[1].url.Query().Get("project"))
 }
 
 // TestIncusAsyncOperationFirstValue: the caller gets the operation as accepted
@@ -126,7 +146,7 @@ func TestIncusAsyncOperationFirstValue(t *testing.T) {
 
 	conn, _ := newOperationServer(t, started)
 
-	updates, err := conn.CreateInstance(t.Context(), api.InstancesPost{Name: "web-1"})
+	updates, err := conn.CreateInstance(t.Context(), "myproject", api.InstancesPost{Name: "web-1"})
 	require.NoError(t, err)
 
 	select {
@@ -145,7 +165,7 @@ func TestIncusAsyncOperationClosesOnTerminal(t *testing.T) {
 
 	conn, server := newOperationServer(t, running("op-1"))
 
-	updates, err := conn.UpdateInstanceState(t.Context(), "web-1", api.InstanceStatePut{Action: "start"}, "")
+	updates, err := conn.UpdateInstanceState(t.Context(), "myproject", "web-1", api.InstanceStatePut{Action: "start"}, "")
 	require.NoError(t, err)
 
 	<-server.subscribe
@@ -171,7 +191,7 @@ func TestIncusAsyncOperationIgnoresOthers(t *testing.T) {
 
 	conn, server := newOperationServer(t, running("op-1"))
 
-	updates, err := conn.DeleteInstance(t.Context(), "web-1")
+	updates, err := conn.DeleteInstance(t.Context(), "myproject", "web-1")
 	require.NoError(t, err)
 
 	<-server.subscribe
@@ -196,7 +216,7 @@ func TestIncusAsyncOperationAlreadyFinished(t *testing.T) {
 
 	conn, _ := newOperationServer(t, api.Operation{ID: "op-1", StatusCode: api.Success, Status: "Success"})
 
-	updates, err := conn.DeleteInstance(t.Context(), "web-1")
+	updates, err := conn.DeleteInstance(t.Context(), "myproject", "web-1")
 	require.NoError(t, err)
 
 	seen := 0
@@ -213,7 +233,7 @@ func TestIncusListenOperationCatchesUp(t *testing.T) {
 
 	conn, server := newOperationServer(t, api.Operation{ID: "op-1", StatusCode: api.Success, Status: "Success"})
 
-	updates, err := conn.ListenOperation(t.Context(), api.Operation{ID: "op-1"})
+	updates, err := conn.ListenOperation(t.Context(), "myproject", api.Operation{ID: "op-1"})
 	require.NoError(t, err)
 
 	seen := 0
@@ -234,7 +254,7 @@ func TestIncusCancelOperation(t *testing.T) {
 
 	conn, seen := recordingServer(t, `{}`)
 
-	require.NoError(t, conn.CancelOperation(t.Context(), api.Operation{ID: "op-1"}))
+	require.NoError(t, conn.CancelOperation(t.Context(), "myproject", api.Operation{ID: "op-1"}))
 
 	req := seen.all()[0]
 	require.Equal(t, http.MethodDelete, req.method)
@@ -246,7 +266,7 @@ func TestIncusGetOperationsFlattens(t *testing.T) {
 
 	conn, seen := recordingServer(t, `{"running":[{"id":"a"}],"success":[{"id":"b"},{"id":"c"}]}`)
 
-	operations, err := conn.GetOperations(t.Context())
+	operations, err := conn.GetOperations(t.Context(), "myproject")
 	require.NoError(t, err)
 
 	// The collection is grouped by status; the caller wants one list.
@@ -262,7 +282,7 @@ func TestIncusOperationsAgainstRealIncus(t *testing.T) {
 
 	conn := testConnection(t)
 
-	operations, err := conn.GetOperations(t.Context())
+	operations, err := conn.GetOperations(t.Context(), "myproject")
 	require.NoError(t, err)
 
 	for _, op := range operations {

@@ -177,13 +177,13 @@ func runScheduler(t *testing.T, c *client.Client) {
 
 // requireStatus waits for the daemon's verdict to land on the instance, and
 // reports what it last saw.
-func requireStatus(t *testing.T, conn *iclient.Connection, name, want string, within time.Duration) {
+func requireStatus(t *testing.T, conn *iclient.Connection, project string, name, want string, within time.Duration) {
 	t.Helper()
 
 	var status, state string
 
 	ok := assert.Eventually(t, func() bool {
-		inst, _, err := conn.GetInstance(t.Context(), name, nil)
+		inst, _, err := conn.GetInstance(t.Context(), project, name, nil)
 		if err != nil {
 			state = err.Error()
 			return false
@@ -202,7 +202,7 @@ func requireStatus(t *testing.T, conn *iclient.Connection, name, want string, wi
 // setState drives an instance from the test side and waits for the change.
 // Every raw write here races the daemon's status writes for the instance's
 // operation lock, so it waits the lock out and retries.
-func setState(t *testing.T, conn *iclient.Connection, name string, req incusApi.InstanceStatePut) {
+func setState(t *testing.T, conn *iclient.Connection, project string, name string, req incusApi.InstanceStatePut) {
 	t.Helper()
 
 	err := retry.New(
@@ -213,12 +213,12 @@ func setState(t *testing.T, conn *iclient.Connection, name string, req incusApi.
 			return errors.Is(err, iclient.ErrInstanceBusy)
 		}),
 	).Do(func() error {
-		err := conn.WaitInstanceBusy(t.Context(), name)
+		err := conn.WaitInstanceBusy(t.Context(), project, name)
 		if err != nil {
 			return err
 		}
 
-		op, err := conn.UpdateInstanceState(t.Context(), name, req, "")
+		op, err := conn.UpdateInstanceState(t.Context(), project, name, req, "")
 		if err != nil {
 			return err
 		}
@@ -244,7 +244,7 @@ func TestE2EConnectRegistersThenReuses(t *testing.T) {
 	conn, err := connect(t.Context(), cfg)
 	require.NoError(t, err)
 
-	_, err = conn.WithProject(c.IncusProject()).GetInstanceNames(t.Context(), nil)
+	_, err = conn.GetInstanceNames(t.Context(), c.IncusProject(), nil)
 	require.NoError(t, err, "the registered certificate must be usable against its project")
 
 	require.FileExists(t, filepath.Join(cfg.DataDir, certFile))
@@ -257,7 +257,7 @@ func TestE2EConnectRegistersThenReuses(t *testing.T) {
 	conn, err = connect(t.Context(), reuse)
 	require.NoError(t, err, "a restarted daemon must reuse its persisted certificate")
 
-	_, err = conn.WithProject(c.IncusProject()).GetInstanceNames(t.Context(), nil)
+	_, err = conn.GetInstanceNames(t.Context(), c.IncusProject(), nil)
 	require.NoError(t, err)
 }
 
@@ -280,7 +280,7 @@ func TestE2EConnectRegistersFromATokenFile(t *testing.T) {
 	conn, err := connect(t.Context(), cfg)
 	require.NoError(t, err)
 
-	_, err = conn.WithProject(c.IncusProject()).GetInstanceNames(t.Context(), nil)
+	_, err = conn.GetInstanceNames(t.Context(), c.IncusProject(), nil)
 	require.NoError(t, err, "a certificate registered from a token file must be usable")
 }
 
@@ -315,7 +315,7 @@ func TestE2ESchedulerReportsHealthy(t *testing.T) {
 
 	runScheduler(t, c)
 
-	requireStatus(t, testConn(t, c), name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, c), c.Project(), name, shared.HealthStatusHealthy, 60*time.Second)
 }
 
 // TestE2ESchedulerReportsUnhealthyAfterRetries pins that a single failure is not
@@ -335,7 +335,7 @@ func TestE2ESchedulerReportsUnhealthyAfterRetries(t *testing.T) {
 
 	runScheduler(t, c)
 
-	requireStatus(t, testConn(t, c), name, shared.HealthStatusUnhealthy, 60*time.Second)
+	requireStatus(t, testConn(t, c), c.Project(), name, shared.HealthStatusUnhealthy, 60*time.Second)
 }
 
 // TestE2ESchedulerRestartsACrashedInstance covers a stop nobody asked for: the
@@ -353,15 +353,15 @@ func TestE2ESchedulerRestartsACrashedInstance(t *testing.T) {
 		"restart":  "always",
 	}), true)
 
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
 
-	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
+	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
 	require.Eventually(t, func() bool {
-		state, _, err := conn.GetInstanceState(t.Context(), name)
+		state, _, err := conn.GetInstanceState(t.Context(), project, name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 90*time.Second, time.Second, "a crashed instance should be restarted")
 }
@@ -387,8 +387,8 @@ func TestE2EMultipleProjects(t *testing.T) {
 
 	runDaemon(t, one, healthdConfig(t, one, one.IncusProject(), two.IncusProject()))
 
-	requireStatus(t, testConn(t, one), nameOne, shared.HealthStatusHealthy, 60*time.Second)
-	requireStatus(t, testConn(t, two), nameTwo, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, one), one.Project(), nameOne, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, two), two.Project(), nameTwo, shared.HealthStatusHealthy, 60*time.Second)
 }
 
 // TestE2EReloadKeepsWatching covers a fresh listener generation, which is what a
@@ -407,17 +407,17 @@ func TestE2EReloadKeepsWatching(t *testing.T) {
 		"restart":  "always",
 	}), true)
 
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 	reload := runDaemon(t, c, healthdConfig(t, c, c.IncusProject()))
 
-	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
 
 	reload <- struct{}{}
 
-	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
+	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
 	require.Eventually(t, func() bool {
-		state, _, err := conn.GetInstanceState(t.Context(), name)
+		state, _, err := conn.GetInstanceState(t.Context(), project, name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 90*time.Second, time.Second,
 		"a crash after a reload must still be repaired: the scheduler outlives the listener")
@@ -455,13 +455,13 @@ func TestE2EDynamicScope(t *testing.T) {
 
 	runDaemon(t, marked, cfg)
 
-	requireStatus(t, testConn(t, marked), watched, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, marked), marked.Project(), watched, shared.HealthStatusHealthy, 60*time.Second)
 
 	// The unmarked project is visible to the certificate and still not watched,
 	// which is the whole point of the marker.
-	conn := testConn(t, plain)
+	conn, project := testConn(t, plain), plain.Project()
 	require.Never(t, func() bool {
-		inst, _, err := conn.GetInstance(t.Context(), ignored, nil)
+		inst, _, err := conn.GetInstance(t.Context(), project, ignored, nil)
 		return err == nil && inst.Config[shared.HealthStatusKey] == shared.HealthStatusHealthy
 	}, 20*time.Second, time.Second, "a project without the marker must not be watched")
 }
@@ -520,7 +520,7 @@ func TestE2EProjectRenamed(t *testing.T) {
 		"retries":  "2",
 	}), true)
 
-	requireStatus(t, testConn(t, renamedClient), name, shared.HealthStatusHealthy, 90*time.Second)
+	requireStatus(t, testConn(t, renamedClient), renamedClient.Project(), name, shared.HealthStatusHealthy, 90*time.Second)
 }
 
 // TestE2EStatusIsRepairedAfterAnotherWriter pins that the daemon notices the
@@ -538,18 +538,18 @@ func TestE2EStatusIsRepairedAfterAnotherWriter(t *testing.T) {
 		"retries":  "2",
 	}), true)
 
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
 
-	require.NoError(t, conn.WaitInstanceBusy(t.Context(), name))
+	require.NoError(t, conn.WaitInstanceBusy(t.Context(), project, name))
 
 	// Exactly what client.Instance.SetHealthCheckingStopped writes on a start.
-	require.NoError(t, patchInstanceConfig(t.Context(), conn, name,
+	require.NoError(t, patchInstanceConfig(t.Context(), conn, project, name,
 		map[string]string{shared.HealthStatusKey: shared.HealthStatusStarting}))
 
-	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
 }
 
 // TestE2ENoBounceAfterAnExternalStart covers the shape of `incus-compose
@@ -568,15 +568,15 @@ func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 		"restart":  "always",
 	}), true)
 
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
 
-	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
-	setState(t, conn, name, incusApi.InstanceStatePut{Action: "start", Timeout: -1})
+	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
+	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "start", Timeout: -1})
 
-	state, _, err := conn.GetInstanceState(t.Context(), name)
+	state, _, err := conn.GetInstanceState(t.Context(), project, name)
 	require.NoError(t, err)
 	require.NotZero(t, state.Pid, "a running container has an init pid, which is what a bounce would change")
 
@@ -584,7 +584,7 @@ func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 
 	// Well past the 5s backoff floor this instance's interval and retries give.
 	require.Never(t, func() bool {
-		state, _, err := conn.GetInstanceState(t.Context(), name)
+		state, _, err := conn.GetInstanceState(t.Context(), project, name)
 		return err != nil || state.StatusCode != incusApi.Running || state.Pid != pid
 	}, 45*time.Second, time.Second, "an instance that came back on its own must not be restarted again")
 }
@@ -604,21 +604,21 @@ func TestE2ESchedulerHonoursAnIntentionalStop(t *testing.T) {
 		"restart":  "unless-stopped",
 	}), true)
 
-	conn := testConn(t, c)
+	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
 
-	require.NoError(t, conn.WaitInstanceBusy(t.Context(), name))
+	require.NoError(t, conn.WaitInstanceBusy(t.Context(), project, name))
 
-	require.NoError(t, patchInstanceConfig(t.Context(), conn, name,
+	require.NoError(t, patchInstanceConfig(t.Context(), conn, project, name,
 		map[string]string{shared.HealthStoppedKey: "true"}))
 
-	setState(t, conn, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
+	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
 	// Outlast the 5s backoff floor several times over.
 	require.Never(t, func() bool {
-		state, _, err := conn.GetInstanceState(t.Context(), name)
+		state, _, err := conn.GetInstanceState(t.Context(), project, name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 45*time.Second, time.Second, "a deliberately stopped instance must stay stopped")
 }

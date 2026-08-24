@@ -16,7 +16,7 @@ import (
 const incusImagesPath = "/images"
 
 // GetImage returns one image and its ETag.
-func (c *Connection) GetImage(ctx context.Context, fingerprint string, args *GetImageArgs) (*api.Image, string, error) {
+func (c *Connection) GetImage(ctx context.Context, project string, fingerprint string, args *GetImageArgs) (*api.Image, string, error) {
 	if args == nil {
 		args = &GetImageArgs{}
 	}
@@ -30,7 +30,7 @@ func (c *Connection) GetImage(ctx context.Context, fingerprint string, args *Get
 
 	image := api.Image{}
 
-	etag, err := c.getStruct(ctx, incusImagesPath+"/"+url.PathEscape(fingerprint), query, &image)
+	etag, err := c.getStruct(ctx, project, incusImagesPath+"/"+url.PathEscape(fingerprint), query, &image)
 	if err != nil {
 		return nil, "", err
 	}
@@ -39,7 +39,7 @@ func (c *Connection) GetImage(ctx context.Context, fingerprint string, args *Get
 }
 
 // GetImageAlias resolves an alias to the image behind it.
-func (c *Connection) GetImageAlias(ctx context.Context, name string, args *GetImageAliasArgs) (*api.ImageAliasesEntry, string, error) {
+func (c *Connection) GetImageAlias(ctx context.Context, project string, name string, args *GetImageAliasArgs) (*api.ImageAliasesEntry, string, error) {
 	if args == nil {
 		args = &GetImageAliasArgs{}
 	}
@@ -51,7 +51,7 @@ func (c *Connection) GetImageAlias(ctx context.Context, name string, args *GetIm
 
 	alias := api.ImageAliasesEntry{}
 
-	etag, err := c.getStruct(ctx, path, nil, &alias)
+	etag, err := c.getStruct(ctx, project, path, nil, &alias)
 	if err != nil {
 		return nil, "", err
 	}
@@ -64,9 +64,9 @@ func (c *Connection) GetImageAlias(ctx context.Context, name string, args *GetIm
 //
 // With args the tarballs are uploaded instead, and image carries only the
 // aliases and properties to record.
-func (c *Connection) CreateImage(ctx context.Context, image api.ImagesPost, args *ImageCreateArgs) (<-chan api.Operation, error) {
+func (c *Connection) CreateImage(ctx context.Context, project string, image api.ImagesPost, args *ImageCreateArgs) (<-chan api.Operation, error) {
 	if args == nil {
-		return c.asyncOperation(ctx, http.MethodPost, incusImagesPath, image, "")
+		return c.asyncOperation(ctx, project, http.MethodPost, incusImagesPath, image, "")
 	}
 
 	if args.MetaFile == nil {
@@ -77,7 +77,7 @@ func (c *Connection) CreateImage(ctx context.Context, image api.ImagesPost, args
 
 	// A unified image is one tarball; a split one needs the two parts named.
 	if args.RootfsFile == nil {
-		return c.asyncUpload(ctx, incusImagesPath, args.MetaFile, "application/octet-stream", header)
+		return c.asyncUpload(ctx, project, incusImagesPath, args.MetaFile, "application/octet-stream", header)
 	}
 
 	reader, writer := io.Pipe()
@@ -88,7 +88,7 @@ func (c *Connection) CreateImage(ctx context.Context, image api.ImagesPost, args
 		_ = writer.CloseWithError(writeImageParts(form, args))
 	}()
 
-	return c.asyncUpload(ctx, incusImagesPath, reader, form.FormDataContentType(), header)
+	return c.asyncUpload(ctx, project, incusImagesPath, reader, form.FormDataContentType(), header)
 }
 
 // imageUploadHeader carries what an upload cannot put in the body, the body
@@ -166,15 +166,15 @@ func writeImageParts(form *multipart.Writer, args *ImageCreateArgs) error {
 }
 
 // UpdateImage replaces an image's configuration.
-func (c *Connection) UpdateImage(ctx context.Context, fingerprint string, image api.ImagePut, etag string) error {
-	_, _, err := c.do(ctx, http.MethodPut, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, image, etag)
+func (c *Connection) UpdateImage(ctx context.Context, project string, fingerprint string, image api.ImagePut, etag string) error {
+	_, _, err := c.do(ctx, project, http.MethodPut, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, image, etag)
 
 	return err
 }
 
 // DeleteImage removes an image and follows the operation.
-func (c *Connection) DeleteImage(ctx context.Context, fingerprint string) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, http.MethodDelete, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, "")
+func (c *Connection) DeleteImage(ctx context.Context, project string, fingerprint string) (<-chan api.Operation, error) {
+	return c.asyncOperation(ctx, project, http.MethodDelete, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, "")
 }
 
 // imageSecret mints the one-time token that fetching a non-public image needs.
@@ -182,10 +182,10 @@ func (c *Connection) DeleteImage(ctx context.Context, fingerprint string) (<-cha
 // A token operation never reaches a terminal state, so following it would
 // subscribe to events for something that never reports: the response to the
 // request already carries the secret.
-func (c *Connection) imageSecret(ctx context.Context, fingerprint string) (string, error) {
+func (c *Connection) imageSecret(ctx context.Context, project string, fingerprint string) (string, error) {
 	path := incusImagesPath + "/" + url.PathEscape(fingerprint) + "/secret"
 
-	resp, _, err := c.do(ctx, http.MethodPost, path, nil, nil, "")
+	resp, _, err := c.do(ctx, project, http.MethodPost, path, nil, nil, "")
 	if err != nil {
 		return "", fmt.Errorf("minting a secret for %q: %w", fingerprint, err)
 	}
@@ -205,13 +205,13 @@ func (c *Connection) imageSecret(ctx context.Context, fingerprint string) (strin
 	return secret, nil
 }
 
-// CopyImage copies an image from another incus connection into this one.
-func (c *Connection) CopyImage(ctx context.Context, source *Connection, fingerprint string, args *ImageCopyArgs) (<-chan api.Operation, error) {
+// CopyImage copies an image out of sourceProject on source into project here.
+func (c *Connection) CopyImage(ctx context.Context, project string, source *Connection, sourceProject string, fingerprint string, args *ImageCopyArgs) (<-chan api.Operation, error) {
 	if args == nil {
 		args = &ImageCopyArgs{}
 	}
 
-	image, _, err := source.GetImage(ctx, fingerprint, nil)
+	image, _, err := source.GetImage(ctx, sourceProject, fingerprint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("reading the source image %q: %w", fingerprint, err)
 	}
@@ -248,17 +248,17 @@ func (c *Connection) CopyImage(ctx context.Context, source *Connection, fingerpr
 			Type:        "image",
 			Mode:        mode,
 			Fingerprint: fingerprint,
-			Project:     info.Project,
+			Project:     sourceProject,
 		},
 	}
 
 	// A private image is only fetchable with a token.
 	if !image.Public {
-		post.Source.Secret, err = source.imageSecret(ctx, fingerprint)
+		post.Source.Secret, err = source.imageSecret(ctx, sourceProject, fingerprint)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return c.CreateImage(ctx, post, nil)
+	return c.CreateImage(ctx, project, post, nil)
 }

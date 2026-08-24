@@ -20,8 +20,7 @@ type ConnectionInfo struct {
 	// SocketPath is empty for anything but a unix remote.
 	SocketPath string
 
-	Project string
-	Target  string
+	Target string
 }
 
 // ImageCreateArgs uploads an image body directly, rather than having the
@@ -102,18 +101,13 @@ type GetInstanceArgs struct {
 	Full bool
 }
 
-// GetInstancesArgs narrows a listing. A nil one, like the zero value, lists
-// the connection's own project.
+// GetInstancesArgs narrows a listing. A nil one is the zero value.
 type GetInstancesArgs struct {
 	// Type limits the listing to containers or to virtual machines.
 	Type api.InstanceType
 
 	// Full also fetches state, snapshots and backups.
 	Full bool
-
-	// AllProjects lists every project the certificate may see. Instance
-	// names are not unique across projects, so GetInstanceNames refuses it.
-	AllProjects bool
 
 	// Filters are server-side selectors written as "key=value", e.g.
 	// "status=Running". They need the api_filtering extension.

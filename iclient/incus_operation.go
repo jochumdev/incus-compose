@@ -28,9 +28,9 @@ const incusOperationBuffer = 8
 //
 // A token operation is the exception: it waits to be used rather than
 // finishing, so read its first value and cancel the context.
-func (c *Connection) asyncOperation(ctx context.Context, method string, path string, body any, etag string) (<-chan api.Operation, error) {
-	return c.async(ctx, method+" "+path, func(sendCtx context.Context) (*api.Response, error) {
-		resp, _, err := c.do(sendCtx, method, path, nil, body, etag)
+func (c *Connection) asyncOperation(ctx context.Context, project string, method string, path string, body any, etag string) (<-chan api.Operation, error) {
+	return c.async(ctx, project, method+" "+path, func(sendCtx context.Context) (*api.Response, error) {
+		resp, _, err := c.do(sendCtx, project, method, path, nil, body, etag)
 
 		return resp, err
 	})
@@ -38,19 +38,23 @@ func (c *Connection) asyncOperation(ctx context.Context, method string, path str
 
 // asyncUpload is asyncOperation for a request that streams a body, which is
 // how an image is imported from tarballs. header carries what cannot be JSON.
-func (c *Connection) asyncUpload(ctx context.Context, path string, body io.Reader, contentType string, header http.Header) (<-chan api.Operation, error) {
-	return c.async(ctx, http.MethodPost+" "+path, func(sendCtx context.Context) (*api.Response, error) {
-		resp, _, err := c.send(sendCtx, http.MethodPost, c.uriFor(path, nil), body, contentType, "", header)
+func (c *Connection) asyncUpload(ctx context.Context, project string, path string, body io.Reader, contentType string, header http.Header) (<-chan api.Operation, error) {
+	return c.async(ctx, project, http.MethodPost+" "+path, func(sendCtx context.Context) (*api.Response, error) {
+		resp, _, err := c.send(sendCtx, http.MethodPost, uriFor(project, path, nil), body, contentType, "", header)
 
 		return resp, err
 	})
 }
 
 // async subscribes, then sends, then follows whatever operation came back.
-func (c *Connection) async(ctx context.Context, what string, send func(context.Context) (*api.Response, error)) (<-chan api.Operation, error) {
+//
+// project has to be the one the operation runs in: incusd filters the event
+// stream by project, so a listener anywhere else never sees the updates and the
+// caller blocks until its context ends.
+func (c *Connection) async(ctx context.Context, project string, what string, send func(context.Context) (*api.Response, error)) (<-chan api.Operation, error) {
 	listenCtx, cancel := context.WithCancel(ctx)
 
-	events, err := c.ListenEvents(listenCtx, []string{api.EventTypeOperation}, false)
+	events, err := c.ListenEvents(listenCtx, project, []string{api.EventTypeOperation})
 	if err != nil {
 		cancel()
 
@@ -125,15 +129,15 @@ func emitOperation(ctx context.Context, updates chan<- api.Operation, op api.Ope
 	return !op.StatusCode.IsFinal()
 }
 
-// GetOperations returns the operations running on the server.
-func (c *Connection) GetOperations(ctx context.Context) ([]api.Operation, error) {
+// GetOperations returns the operations running in project.
+func (c *Connection) GetOperations(ctx context.Context, project string) ([]api.Operation, error) {
 	// Grouped by status, e.g. {"running": [...]}.
 	byStatus := map[string][]api.Operation{}
 
 	query := url.Values{}
 	query.Set("recursion", "1")
 
-	_, err := c.getStruct(ctx, incusOperationsPath, query, &byStatus)
+	_, err := c.getStruct(ctx, project, incusOperationsPath, query, &byStatus)
 	if err != nil {
 		return nil, err
 	}
@@ -149,10 +153,10 @@ func (c *Connection) GetOperations(ctx context.Context) ([]api.Operation, error)
 // ListenOperation follows an operation this connection did not start. It
 // cannot subscribe before the operation exists, so it reads the operation once
 // after subscribing.
-func (c *Connection) ListenOperation(ctx context.Context, op api.Operation) (<-chan api.Operation, error) {
+func (c *Connection) ListenOperation(ctx context.Context, project string, op api.Operation) (<-chan api.Operation, error) {
 	listenCtx, cancel := context.WithCancel(ctx)
 
-	events, err := c.ListenEvents(listenCtx, []string{api.EventTypeOperation}, false)
+	events, err := c.ListenEvents(listenCtx, project, []string{api.EventTypeOperation})
 	if err != nil {
 		cancel()
 
@@ -161,7 +165,7 @@ func (c *Connection) ListenOperation(ctx context.Context, op api.Operation) (<-c
 
 	current := api.Operation{}
 
-	_, err = c.getStruct(ctx, incusOperationsPath+"/"+url.PathEscape(op.ID), nil, &current)
+	_, err = c.getStruct(ctx, project, incusOperationsPath+"/"+url.PathEscape(op.ID), nil, &current)
 	if err != nil {
 		cancel()
 
@@ -175,14 +179,14 @@ func (c *Connection) ListenOperation(ctx context.Context, op api.Operation) (<-c
 //
 // The server holds the request open, so unlike ListenOperation this costs one
 // request rather than an event socket.
-func (c *Connection) WaitOperationID(ctx context.Context, id string) (*api.Operation, error) {
+func (c *Connection) WaitOperationID(ctx context.Context, project string, id string) (*api.Operation, error) {
 	operation := api.Operation{}
 
 	// -1 stops the server applying a timeout of its own and answering early.
 	query := url.Values{}
 	query.Set("timeout", "-1")
 
-	_, err := c.getStruct(ctx, incusOperationsPath+"/"+url.PathEscape(id)+"/wait", query, &operation)
+	_, err := c.getStruct(ctx, project, incusOperationsPath+"/"+url.PathEscape(id)+"/wait", query, &operation)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +195,8 @@ func (c *Connection) WaitOperationID(ctx context.Context, id string) (*api.Opera
 }
 
 // CancelOperation asks the server to cancel an operation.
-func (c *Connection) CancelOperation(ctx context.Context, op api.Operation) error {
-	_, _, err := c.do(ctx, http.MethodDelete, incusOperationsPath+"/"+url.PathEscape(op.ID), nil, nil, "")
+func (c *Connection) CancelOperation(ctx context.Context, project string, op api.Operation) error {
+	_, _, err := c.do(ctx, project, http.MethodDelete, incusOperationsPath+"/"+url.PathEscape(op.ID), nil, nil, "")
 
 	return err
 }

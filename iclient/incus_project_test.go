@@ -17,9 +17,9 @@ func TestIncusDeleteProjectForce(t *testing.T) {
 		args *DeleteProjectArgs
 		want string
 	}{
-		{"nil is the zero value", nil, "/1.0/projects/other?project=myproject"},
-		{"not forced", &DeleteProjectArgs{}, "/1.0/projects/other?project=myproject"},
-		{"forced", &DeleteProjectArgs{Force: true}, "/1.0/projects/other?force=1&project=myproject"},
+		{"nil is the zero value", nil, "/1.0/projects/other"},
+		{"not forced", &DeleteProjectArgs{}, "/1.0/projects/other"},
+		{"forced", &DeleteProjectArgs{Force: true}, "/1.0/projects/other?force=1"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

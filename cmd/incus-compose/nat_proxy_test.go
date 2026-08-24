@@ -38,7 +38,7 @@ func TestE2ENATProxy(t *testing.T) {
 	c := projectClient(ctx, t, pn)
 	conn, err := c.Connection()
 	require.NoError(t, err)
-	inst, _, err := conn.GetInstance(ctx, "web-nat-1", nil)
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-nat-1", nil)
 	require.NoError(t, err)
 
 	proxyDev, ok := inst.Devices["proxy-8081"]
@@ -78,7 +78,7 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, "web-1", nil)
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 
 	proxy, ok := inst.Devices["proxy-8080"]
@@ -125,7 +125,7 @@ networks:
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, "web-1", nil)
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 
 	proxy, ok := inst.Devices["proxy-8080"]

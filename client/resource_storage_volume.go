@@ -196,7 +196,7 @@ func (r *StorageVolume) get(ctx context.Context) error {
 	}
 
 	// Try to get existing volume
-	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName, nil)
+	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, nil)
 	if err != nil {
 		r.clearState()
 		return ErrNotFound.Wrap(err)
@@ -331,11 +331,11 @@ func (r *StorageVolume) create(ctx context.Context) error {
 		return err
 	}
 
-	if err := conn.CreateStoragePoolVolume(ctx, r.Config.Pool, volReq); err != nil {
+	if err := conn.CreateStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, volReq); err != nil {
 		return ErrCreate.Wrap(err)
 	}
 
-	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName, nil)
+	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, nil)
 	if err != nil {
 		return ErrCreate.WithText("fetching created volume").Wrap(err)
 	}
@@ -356,7 +356,7 @@ func (r *StorageVolume) create(ctx context.Context) error {
 		if err != nil {
 			// A half filled volume is worse than none, and it is ours to drop.
 			r.client.WarnError(func() error {
-				return conn.DeleteStoragePoolVolume(context.WithoutCancel(ctx), r.Config.Pool, "custom", r.incusName)
+				return conn.DeleteStoragePoolVolume(context.WithoutCancel(ctx), r.client.incusProject, r.Config.Pool, "custom", r.incusName)
 			}, "Failed to remove a volume its prefetch left behind")
 
 			r.clearState()
@@ -460,7 +460,7 @@ func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	err = conn.DeleteStoragePoolVolume(ctx, r.Config.Pool, "custom", r.incusName)
+	err = conn.DeleteStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName)
 	if errors.Is(err, iclient.ErrVolumeInUse) {
 		// Replicas share one volume, so every instance but the last says this.
 		err = ErrVolumeInUse.WithResource(r).Wrap(err)
@@ -541,7 +541,7 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 
 	backupName := r.backupName()
 	volumeExists := false
-	_, _, err = conn.GetStoragePoolVolume(ctx, options.BackupConfig.Pool, "custom", backupName, nil)
+	_, _, err = conn.GetStoragePoolVolume(ctx, bc.incusProject, options.BackupConfig.Pool, "custom", backupName, nil)
 	if !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 		volumeExists = true
 	}
@@ -571,7 +571,7 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 		req.Source.Location = source.Location
 	}
 
-	copyOp, err := conn.CopyStoragePoolVolume(ctx, options.BackupConfig.Pool, req)
+	copyOp, err := conn.CopyStoragePoolVolume(ctx, bc.incusProject, options.BackupConfig.Pool, req)
 	err = r.client.hookOperation(ctx, ActionBackup, r, options, copyOp, err)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionBackup, r, options, ErrBackupFailed.WithText("copy").Wrap(err))
@@ -581,7 +581,7 @@ func (r *StorageVolume) Backup(ctx context.Context, opts ...Option) error {
 		Name: options.BackupConfig.Timestamp,
 	}
 
-	snapOp, err := conn.CreateStoragePoolVolumeSnapshot(ctx, options.BackupConfig.Pool, source.Type, backupName, snap)
+	snapOp, err := conn.CreateStoragePoolVolumeSnapshot(ctx, bc.incusProject, options.BackupConfig.Pool, source.Type, backupName, snap)
 	err = r.client.hookOperation(ctx, ActionBackup, r, options, snapOp, err)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionBackup, r, options, ErrBackupFailed.WithText("snapshot").Wrap(err))
@@ -646,12 +646,12 @@ func (r *StorageVolume) Restore(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrUnknown.Wrap(err))
 	}
 
-	mirror, _, err := bConn.GetStoragePoolVolume(ctx, options.BackupConfig.Pool, "custom", backupName, nil)
+	mirror, _, err := bConn.GetStoragePoolVolume(ctx, bc.incusProject, options.BackupConfig.Pool, "custom", backupName, nil)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrBackupNotFound.WithText(backupName).Wrap(err))
 	}
 
-	snapshots, err := bConn.GetStoragePoolVolumeSnapshotNames(ctx, options.BackupConfig.Pool, "custom", backupName)
+	snapshots, err := bConn.GetStoragePoolVolumeSnapshotNames(ctx, bc.incusProject, options.BackupConfig.Pool, "custom", backupName)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrUnknown.Wrap(err))
 	}
@@ -688,7 +688,7 @@ func (r *StorageVolume) Restore(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrUnknown.Wrap(err))
 	}
 
-	copyOp, err := conn.CopyStoragePoolVolume(ctx, r.Config.Pool, req)
+	copyOp, err := conn.CopyStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, req)
 	err = r.client.hookOperation(ctx, ActionRestore, r, options, copyOp, err)
 	if err != nil {
 		return r.client.hookAfter(ctx, ActionRestore, r, options, ErrRestoreFailed.WithText("copy").Wrap(err))

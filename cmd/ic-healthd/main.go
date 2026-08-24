@@ -319,7 +319,7 @@ func connect(ctx context.Context, cfg config) (*iclient.Connection, error) {
 
 // discoverProject re-reads the whole project on its own goroutine and closes
 // with a roster, so the loop can drop the instances that are gone.
-func discoverProject(ctx context.Context, conn *iclient.Connection, results chan<- instanceResult) {
+func discoverProject(ctx context.Context, conn *iclient.Connection, project string, results chan<- instanceResult) {
 	go func() {
 		send := func(res instanceResult) bool {
 			select {
@@ -343,7 +343,7 @@ func discoverProject(ctx context.Context, conn *iclient.Connection, results chan
 			callCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 			defer cancel()
 
-			got, err := conn.GetInstances(callCtx, nil)
+			got, err := conn.GetInstances(callCtx, project, nil)
 
 			instances = got
 
@@ -380,20 +380,16 @@ func projectScheduler(ctx context.Context, conn *iclient.Connection, pool *pools
 	logger := logger(ctx).With("project", project)
 	ctx = withLogger(ctx, logger)
 
-	// Scoped once here rather than per call, so every read this scheduler makes
-	// is in its own project.
-	conn = conn.WithProject(project)
-
 	instances := map[string]*instance{}
 	results := make(chan instanceResult, resultBuffer)
 
-	discoverProject(ctx, conn, results)
+	discoverProject(ctx, conn, project, results)
 
 	nextCheck := time.NewTimer(time.Hour)
 	defer nextCheck.Stop()
 
 	for {
-		earliest := runInstanceActions(ctx, conn, pool, instances, results)
+		earliest := runInstanceActions(ctx, conn, project, pool, instances, results)
 		nextCheck.Stop()
 		if earliest.IsZero() {
 			nextCheck.Reset(time.Hour)
@@ -407,16 +403,16 @@ func projectScheduler(ctx context.Context, conn *iclient.Connection, pool *pools
 		case ev := <-events:
 			if ev.Action == instanceResync {
 				logger.Debug("Resyncing the project")
-				discoverProject(ctx, conn, results)
+				discoverProject(ctx, conn, project, results)
 
 				continue
 			}
 
-			handleInstanceEvent(ctx, conn, instances, results, ev)
+			handleInstanceEvent(ctx, conn, project, instances, results, ev)
 		case res := <-results:
-			handleInstanceResult(ctx, conn, instances, results, res)
+			handleInstanceResult(ctx, conn, project, instances, results, res)
 		case <-nextCheck.C:
-			_ = runInstanceActions(ctx, conn, pool, instances, results)
+			_ = runInstanceActions(ctx, conn, project, pool, instances, results)
 		}
 	}
 }
@@ -598,7 +594,7 @@ func runProjects(ctx context.Context, conn *iclient.Connection, cfg config, relo
 		// The schedulers hang off ctx and are untouched by it.
 		evCtx, evCancel := context.WithCancel(ctx)
 
-		events, err := conn.ListenEvents(evCtx, []string{incusApi.EventTypeLifecycle}, true)
+		events, err := conn.ListenEventsAllProjects(evCtx, []string{incusApi.EventTypeLifecycle})
 		if err != nil {
 			log.Error("Opening the event listener", "error", err)
 			evCancel()
@@ -829,12 +825,10 @@ func mainAction(ctx context.Context, cfg config) error {
 		conn = c
 	}
 
-	ownConn := conn.WithProject(cfg.OwnProject)
-
 	logger.Info("Health daemon connected")
 
 	if cfg.OwnProject != "" && cfg.OwnName != "" {
-		err := writeInstanceStatus(ctx, ownConn, cfg.OwnName, shared.HealthStatusHealthy)
+		err := writeInstanceStatus(ctx, conn, cfg.OwnProject, cfg.OwnName, shared.HealthStatusHealthy)
 		if err != nil {
 			cancel()
 			return fmt.Errorf("failed to update my status: %w", err)
@@ -846,7 +840,7 @@ func mainAction(ctx context.Context, cfg config) error {
 	if cfg.OwnProject != "" && cfg.OwnName != "" {
 		// ctx is already done on the way out, so the write needs its own budget.
 		shutCtx, shutCancel := context.WithTimeout(context.WithoutCancel(ctx), apiTimeout)
-		statusErr := writeInstanceStatus(shutCtx, ownConn, cfg.OwnName, shared.HealthStatusUnhealthy)
+		statusErr := writeInstanceStatus(shutCtx, conn, cfg.OwnProject, cfg.OwnName, shared.HealthStatusUnhealthy)
 		shutCancel()
 
 		if statusErr != nil {

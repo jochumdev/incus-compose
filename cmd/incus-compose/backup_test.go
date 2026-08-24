@@ -25,7 +25,7 @@ func assertBackupVolumeExists(t *testing.T, c *client.Client, pool, name string)
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	_, _, err = conn.GetStoragePoolVolume(t.Context(), pool, "custom", name, nil)
+	_, _, err = conn.GetStoragePoolVolume(t.Context(), c.IncusProject(), pool, "custom", name, nil)
 	require.NoError(t, err, "volume %q should exist in pool %q", name, pool)
 }
 
@@ -35,7 +35,7 @@ func assertBackupSnapshotExists(t *testing.T, c *client.Client, pool, volumeName
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	names, err := conn.GetStoragePoolVolumeSnapshotNames(t.Context(), pool, "custom", volumeName)
+	names, err := conn.GetStoragePoolVolumeSnapshotNames(t.Context(), c.IncusProject(), pool, "custom", volumeName)
 	require.NoError(t, err)
 
 	assert.Contains(t, names, snapshotName, "on volume %s in pool %s", volumeName, pool)
@@ -91,13 +91,13 @@ func backupManifestDir(t *testing.T, c *client.Client) []string {
 	require.NoError(t, err)
 
 	name := backupManifestIncusName(t, c)
-	_, _, err = conn.GetStoragePoolVolume(t.Context(), c.Config().DefaultStoragePool, "custom", name, nil)
+	_, _, err = conn.GetStoragePoolVolume(t.Context(), c.IncusProject(), c.Config().DefaultStoragePool, "custom", name, nil)
 	if incusApi.StatusErrorCheck(err, http.StatusNotFound) {
 		return nil
 	}
 	require.NoError(t, err)
 
-	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.Config().DefaultStoragePool, "custom", name)
+	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.IncusProject(), c.Config().DefaultStoragePool, "custom", name)
 	require.NoError(t, err)
 	defer func() { _ = sc.Close() }()
 
@@ -120,7 +120,7 @@ func readBackupManifest(t *testing.T, c *client.Client) []backupManifest {
 	require.NoError(t, err)
 
 	name := backupManifestIncusName(t, c)
-	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.Config().DefaultStoragePool, "custom", name)
+	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.IncusProject(), c.Config().DefaultStoragePool, "custom", name)
 	require.NoError(t, err)
 	defer func() { _ = sc.Close() }()
 
@@ -403,7 +403,7 @@ volumes:
 	conn, err := bp.Connection()
 	require.NoError(t, err)
 
-	_, _, err = conn.GetStoragePoolVolume(t.Context(), bp.Config().DefaultStoragePool, "custom", "ic-backup-app-data", nil)
+	_, _, err = conn.GetStoragePoolVolume(t.Context(), bp.IncusProject(), bp.Config().DefaultStoragePool, "custom", "ic-backup-app-data", nil)
 	assert.True(t, incusApi.StatusErrorCheck(err, http.StatusNotFound), "app-data must not have a backup mirror")
 }
 
@@ -574,7 +574,7 @@ func TestE2EBackupCreateDataIntegrity(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.Config().DefaultStoragePool, "custom", "vol-data")
+	sc, err := conn.GetStoragePoolVolumeFileSFTP(t.Context(), c.IncusProject(), c.Config().DefaultStoragePool, "custom", "vol-data")
 	require.NoError(t, err)
 
 	f, err := sc.Create("backup-test.txt")
@@ -595,7 +595,7 @@ func TestE2EBackupCreateDataIntegrity(t *testing.T) {
 	bConn, err := bp.Connection()
 	require.NoError(t, err)
 
-	bSc, err := bConn.GetStoragePoolVolumeFileSFTP(t.Context(), bp.Config().DefaultStoragePool, "custom", "ic-backup-data")
+	bSc, err := bConn.GetStoragePoolVolumeFileSFTP(t.Context(), bp.IncusProject(), bp.Config().DefaultStoragePool, "custom", "ic-backup-data")
 	require.NoError(t, err)
 	defer func() { _ = bSc.Close() }()
 

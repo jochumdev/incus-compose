@@ -69,7 +69,7 @@ func TestIncusTransportTuning(t *testing.T) {
 			// The default of 2 makes a worker pool reconnect constantly.
 			require.Greater(t, transport.MaxIdleConnsPerHost, 2)
 
-			require.False(t, transport.DisableKeepAlives, "pooling is why WithProject shares the transport")
+			require.False(t, transport.DisableKeepAlives, "a worker pool reconnects constantly without pooling")
 			require.False(t, transport.ForceAttemptHTTP2, "events and exec need an HTTP/1.1 upgrade")
 
 			require.NotZero(t, transport.TLSHandshakeTimeout)
@@ -99,29 +99,14 @@ func TestIncusTransportPerAddressKind(t *testing.T) {
 	require.NotNil(t, transport.Proxy, "an https remote honors the proxy environment")
 }
 
-// TestIncusWithProjectSharesTransport is the payoff of pooling: a re-scoped
-// copy must not open a second pool.
-func TestIncusWithProjectSharesTransport(t *testing.T) {
-	t.Parallel()
-
-	conn, err := NewConnection(&ConfigRemoteInfo{Name: "t", Addrs: []string{"https://127.0.0.1:8443"}})
-	require.NoError(t, err)
-
-	_, original := transportOf(t, conn)
-	_, copied := transportOf(t, conn.WithProject("other"))
-
-	require.Same(t, original, copied)
-}
-
-// TestIncusWithMaxIdleConns is the mirror image of WithProject: here the
-// transport must NOT be shared, because the pool size belongs to the pool.
+// TestIncusWithMaxIdleConns: the transport must NOT be shared with the copy,
+// because the pool size belongs to the pool.
 func TestIncusWithMaxIdleConns(t *testing.T) {
 	t.Parallel()
 
 	conn, err := NewConnection(&ConfigRemoteInfo{
-		Name:    "t",
-		Addrs:   []string{"https://127.0.0.1:8443"},
-		Project: "myproject",
+		Name:  "t",
+		Addrs: []string{"https://127.0.0.1:8443"},
 	})
 	require.NoError(t, err)
 
@@ -140,7 +125,6 @@ func TestIncusWithMaxIdleConns(t *testing.T) {
 	require.Equal(t, incusMaxIdleConnsPerHost, before.MaxIdleConnsPerHost)
 
 	// Everything else survives the clone.
-	require.Equal(t, "myproject", incus.project)
 	require.NotNil(t, after.TLSClientConfig)
 	require.NotNil(t, after.Proxy)
 	require.False(t, after.ForceAttemptHTTP2)
@@ -158,18 +142,6 @@ func TestIncusWithMaxIdleConnsKeepsTheDialer(t *testing.T) {
 
 	require.NotNil(t, transport.DialContext, "a unix connection is nothing without its dialer")
 	require.Equal(t, "/tmp/x.socket", incus.socketPath)
-}
-
-func TestIncusWithersCompose(t *testing.T) {
-	t.Parallel()
-
-	conn, err := NewConnection(&ConfigRemoteInfo{Name: "t", Addrs: []string{"https://127.0.0.1:8443"}})
-	require.NoError(t, err)
-
-	incus, transport := transportOf(t, conn.WithMaxIdleConns(9, 5).WithProject("other"))
-
-	require.Equal(t, "other", incus.project)
-	require.Equal(t, 9, transport.MaxIdleConns, "WithProject must keep the retuned transport")
 }
 
 func TestNewConnectionIncusNoAddress(t *testing.T) {
@@ -209,7 +181,7 @@ func TestIncusGetInstanceNames(t *testing.T) {
 
 	conn := testConnection(t)
 
-	names, err := conn.GetInstanceNames(t.Context(), nil)
+	names, err := conn.GetInstanceNames(t.Context(), "", nil)
 	require.NoError(t, err)
 
 	// Every name must be a bare name, not the resource URL the API returns.
@@ -225,15 +197,15 @@ func TestIncusGetInstancesRecursion(t *testing.T) {
 	ctx := t.Context()
 	conn := testConnection(t)
 
-	instances, err := conn.GetInstances(ctx, nil)
+	instances, err := conn.GetInstances(ctx, "", nil)
 	require.NoError(t, err)
 
-	full, err := conn.GetInstances(ctx, &GetInstancesArgs{Full: true})
+	full, err := conn.GetInstances(ctx, "", &GetInstancesArgs{Full: true})
 	require.NoError(t, err)
 
 	require.Len(t, full, len(instances), "recursion=1 and recursion=2 must see the same set")
 
-	names, err := conn.GetInstanceNames(ctx, nil)
+	names, err := conn.GetInstanceNames(ctx, "", nil)
 	require.NoError(t, err)
 
 	require.Len(t, names, len(instances), "the name list must match the recursive list")
@@ -248,11 +220,11 @@ func TestIncusGetInstanceNotFound(t *testing.T) {
 	ctx := t.Context()
 	conn := testConnection(t)
 
-	_, _, err := conn.GetInstance(ctx, "ic-iclient-does-not-exist", nil)
+	_, _, err := conn.GetInstance(ctx, "", "ic-iclient-does-not-exist", nil)
 	require.Error(t, err)
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404 StatusError, got %v", err)
 
-	_, _, err = conn.GetInstanceState(ctx, "ic-iclient-does-not-exist")
+	_, _, err = conn.GetInstanceState(ctx, "", "ic-iclient-does-not-exist")
 	require.Error(t, err)
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404 StatusError, got %v", err)
 }
@@ -266,7 +238,7 @@ func TestIncusGetInstanceRoundTrip(t *testing.T) {
 	ctx := t.Context()
 	conn := testConnection(t)
 
-	names, err := conn.GetInstanceNames(ctx, nil)
+	names, err := conn.GetInstanceNames(ctx, "", nil)
 	require.NoError(t, err)
 
 	if len(names) == 0 {
@@ -275,16 +247,16 @@ func TestIncusGetInstanceRoundTrip(t *testing.T) {
 
 	name := names[0]
 
-	instance, etag, err := conn.GetInstance(ctx, name, nil)
+	instance, etag, err := conn.GetInstance(ctx, "", name, nil)
 	require.NoError(t, err)
 	require.Equal(t, name, instance.Name)
 	require.NotEmpty(t, etag, "GetInstance must return the ETag header")
 
-	full, _, err := conn.GetInstance(ctx, name, &GetInstanceArgs{Full: true})
+	full, _, err := conn.GetInstance(ctx, "", name, &GetInstanceArgs{Full: true})
 	require.NoError(t, err)
 	require.Equal(t, name, full.Name)
 
-	state, _, err := conn.GetInstanceState(ctx, name)
+	state, _, err := conn.GetInstanceState(ctx, "", name)
 	require.NoError(t, err)
 	require.NotEmpty(t, state.Status)
 }
@@ -295,18 +267,9 @@ func TestIncusUnknownProjectIsEmpty(t *testing.T) {
 	skipLocal(t)
 	t.Parallel()
 
-	config, err := ReadConfig("")
-	require.NoError(t, err)
+	conn := testConnection(t)
 
-	info, err := config.RemoteInfos(os.Getenv("INCUS_REMOTE"))
-	require.NoError(t, err)
-
-	info.Project = "ic-iclient-no-such-project"
-
-	conn, err := NewConnection(info)
-	require.NoError(t, err)
-
-	names, err := conn.GetInstanceNames(t.Context(), nil)
+	names, err := conn.GetInstanceNames(t.Context(), "ic-iclient-no-such-project", nil)
 	require.NoError(t, err)
 	require.Empty(t, names)
 }
@@ -398,9 +361,8 @@ func recordingServer(t *testing.T, metadata string) (*Connection, *recorder) {
 	t.Cleanup(server.Close)
 
 	conn, err := NewConnection(&ConfigRemoteInfo{
-		Name:    "recording",
-		Addrs:   []string{server.URL},
-		Project: "myproject",
+		Name:  "recording",
+		Addrs: []string{server.URL},
 	})
 	require.NoError(t, err)
 
@@ -422,36 +384,39 @@ func TestIncusRequestURLs(t *testing.T) {
 	}{
 		{
 			"GetInstanceNames", `[]`,
-			func(c *Connection) error { _, err := c.GetInstanceNames(ctx, nil); return err },
+			func(c *Connection) error { _, err := c.GetInstanceNames(ctx, "myproject", nil); return err },
 			"/1.0/instances?project=myproject",
 		},
 		{
 			"GetInstanceNames typed", `[]`,
 			func(c *Connection) error {
-				_, err := c.GetInstanceNames(ctx, &GetInstancesArgs{Type: api.InstanceTypeContainer})
+				_, err := c.GetInstanceNames(ctx, "myproject", &GetInstancesArgs{Type: api.InstanceTypeContainer})
 				return err
 			},
 			"/1.0/instances?instance-type=container&project=myproject",
 		},
 		{
 			"GetInstances", `[]`,
-			func(c *Connection) error { _, err := c.GetInstances(ctx, nil); return err },
+			func(c *Connection) error { _, err := c.GetInstances(ctx, "myproject", nil); return err },
 			"/1.0/instances?project=myproject&recursion=1",
 		},
 		{
 			"GetInstancesFull", `[]`,
-			func(c *Connection) error { _, err := c.GetInstances(ctx, &GetInstancesArgs{Full: true}); return err },
+			func(c *Connection) error {
+				_, err := c.GetInstances(ctx, "myproject", &GetInstancesArgs{Full: true})
+				return err
+			},
 			"/1.0/instances?project=myproject&recursion=2",
 		},
 		{
 			"GetInstance", `{}`,
-			func(c *Connection) error { _, _, err := c.GetInstance(ctx, "web-1", nil); return err },
+			func(c *Connection) error { _, _, err := c.GetInstance(ctx, "myproject", "web-1", nil); return err },
 			"/1.0/instances/web-1?project=myproject",
 		},
 		{
 			"GetInstance full", `{}`,
 			func(c *Connection) error {
-				_, _, err := c.GetInstance(ctx, "web-1", &GetInstanceArgs{Full: true})
+				_, _, err := c.GetInstance(ctx, "myproject", "web-1", &GetInstanceArgs{Full: true})
 
 				return err
 			},
@@ -459,12 +424,12 @@ func TestIncusRequestURLs(t *testing.T) {
 		},
 		{
 			"GetInstanceState", `{}`,
-			func(c *Connection) error { _, _, err := c.GetInstanceState(ctx, "web-1"); return err },
+			func(c *Connection) error { _, _, err := c.GetInstanceState(ctx, "myproject", "web-1"); return err },
 			"/1.0/instances/web-1/state?project=myproject",
 		},
 		{
 			"name is escaped", `{}`,
-			func(c *Connection) error { _, _, err := c.GetInstance(ctx, "a/b", nil); return err },
+			func(c *Connection) error { _, _, err := c.GetInstance(ctx, "myproject", "a/b", nil); return err },
 			"/1.0/instances/a%2Fb?project=myproject",
 		},
 	} {
@@ -479,37 +444,33 @@ func TestIncusRequestURLs(t *testing.T) {
 	}
 }
 
-// TestIncusWithProject covers the sharing contract: a re-scoped copy reuses the
-// transport, leaves the original alone, and sends the new project.
-func TestIncusWithProject(t *testing.T) {
+// TestIncusPerCallProject: one connection serves two projects, and neither call
+// leaves anything behind on it.
+func TestIncusPerCallProject(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
 
 	conn, seen := recordingServer(t, `[]`)
-	other := conn.WithProject("second")
 
-	_, err := other.GetInstanceNames(ctx, nil)
+	_, err := conn.GetInstanceNames(ctx, "second", nil)
 	require.NoError(t, err)
 
-	_, err = conn.GetInstanceNames(ctx, nil)
+	_, err = conn.GetInstanceNames(ctx, "myproject", nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{
 		"/1.0/instances?project=second",
 		"/1.0/instances?project=myproject",
-	}, seen.uris(), "the copy must re-scope and the original must not change")
-
-	require.NotSame(t, conn, other, "WithProject must not mutate in place")
-	require.Same(t, conn.http, other.http, "the transport is what gets shared")
+	}, seen.uris())
 }
 
-func TestIncusWithProjectEmpty(t *testing.T) {
+func TestIncusEmptyProject(t *testing.T) {
 	t.Parallel()
 
 	conn, seen := recordingServer(t, `[]`)
 
-	_, err := conn.WithProject("").GetInstanceNames(t.Context(), nil)
+	_, err := conn.GetInstanceNames(t.Context(), "", nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"/1.0/instances"}, seen.uris(), "an empty project sends no parameter")
@@ -529,11 +490,6 @@ func TestIncusInstancesArgs(t *testing.T) {
 		{"nil is the zero value", nil, "/1.0/instances?project=myproject&recursion=1"},
 		{"full", &GetInstancesArgs{Full: true}, "/1.0/instances?project=myproject&recursion=2"},
 		{
-			"all projects drops the project",
-			&GetInstancesArgs{AllProjects: true},
-			"/1.0/instances?all-projects=true&recursion=1",
-		},
-		{
 			"filters are rendered as the API reads them",
 			&GetInstancesArgs{Filters: []string{"status=Running"}},
 			"/1.0/instances?filter=status+eq+Running&project=myproject&recursion=1",
@@ -541,13 +497,12 @@ func TestIncusInstancesArgs(t *testing.T) {
 		{
 			"every axis at once",
 			&GetInstancesArgs{
-				Type:        api.InstanceTypeContainer,
-				Full:        true,
-				AllProjects: true,
-				Filters:     []string{"status=Running", "type=container"},
+				Type:    api.InstanceTypeContainer,
+				Full:    true,
+				Filters: []string{"status=Running", "type=container"},
 			},
-			"/1.0/instances?all-projects=true&filter=status+eq+Running+and+type+eq+container" +
-				"&instance-type=container&recursion=2",
+			"/1.0/instances?filter=status+eq+Running+and+type+eq+container" +
+				"&instance-type=container&project=myproject&recursion=2",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -555,23 +510,24 @@ func TestIncusInstancesArgs(t *testing.T) {
 
 			conn, seen := recordingServer(t, `[]`)
 
-			_, err := conn.GetInstances(ctx, tt.args)
+			_, err := conn.GetInstances(ctx, "myproject", tt.args)
 			require.NoError(t, err)
 			require.Equal(t, []string{tt.want}, seen.uris())
 		})
 	}
 }
 
-// TestIncusGetInstanceNamesRefusesAllProjects: a bare name is not unique
-// across projects, so this combination has no honest answer.
-func TestIncusGetInstanceNamesRefusesAllProjects(t *testing.T) {
+// TestIncusGetInstancesAllProjects: incusd refuses a request carrying both, so
+// the all-projects form must send no project of its own.
+func TestIncusGetInstancesAllProjects(t *testing.T) {
 	t.Parallel()
 
 	conn, seen := recordingServer(t, `[]`)
 
-	_, err := conn.GetInstanceNames(t.Context(), &GetInstancesArgs{AllProjects: true})
-	require.ErrorIs(t, err, ErrConnectionUnsupported)
-	require.Empty(t, seen.all(), "it must refuse before asking the server")
+	_, err := conn.GetInstancesAllProjects(t.Context(), &GetInstancesArgs{Full: true})
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"/1.0/instances?all-projects=true&recursion=2"}, seen.uris())
 }
 
 func TestIncusGetInstanceReturnsETag(t *testing.T) {
@@ -579,7 +535,7 @@ func TestIncusGetInstanceReturnsETag(t *testing.T) {
 
 	conn, _ := recordingServer(t, `{"name":"web-1"}`)
 
-	instance, etag, err := conn.GetInstance(t.Context(), "web-1", nil)
+	instance, etag, err := conn.GetInstance(t.Context(), "myproject", "web-1", nil)
 	require.NoError(t, err)
 	require.Equal(t, "web-1", instance.Name)
 	require.Equal(t, "test-etag", etag)
@@ -601,7 +557,7 @@ func TestIncusErrorEnvelope(t *testing.T) {
 	conn, err := NewConnection(&ConfigRemoteInfo{Name: "erroring", Addrs: []string{server.URL}})
 	require.NoError(t, err)
 
-	_, _, err = conn.GetInstance(t.Context(), "nope", nil)
+	_, _, err = conn.GetInstance(t.Context(), "myproject", "nope", nil)
 	require.Error(t, err)
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404 StatusError, got %v", err)
 	require.Contains(t, err.Error(), "Instance not found")
@@ -636,6 +592,6 @@ func TestIncusContextCancelled(t *testing.T) {
 		cancel()
 	}()
 
-	_, err = conn.GetInstanceNames(ctx, nil)
+	_, err = conn.GetInstanceNames(ctx, "myproject", nil)
 	require.ErrorIs(t, err, context.Canceled)
 }

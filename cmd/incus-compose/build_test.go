@@ -130,7 +130,7 @@ ENV PATH=/opt/bin:/usr/bin
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, "app-1", nil)
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "app-1", nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "hello", inst.Config["environment.GREETING"])
@@ -173,7 +173,7 @@ RUN echo "built by incus-compose"
 	require.NoError(t, err)
 
 	uuid := func(name string) string {
-		inst, _, err := conn.GetInstance(ctx, name, nil)
+		inst, _, err := conn.GetInstance(ctx, c.IncusProject(), name, nil)
 		require.NoError(t, err)
 
 		return inst.Config["volatile.uuid"]
