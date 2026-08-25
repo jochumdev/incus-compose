@@ -17,6 +17,7 @@ import (
 	"time"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/osarch"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	rspecs "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -74,37 +75,138 @@ type BuildConfig struct {
 	Pull bool
 }
 
-// incusArchToPlatform maps an Incus architecture name to an OCI platform.
-func incusArchToPlatform(arch string) (string, bool) {
-	switch arch {
-	case "x86_64":
-		return "linux/amd64", true
-	case "i686":
-		return "linux/386", true
-	case "aarch64":
-		return "linux/arm64", true
-	case "armv7", "armv7l":
-		return "linux/arm/v7", true
-	case "armv6", "armv6l":
-		return "linux/arm/v6", true
-	case "ppc64le":
-		return "linux/ppc64le", true
-	case "s390x":
-		return "linux/s390x", true
-	case "riscv64":
-		return "linux/riscv64", true
+// buildArchitectures are the architectures a container builder takes a
+// --platform for. Incus runs more than these, and a build targeting one of the
+// others has nowhere to go, so it fails rather than handing the builder a
+// platform it will reject.
+var buildArchitectures = []string{"x86_64", "i686", "aarch64", "armv6l", "armv7l", "ppc64le", "s390x", "riscv64"}
+
+// platformParts splits an architecture token into its canonical registry
+// spelling and the variant that spelling implies. Incus' names and aliases
+// carry one where the registry keeps it separate: armhf is ARMv7.
+func platformParts(arch string) (string, string, bool) {
+	id, err := osarch.ArchitectureID(arch)
+	if err != nil {
+		return "", "", false
 	}
-	return "", false
+
+	name, err := osarch.ArchitectureName(id)
+	if err != nil {
+		return "", "", false
+	}
+
+	switch name {
+	case "x86_64":
+		return "amd64", "", true
+	case "i686":
+		return "386", "", true
+	case "aarch64":
+		return "arm64", "", true
+	case "armv6l":
+		return "arm", "v6", true
+	case "armv7l":
+		return "arm", "v7", true
+	case "armv8l":
+		return "arm", "v8", true
+	}
+
+	// ppc64le, s390x, riscv64, loongarch64 and the mips family spell the same
+	// on both sides.
+	return name, "", true
 }
 
-func platformToIncusArch(platform string, arches []string) (string, bool) {
-	for _, arch := range arches {
-		candidate, ok := incusArchToPlatform(arch)
-		if ok && candidate == platform {
-			return arch, true
+// platformKey normalizes an OCI platform to the form the cache alias suffix and
+// the manifest picker share, and answers the Incus architecture alongside it.
+//
+// The variant is kept whenever the registry gives it its own manifest, which is
+// every variant except the one case where it names the architecture itself:
+// arm64's v8. A bare arm takes the variant its Incus architecture implies.
+func platformKey(platform string) (string, string, bool) {
+	parts := strings.Split(strings.ToLower(platform), "/")
+	if parts[0] == "linux" {
+		parts = parts[1:]
+	}
+
+	if len(parts) == 0 || len(parts) > 2 {
+		return "", "", false
+	}
+
+	variant := ""
+	if len(parts) == 2 {
+		variant = parts[1]
+	}
+
+	base, implied, ok := platformParts(parts[0])
+	if !ok {
+		return "", "", false
+	}
+
+	if variant == "" {
+		variant = implied
+	}
+
+	if base == "arm64" && variant == "v8" {
+		variant = ""
+	}
+
+	key := base
+	if variant != "" {
+		key += "/" + variant
+	}
+
+	arch, ok := platformArch(key)
+	if !ok {
+		return "", "", false
+	}
+
+	return key, arch, true
+}
+
+// platformArch is the Incus architecture name for a platform key. Only 32-bit
+// arm has an entry per variant; everywhere else the variant names a baseline of
+// one architecture, which Incus does not model. Nor does it model every arm
+// variant - v5 lands on ARMv6, the nearest it has - so this is not the answer
+// to whether two keys name one manifest.
+func platformArch(key string) (string, bool) {
+	arch, variant, _ := strings.Cut(key, "/")
+
+	if arch == "arm" {
+		switch variant {
+		case "v7":
+			arch = "armv7l"
+		case "v8":
+			arch = "armv8l"
+		default:
+			arch = "armv6l"
 		}
 	}
-	return "", false
+
+	id, err := osarch.ArchitectureID(arch)
+	if err != nil {
+		return "", false
+	}
+
+	name, err := osarch.ArchitectureName(id)
+	if err != nil {
+		return "", false
+	}
+
+	return name, true
+}
+
+// archPlatform is the platform key for an Incus architecture, used when nothing
+// asked for one and the server's own is taken instead.
+func archPlatform(arch string) string {
+	base, implied, ok := platformParts(arch)
+	if !ok {
+		return arch
+	}
+
+	if implied != "" {
+		return base + "/" + implied
+	}
+
+	return base
 }
 
 // buildDetectBuilder returns the path to the container builder.
