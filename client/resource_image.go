@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"github.com/avast/retry-go/v5"
 	"github.com/distribution/reference"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/sftp"
 
 	"github.com/lxc/incus-compose/iclient"
@@ -56,6 +58,11 @@ type ImageConfig struct {
 	// per-alias locks. Empty means DefaultLockVolume.
 	LockVolume string
 
+	// Platform is the OCI platform the image is wanted for, for example
+	// linux/arm64. Empty means the architecture of the server we are connected
+	// to. Build.Platform takes precedence for a built image.
+	Platform string
+
 	// Build, when set, marks this image as locally built rather than pulled
 	// from a registry. Ensure will shell out to podman/docker instead of
 	// calling CopyImage.
@@ -90,6 +97,11 @@ type Image struct {
 
 	// image is the image reference without the remote prefix
 	image string
+
+	// arch is the Incus architecture name this image is wanted for, and
+	// platform its registry spelling. Resolved together, never separately.
+	arch     string
+	platform string
 
 	// cache is the resolved client for caching, nil when caching is off
 	cache *Client
@@ -242,6 +254,78 @@ func (r *Image) IncusName() string {
 	return r.incusName
 }
 
+// resolvePlatform reads a platform request, answering the cache alias key and
+// the Incus architecture behind it.
+func (r *Image) resolvePlatform(platform string) (string, string, error) {
+	key, arch, ok := platformKey(platform)
+	if ok {
+		return key, arch, nil
+	}
+
+	if r.Config.Build != nil {
+		return "", "", ErrNoPlatform.WithText("unsupported build platform " + platform)
+	}
+
+	return "", "", ErrNoPlatform.WithText("unsupported platform " + platform)
+}
+
+// requestedPlatform is the platform this image was configured for. A build
+// states it under build.platforms, which compose-go keeps apart from
+// service.platform, and the builder's is the one that decides the bytes.
+func (r *Image) requestedPlatform() string {
+	if r.Config.Build != nil && r.Config.Build.Platform != "" {
+		return r.Config.Build.Platform
+	}
+
+	return r.Config.Platform
+}
+
+// cacheAlias is the alias the store holds this image under. The platform is
+// part of the key because a stored alias resolves to one fingerprint, while the
+// store is shared across projects and, on a cluster, across architectures.
+func (r *Image) cacheAlias() string {
+	return r.incusName + "/" + r.platform
+}
+
+// resolveArch fixes the architecture this image is wanted for. An empty
+// platform takes the connected server's own, which is the one architecture we
+// know is runnable without asking where the instance will land.
+func (r *Image) resolveArch(ctx context.Context) error {
+	if r.arch != "" {
+		return nil
+	}
+
+	platform := r.requestedPlatform()
+	if platform != "" {
+		key, arch, err := r.resolvePlatform(platform)
+		if err != nil {
+			return err
+		}
+
+		r.arch, r.platform = arch, key
+
+		return nil
+	}
+
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	server, _, err := conn.GetServer(ctx)
+	if err != nil {
+		return ErrCreate.WithText("getting Incus server info").Wrap(err)
+	}
+
+	if len(server.Environment.Architectures) == 0 {
+		return ErrCreate.WithText("Incus server has no supported architectures")
+	}
+
+	r.arch, r.platform = server.Environment.Architectures[0], archPlatform(server.Environment.Architectures[0])
+
+	return nil
+}
+
 // IsEnsured returns true if the image has been fetched/copied to cache.
 func (r *Image) IsEnsured() bool {
 	return r.State().IncusAlias != nil
@@ -272,12 +356,51 @@ func (r *Image) updateState(f func(s *ImageState)) {
 }
 
 // AddService records a compose service that uses this image. One image often
-// serves several services, and Client.Resource hands them all the same object.
-func (r *Image) AddService(name string) {
+// serves several services, and Client.Resource hands them all the same object -
+// which two services wanting different architectures of it cannot share.
+func (r *Image) AddService(name string, platform string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	want := r.requestedPlatform()
+	_, _, valid := platformKey(platform)
+
+	switch {
+	// The conflict is between services, so the first one has nobody to
+	// disagree with - its own platform is already r's.
+	case len(r.Config.Services) == 0 || platform == "":
+		// Nothing to settle: no preference.
+	case want == "" || !valid:
+		// The earlier services had no preference, or this one names something
+		// resolveArch has to reject. Either way this value decides: services
+		// are loaded in map order, so an unusable one that did not take hold
+		// here would be reported or silently dropped run by run.
+		r.Config.Platform = platform
+	case samePlatform(want, platform):
+		// The same one twice.
+	default:
+		return ErrPlatformConflict.WithText(fmt.Sprintf(
+			"%s as %q and as %q", r.incusName, want, platform))
+	}
+
 	r.Config.Services = append(r.Config.Services, name)
+
+	return nil
+}
+
+// samePlatform reports whether two platform requests are known to name one
+// manifest. One that does not parse answers true, because it is not a
+// disagreement: resolveArch reports it, at a point where down can still tear
+// the project down.
+func samePlatform(a string, b string) bool {
+	keyA, _, okA := platformKey(a)
+	keyB, _, okB := platformKey(b)
+
+	if !okA || !okB {
+		return true
+	}
+
+	return keyA == keyB
 }
 
 // Created returns true if the image was created during the last Ensure call.
@@ -322,7 +445,7 @@ func (r *Image) Ensure(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	err = r.setupCacheAndSource()
+	err = r.setupCacheAndSource(ctx)
 	if err != nil {
 		_ = r.client.hookBefore(ctx, ActionEnsure, r, args, nil)
 
@@ -362,7 +485,7 @@ func (r *Image) Ensure(ctx context.Context, opts ...Option) error {
 	return err
 }
 
-func (r *Image) setupCacheAndSource() error {
+func (r *Image) setupCacheAndSource(ctx context.Context) error {
 	// Resolve cache: CacheClient > CacheProject > default imageCache which might be nil
 	if r.cache == nil {
 		if r.Config.CacheClient != nil {
@@ -376,6 +499,11 @@ func (r *Image) setupCacheAndSource() error {
 		} else {
 			r.cache = r.client.imageCache
 		}
+	}
+
+	err := r.resolveArch(ctx)
+	if err != nil {
+		return err
 	}
 
 	// Resolve source image server
@@ -431,10 +559,11 @@ func (r *Image) resolveSource() (*imageSource, error) {
 	return source, nil
 }
 
-// pullRequest is the copy incusd performs on its own; we only say where the source is.
-func (r *Image) pullRequest(fingerprint string) incusApi.ImagesPost {
+// pullRequest is the copy incusd performs on its own; we only say where the
+// source is and what to alias the result as.
+func (r *Image) pullRequest(alias string, fingerprint string) incusApi.ImagesPost {
 	return incusApi.ImagesPost{
-		Aliases: []incusApi.ImageAlias{{Name: r.incusName}},
+		Aliases: []incusApi.ImageAlias{{Name: alias}},
 		Source: &incusApi.ImagesPostSource{
 			ImageSource: incusApi.ImageSource{
 				Server:      r.source.serverURL(),
@@ -446,6 +575,74 @@ func (r *Image) pullRequest(fingerprint string) incusApi.ImagesPost {
 			Fingerprint: fingerprint,
 		},
 	}
+}
+
+// pullSource is what to ask the source for, plus the OCI config when reading
+// the registry answered that too.
+//
+// An OCI reference is pinned to the manifest built for this image's platform.
+// The registry serves one per architecture behind a single tag, and incusd
+// resolves an unpinned reference with skopeo on whichever cluster member
+// handles the pull - which is how the store ends up holding one member's
+// architecture for everybody.
+func (r *Image) pullSource(ctx context.Context) (string, *ocispec.ImageConfig, error) {
+	if r.NativeIncus() {
+		fingerprint, err := r.sourceFingerprint(ctx)
+
+		return fingerprint, nil, err
+	}
+
+	if r.source.info.Protocol != "oci" {
+		return r.image, nil, nil
+	}
+
+	digest, fingerprint, config, err := r.ociResolveSource(ctx, r.platform)
+	if err != nil {
+		return "", nil, err
+	}
+
+	r.updateState(func(s *ImageState) {
+		s.SourceFingerprint = fingerprint
+		ociStateFromConfig(s, config)
+	})
+
+	name, _, _ := strings.Cut(r.image, "@")
+
+	return name + "@" + digest, config, nil
+}
+
+// verifyArch rejects a stored image whose architecture is not the one asked
+// for, and deletes it. An OCI pull is pinned to an exact manifest and needs no
+// check; every other source resolves the reference server-side, and answers
+// with the architecture of the member that happened to serve the request.
+//
+// The check can only run once the image is stored, so leaving a rejected one
+// behind would put it under the platform's alias for good: the store is shared
+// across projects, and a hit there is answered without asking again.
+func (r *Image) verifyArch(ctx context.Context, conn *iclient.Connection, project string, fingerprint string) error {
+	if r.source != nil && r.source.info.Protocol == "oci" {
+		return nil
+	}
+
+	img, _, err := conn.GetImage(ctx, project, fingerprint, nil)
+	if err != nil {
+		return ErrNotFound.WithText("the image just stored").Wrap(err)
+	}
+
+	if img.Architecture == r.arch {
+		return nil
+	}
+
+	rejected := ErrNoPlatform.WithText(fmt.Sprintf(
+		"%s resolved to %s, not %s; only an OCI source can be asked for one architecture",
+		r.image, img.Architecture, r.arch))
+
+	err = deleteImage(ctx, conn, project, fingerprint)
+	if err != nil {
+		return errors.Join(rejected, ErrDelete.WithText("the image of the wrong architecture").Wrap(err))
+	}
+
+	return rejected
 }
 
 // sourceFingerprint is what to ask the source for - the reference itself, unless a
@@ -487,6 +684,15 @@ func (r *Image) get(ctx context.Context) error {
 
 	img, _, err := conn.GetImage(ctx, r.client.incusProject, alias.Target, nil)
 	if err == nil {
+		// The project alias carries no platform, so a service that changed its
+		// platform finds the previous run's copy here. Answering it would make
+		// the change a no-op until something else deleted the image.
+		if !r.projectArchOK(img.Architecture) {
+			r.clearState()
+
+			return ErrNotFound.WithText(fmt.Sprintf("the project holds %s, not %s", img.Architecture, r.arch))
+		}
+
 		next.Size = img.Size
 		ociReadProperties(next, img.Properties)
 	}
@@ -494,6 +700,35 @@ func (r *Image) get(ctx context.Context) error {
 	r.state.Store(next)
 
 	return nil
+}
+
+// projectArchOK reports whether an image already in the project is the one this
+// resource wants.
+//
+// incusd derives a pulled OCI image's architecture from the manifest's
+// architecture field, which carries no variant, so every 32-bit arm image it
+// pulls is recorded as armv6l whichever variant was pinned. Comparing against
+// that is what the stored label can support: it catches amd64 against arm64,
+// and cannot tell arm/v6 from arm/v7.
+//
+// A built image is labeled by buildMetadataTar instead, which writes r.arch
+// unfolded, so the allowance is wrong for one and must not apply.
+func (r *Image) projectArchOK(stored string) bool {
+	if r.arch == "" || stored == "" {
+		return true
+	}
+
+	want := r.arch
+	if r.Config.Build == nil && r.source != nil && r.source.info.Protocol == "oci" {
+		base, _, _ := strings.Cut(r.platform, "/")
+
+		labeled, ok := platformArch(base)
+		if ok {
+			want = labeled
+		}
+	}
+
+	return stored == want
 }
 
 // readSource records what the source holds now, so a caller can tell it apart
@@ -522,21 +757,9 @@ func (r *Image) readSource(ctx context.Context) {
 		return
 	}
 
-	conn, err := r.client.Connection()
-	if err != nil {
-		return
-	}
-
 	// An index holds one manifest per architecture, and the one to compare
-	// against is what incusd pulled - which is what the stored image carries.
-	img, _, err := conn.GetImage(ctx, r.client.incusProject, r.State().IncusAlias.Target, nil)
-	if err != nil {
-		r.client.LogWarn("Cannot read the stored image", "resource", r, "error", err)
-
-		return
-	}
-
-	fingerprint, config, err := r.ociResolveSource(ctx, img.Architecture)
+	// against is the one this image was pulled for.
+	_, fingerprint, config, err := r.ociResolveSource(ctx, r.platform)
 	if err != nil {
 		r.client.LogWarn("Cannot resolve the image on its registry", "resource", r, "error", err)
 
@@ -554,12 +777,18 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 		return nil, ErrImageSource.WithText("not configured")
 	}
 
-	fingerprint, err := r.sourceFingerprint(ctx)
+	fingerprint, ociCfg, err := r.pullSource(ctx)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrNoPlatform) {
+			return nil, err
+		}
+
+		// Anything else is a store miss like any other, so materialize still
+		// gets to check whether a concurrent writer filled it.
+		return nil, ErrNotFound.Wrap(err)
 	}
 
-	op, err := r.cache.incus.CreateImage(ctx, r.cache.incusProject, r.pullRequest(fingerprint), nil)
+	op, err := r.cache.incus.CreateImage(ctx, r.cache.incusProject, r.pullRequest(r.cacheAlias(), fingerprint), nil)
 	if err == nil {
 		err = r.client.hookOperation(ctx, ActionEnsure, r, args, op, nil)
 	}
@@ -579,15 +808,20 @@ func (r *Image) copyToCache(ctx context.Context, args Options) (*incusApi.ImageA
 		retry.DelayType(retry.FixedDelay),
 		retry.LastErrorOnly(true),
 	).Do(func() (*incusApi.ImageAliasesEntry, error) {
-		alias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
+		alias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.cacheAlias(), nil)
 		return alias, err
 	})
 	if err != nil {
 		return nil, ErrNotFound.WithText("on cache after copy").Wrap(err)
 	}
 
+	err = r.verifyArch(ctx, r.cache.incus, r.cache.incusProject, cacheAlias.Target)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract oci informations with a temporary instance.
-	err = r.ociStoreConfig(ctx, r.cache.incus, r.cache.incusProject, cacheAlias.Target, nil)
+	err = r.ociStoreConfig(ctx, r.cache.incus, r.cache.incusProject, cacheAlias.Target, ociCfg)
 	if err != nil {
 		return nil, ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 	}
@@ -611,6 +845,16 @@ func (r *Image) copyToProject(ctx context.Context, args Options, cacheAlias *inc
 	conn, err := r.client.Connection()
 	if err != nil {
 		return err
+	}
+
+	// The project alias carries no platform, so the copy has nowhere to land
+	// while the previous platform's image still holds the name.
+	stale, _, err := conn.GetImageAlias(ctx, r.client.incusProject, r.incusName, nil)
+	if err == nil && stale.Target != cacheAlias.Target {
+		err = deleteImage(ctx, conn, r.client.incusProject, stale.Target)
+		if err != nil {
+			return ErrCreate.WithText("while removing the previous project image").Wrap(err)
+		}
 	}
 
 	op, err := conn.CopyImage(ctx, r.client.incusProject, r.cache.incus, r.cache.incusProject, cacheAlias.Target, &iclient.ImageCopyArgs{
@@ -663,7 +907,7 @@ func (r *Image) lockStore(ctx context.Context) (func(), error) {
 		return nil, ErrCreate.WithText("connecting to the image " + where).Wrap(err)
 	}
 
-	lock, err := vol.Lock(ctx, sc, fmt.Sprintf("%x", sha256.Sum256([]byte(r.incusName))), imageLockStale)
+	lock, err := vol.Lock(ctx, sc, fmt.Sprintf("%x", sha256.Sum256([]byte(r.cacheAlias()))), imageLockStale)
 	if err != nil {
 		r.client.WarnError(sc.Close, "Failed to close the image lock connection")
 		return nil, ErrCreate.WithText("taking the image lock in the " + where).Wrap(err)
@@ -699,7 +943,7 @@ func (r *Image) create(ctx context.Context, args Options) error {
 
 // materialize is hop A: make sure the cache holds the alias, returning it.
 func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageAliasesEntry, error) {
-	cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
+	cacheAlias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.cacheAlias(), nil)
 	if err == nil {
 		// An entry cached before the split still concatenates entrypoint and
 		// command, so reading the config again upgrades it where it lies.
@@ -718,7 +962,7 @@ func (r *Image) materialize(ctx context.Context, args Options) (*incusApi.ImageA
 	cacheAlias, cacheErr := r.copyToCache(ctx, args)
 	if cacheErr != nil && errors.Is(cacheErr, ErrNotFound) {
 		// A concurrent copy may still have published the alias.
-		cacheAlias, _, err = r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
+		cacheAlias, _, err = r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.cacheAlias(), nil)
 		if err != nil {
 			return nil, ErrNotFound.WithText("on cache and source").Wrap(cacheErr)
 		}
@@ -747,7 +991,7 @@ func (r *Image) createDirect(ctx context.Context, args Options) error {
 		return ErrImageSource.WithText("not configured")
 	}
 
-	fingerprint, err := r.sourceFingerprint(ctx)
+	fingerprint, ociCfg, err := r.pullSource(ctx)
 	if err != nil {
 		return err
 	}
@@ -757,7 +1001,7 @@ func (r *Image) createDirect(ctx context.Context, args Options) error {
 		return err
 	}
 
-	op, err := conn.CreateImage(ctx, r.client.incusProject, r.pullRequest(fingerprint), nil)
+	op, err := conn.CreateImage(ctx, r.client.incusProject, r.pullRequest(r.incusName, fingerprint), nil)
 	if err != nil {
 		r.client.LogWarn("Creating a copy operation failed", "resource", r, "error", err)
 	} else {
@@ -773,8 +1017,13 @@ func (r *Image) createDirect(ctx context.Context, args Options) error {
 		return ErrNotFound.WithText("on project after copy").Wrap(err)
 	}
 
+	err = r.verifyArch(ctx, conn, r.client.incusProject, targetAlias.Target)
+	if err != nil {
+		return err
+	}
+
 	// Extract oci informations with a temporary instance.
-	err = r.ociStoreConfig(ctx, conn, r.client.incusProject, targetAlias.Target, nil)
+	err = r.ociStoreConfig(ctx, conn, r.client.incusProject, targetAlias.Target, ociCfg)
 	if err != nil {
 		return ErrCreate.WithText("extracting OCI config from the image").Wrap(err)
 	}
@@ -813,7 +1062,7 @@ func (r *Image) ensureBuild(ctx context.Context, args Options) error {
 
 	// Hop A: the store already holds it, so copy rather than rebuild.
 	if r.cache != nil && args.Build.Mode != BuildForce {
-		cacheAlias, _, storeErr := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
+		cacheAlias, _, storeErr := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.cacheAlias(), nil)
 		if storeErr == nil {
 			r.client.LogDebug("Copying the built image from the cache", "resource", r)
 
@@ -846,20 +1095,27 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 		return ErrCreate.WithText("Incus server has no supported architectures")
 	}
 
+	// The builder produces the rootfs here and this server has to import it, so
+	// a build cannot target an architecture the server does not run.
+	if !slices.Contains(server.Environment.Architectures, r.arch) {
+		platform := r.Config.Build.Platform
+		if platform == "" {
+			platform = r.platform
+		}
+
+		return ErrNoPlatform.WithText("unsupported build platform " + platform)
+	}
+
+	// A platform the user wrote goes to the builder verbatim, since builders
+	// take platforms Incus has no architecture for and the string is theirs to
+	// get right. Only one we infer has to come from a set we know it accepts.
 	buildCfg := *r.Config.Build
-	incusArch := server.Environment.Architectures[0]
-	if buildCfg.Platform != "" {
-		var ok bool
-		incusArch, ok = platformToIncusArch(buildCfg.Platform, server.Environment.Architectures)
-		if !ok {
-			return ErrCreate.WithText("unsupported build platform " + buildCfg.Platform)
+	if buildCfg.Platform == "" {
+		if !slices.Contains(buildArchitectures, r.arch) {
+			return ErrNoPlatform.WithText("no build platform for " + r.arch)
 		}
-	} else {
-		platform, ok := incusArchToPlatform(incusArch)
-		if !ok {
-			return ErrCreate.WithText("unsupported Incus architecture " + incusArch)
-		}
-		buildCfg.Platform = platform
+
+		buildCfg.Platform = "linux/" + archPlatform(r.arch)
 	}
 
 	builder, err := buildDetectBuilder(args.Build.PreferredBuilder)
@@ -873,21 +1129,21 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 	}
 	defer r.client.WarnError(rootfs.Close, "Failure during close")
 
-	meta, err := buildMetadataTar(r.incusName, incusArch, configJSON)
+	meta, err := buildMetadataTar(r.incusName, r.arch, configJSON)
 	if err != nil {
 		return ErrCreate.WithText("building image metadata").Wrap(err)
 	}
 
 	// Without a usable cache the project is the import target, and hop B is a no-op.
 	cached := r.cache != nil && !buildCfg.NoCache
-	target, targetProject := conn, r.client.incusProject
+	target, targetProject, targetAlias := conn, r.client.incusProject, r.incusName
 	targetName := "project"
 	if cached {
-		target, targetProject = r.cache.incus, r.cache.incusProject
+		target, targetProject, targetAlias = r.cache.incus, r.cache.incusProject, r.cacheAlias()
 		targetName = "cache"
 	}
 
-	stale, _, err := target.GetImageAlias(ctx, targetProject, r.incusName, nil)
+	stale, _, err := target.GetImageAlias(ctx, targetProject, targetAlias, nil)
 	if err == nil {
 		err = deleteImage(ctx, target, targetProject, stale.Target)
 		if err != nil {
@@ -896,7 +1152,7 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 	}
 
 	op, err := target.CreateImage(ctx, targetProject, incusApi.ImagesPost{
-		Aliases: []incusApi.ImageAlias{{Name: r.incusName}},
+		Aliases: []incusApi.ImageAlias{{Name: targetAlias}},
 	}, &iclient.ImageCreateArgs{
 		MetaFile:   meta,
 		MetaName:   "metadata.tar",
@@ -908,7 +1164,7 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 		return ErrCreate.WithText("importing built image on " + targetName).Wrap(err)
 	}
 
-	built, eTag, err := target.GetImageAlias(ctx, targetProject, r.incusName, nil)
+	built, eTag, err := target.GetImageAlias(ctx, targetProject, targetAlias, nil)
 	if err != nil {
 		return ErrCreate.WithText("fetching alias after build").Wrap(err)
 	}
@@ -927,14 +1183,6 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 	r.created = true
 
 	if cached {
-		projectAlias, _, aliasErr := conn.GetImageAlias(ctx, r.client.incusProject, r.incusName, nil)
-		if aliasErr == nil {
-			err = deleteImage(ctx, conn, r.client.incusProject, projectAlias.Target)
-			if err != nil {
-				return ErrCreate.WithText("while removing the image from the project").Wrap(err)
-			}
-		}
-
 		err = r.copyToProject(ctx, args, built)
 		if err != nil {
 			return err
@@ -970,7 +1218,7 @@ func (r *Image) deleteCached(ctx context.Context) error {
 
 	defer release()
 
-	alias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.incusName, nil)
+	alias, _, err := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.cacheAlias(), nil)
 	if err != nil {
 		return nil
 	}

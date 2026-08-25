@@ -188,8 +188,12 @@ var (
 	ErrImageSource = NewError("image source error")
 
 	// ErrNoPlatform indicates a multi-arch image carries no manifest for the
-	// server's architecture.
+	// architecture it was asked for.
 	ErrNoPlatform = NewError("image has no manifest for the architecture")
+
+	// ErrPlatformConflict indicates two services want one image reference for
+	// different architectures.
+	ErrPlatformConflict = NewError("image wanted for two architectures")
 
 	// ErrNoSuchUser indicates a user or group name the image does not define.
 	ErrNoSuchUser = NewError("no such user or group in the image")

@@ -348,7 +348,7 @@ func instanceImage(c *client.Client, service types.ServiceConfig) (client.Resour
 	var errs error
 
 	imageName := service.Image
-	cfg := &client.ImageConfig{}
+	cfg := &client.ImageConfig{Platform: service.Platform}
 	if service.Build != nil {
 		if imageName == "" {
 			imageName = "localhost/" + service.Name
@@ -395,7 +395,10 @@ func instanceImage(c *client.Client, service types.ServiceConfig) (client.Resour
 	if !ok {
 		return nil, errors.Join(errs, errors.New("not an image"))
 	}
-	img.AddService(service.Name)
+	err = img.AddService(service.Name, service.Platform)
+	if err != nil {
+		return nil, errors.Join(errs, err)
+	}
 
 	return image, errs
 }

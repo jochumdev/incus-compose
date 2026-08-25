@@ -152,15 +152,27 @@ func TestOCIPickManifest(t *testing.T) {
 		Manifests: []ocispec.Descriptor{
 			{
 				Digest:   digest.FromString("arm64"),
-				Platform: &ocispec.Platform{OS: "linux", Architecture: "arm64"},
+				Platform: &ocispec.Platform{OS: "linux", Architecture: "arm64", Variant: "v8"},
 			},
 			{
 				Digest:   digest.FromString("windows"),
 				Platform: &ocispec.Platform{OS: "windows", Architecture: "amd64"},
 			},
 			{
+				Digest:   digest.FromString("armv5"),
+				Platform: &ocispec.Platform{OS: "linux", Architecture: "arm", Variant: "v5"},
+			},
+			{
+				Digest:   digest.FromString("armv6"),
+				Platform: &ocispec.Platform{OS: "linux", Architecture: "arm", Variant: "v6"},
+			},
+			{
 				Digest:   digest.FromString("amd64"),
 				Platform: &ocispec.Platform{OS: "linux", Architecture: "amd64"},
+			},
+			{
+				Digest:   digest.FromString("armv7"),
+				Platform: &ocispec.Platform{OS: "linux", Architecture: "arm", Variant: "v7"},
 			},
 			{
 				Digest: digest.FromString("attestation"),
@@ -169,22 +181,39 @@ func TestOCIPickManifest(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The Incus name and the OCI name for one architecture differ, which is the
-	// whole reason both go through Incus' alias table.
-	t.Run("x86_64 finds the amd64 manifest", func(t *testing.T) {
+	t.Run("amd64", func(t *testing.T) {
 		t.Parallel()
 
-		desc, err := ociPickManifest(index, "x86_64")
+		desc, err := ociPickManifest(index, "amd64")
 		require.NoError(t, err)
 		assert.Equal(t, digest.FromString("amd64"), desc.Digest)
 	})
 
-	t.Run("aarch64 finds the arm64 manifest", func(t *testing.T) {
+	// The registry spells out a variant Incus' architecture table folds away.
+	t.Run("arm64 matches the entry carrying v8", func(t *testing.T) {
 		t.Parallel()
 
-		desc, err := ociPickManifest(index, "aarch64")
+		desc, err := ociPickManifest(index, "arm64")
 		require.NoError(t, err)
 		assert.Equal(t, digest.FromString("arm64"), desc.Digest)
+	})
+
+	// Every entry is architecture "arm"; only the variant tells them apart, and
+	// picking either for the other ships code the CPU may not run. Incus has no
+	// ARMv5, so v5 is the one that folds if anything does - busybox lists it
+	// first, which is what a first-match picker would return for v6.
+	t.Run("arm variants are distinguished", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tt := range []struct{ platform, want string }{
+			{"arm/v5", "armv5"},
+			{"arm/v6", "armv6"},
+			{"arm/v7", "armv7"},
+		} {
+			desc, err := ociPickManifest(index, tt.platform)
+			require.NoError(t, err, tt.platform)
+			assert.Equal(t, digest.FromString(tt.want), desc.Digest, tt.platform)
+		}
 	})
 
 	t.Run("an architecture the image was not built for", func(t *testing.T) {
@@ -280,6 +309,7 @@ func TestOCIResolveSource(t *testing.T) {
 	t.Parallel()
 
 	config, err := json.Marshal(ocispec.Image{
+		Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"},
 		Config: ocispec.ImageConfig{
 			Entrypoint: []string{"docker-entrypoint.sh"},
 			Cmd:        []string{"redis-server"},
@@ -330,7 +360,7 @@ func TestOCIResolveSource(t *testing.T) {
 
 		server, _ := ociTestRegistry(t, blobs, indexDigest)
 
-		_, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
+		_, _, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.NoError(t, err)
 
 		assert.Equal(t, &ocispec.ImageConfig{
@@ -349,7 +379,7 @@ func TestOCIResolveSource(t *testing.T) {
 
 		server, requests := ociTestRegistry(t, blobs, indexDigest)
 
-		fingerprint, config, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
+		_, fingerprint, config, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.NoError(t, err)
 		require.NotEmpty(t, fingerprint)
 		require.NotNil(t, config)
@@ -363,7 +393,7 @@ func TestOCIResolveSource(t *testing.T) {
 
 		server, _ := ociTestRegistry(t, blobs, manifestDigest)
 
-		_, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
+		_, _, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.NoError(t, err)
 
 		assert.Equal(t, []string{"redis-server"}, got.Cmd)
@@ -374,7 +404,52 @@ func TestOCIResolveSource(t *testing.T) {
 
 		server, _ := ociTestRegistry(t, blobs, indexDigest)
 
-		_, _, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "s390x")
+		_, _, _, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "s390x")
+		require.ErrorIs(t, err, ErrNoPlatform)
+	})
+
+	// Nothing matched a single-arch tag against anything, so pinning it
+	// unchecked would store one architecture under another's cache alias.
+	t.Run("a single-arch tag of the wrong architecture", func(t *testing.T) {
+		t.Parallel()
+
+		server, _ := ociTestRegistry(t, blobs, manifestDigest)
+
+		_, _, _, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "arm64")
+		require.ErrorIs(t, err, ErrNoPlatform)
+	})
+
+	// Nothing matched the architecture either, and a windows manifest carries
+	// an architecture that compares equal to a linux one.
+	t.Run("a single-arch tag built for another OS", func(t *testing.T) {
+		t.Parallel()
+
+		win, err := json.Marshal(ocispec.Image{
+			Platform: ocispec.Platform{OS: "windows", Architecture: "amd64"},
+			Config:   ocispec.ImageConfig{User: "nobody"},
+		})
+		require.NoError(t, err)
+
+		winConfigDigest := digest.FromBytes(win)
+
+		winManifest, err := json.Marshal(ocispec.Manifest{
+			MediaType: ocispec.MediaTypeImageManifest,
+			Config: ocispec.Descriptor{
+				MediaType: ocispec.MediaTypeImageConfig,
+				Digest:    winConfigDigest,
+				Size:      int64(len(win)),
+			},
+		})
+		require.NoError(t, err)
+
+		winManifestDigest := digest.FromBytes(winManifest)
+
+		server, _ := ociTestRegistry(t, map[digest.Digest][]byte{
+			winManifestDigest: winManifest,
+			winConfigDigest:   win,
+		}, winManifestDigest)
+
+		_, _, _, err = ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.ErrorIs(t, err, ErrNoPlatform)
 	})
 
@@ -382,7 +457,10 @@ func TestOCIResolveSource(t *testing.T) {
 	t.Run("an image declaring almost nothing", func(t *testing.T) {
 		t.Parallel()
 
-		bare, err := json.Marshal(ocispec.Image{Config: ocispec.ImageConfig{User: "nobody"}})
+		bare, err := json.Marshal(ocispec.Image{
+			Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"},
+			Config:   ocispec.ImageConfig{User: "nobody"},
+		})
 		require.NoError(t, err)
 
 		bareConfigDigest := digest.FromBytes(bare)
@@ -404,7 +482,7 @@ func TestOCIResolveSource(t *testing.T) {
 			bareConfigDigest:   bare,
 		}, bareManifestDigest)
 
-		_, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "x86_64")
+		_, _, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.NoError(t, err)
 
 		assert.Equal(t, &ocispec.ImageConfig{User: "nobody"}, got)

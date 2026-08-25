@@ -193,6 +193,29 @@ for correct semver ordering. Headings below preserve each release's announced fo
 
 ### Fixed
 
+- The image cache is keyed by architecture, so a cluster mixing architectures no
+  longer serves one member's image to all of them. The cached alias carries the
+  platform (`docker.io/library/nginx:alpine/arm64`), and an OCI pull is pinned to
+  the manifest digest for that architecture instead of letting incusd resolve the
+  tag with skopeo on whichever member handles the request. A source that cannot
+  be pinned - simplestreams, a native `incus:` remote - is checked once stored
+  and the image is deleted again, since a wrong one left under the platform's
+  alias would be served to every later run in every project. Existing arch-blind cache entries are ignored and re-fetched
+  once; the old entry is left where it is, so a cache built by an earlier
+  version keeps one unused image per reference until it is deleted by hand.
+  (by @jochumdev)
+
+- A service `platform:` is honoured for pulled images, not only built ones. It
+  takes the OCI spelling `docker compose` uses (`linux/arm64`, `linux/arm/v7`),
+  and an unsupported one is an error instead of being ignored. Two services
+  wanting one image reference for different architectures is reported rather
+  than silently served from whichever was configured first. (by @jochumdev)
+
+- Multi-arch images publishing both `arm/v6` and `arm/v7` resolve to the right
+  one. Both entries carry architecture `arm` and differ only by variant, which
+  the manifest picker ignored - so `linux/arm/v7` found no manifest at all and
+  `linux/arm/v6` got whichever the registry listed first. (by @jochumdev)
+
 - A service `user:` may now name its user and group, not only number them:
   `user: "netbox:root"` starts instead of failing the whole project. Names
   resolve against the image's own `/etc/passwd` and `/etc/group`, and one the

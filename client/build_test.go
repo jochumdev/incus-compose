@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/lxc/incus/v7/shared/osarch"
+
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v4"
 )
@@ -91,36 +93,105 @@ func TestOptionBuild(t *testing.T) {
 	}
 }
 
-func TestIncusArchToPlatform(t *testing.T) {
+func TestBuildArchitectures(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		arch     string
-		platform string
-	}{
-		{"x86_64", "linux/amd64"},
-		{"i686", "linux/386"},
-		{"aarch64", "linux/arm64"},
-		{"armv7l", "linux/arm/v7"},
-		{"armv6l", "linux/arm/v6"},
-		{"ppc64le", "linux/ppc64le"},
-		{"s390x", "linux/s390x"},
-		{"riscv64", "linux/riscv64"},
+
+	// buildImage prefixes the key with linux/, so every entry has to spell a
+	// platform a builder accepts.
+	want := map[string]string{
+		"x86_64":  "linux/amd64",
+		"i686":    "linux/386",
+		"aarch64": "linux/arm64",
+		"armv7l":  "linux/arm/v7",
+		"armv6l":  "linux/arm/v6",
+		"ppc64le": "linux/ppc64le",
+		"s390x":   "linux/s390x",
+		"riscv64": "linux/riscv64",
 	}
-	for _, tt := range tests {
-		platform, ok := incusArchToPlatform(tt.arch)
-		require.True(t, ok)
-		require.Equal(t, tt.platform, platform)
+
+	for _, arch := range buildArchitectures {
+		require.Equal(t, want[arch], "linux/"+archPlatform(arch), arch)
+	}
+	require.Len(t, want, len(buildArchitectures))
+
+	// The architectures Incus runs and no builder targets must stay out, or the
+	// build fails somewhere less clear than our own error.
+	for _, arch := range []string{"loongarch64", "ppc", "ppc64", "mips", "mips64", "riscv32", "armv8l"} {
+		require.NotContains(t, buildArchitectures, arch)
 	}
 }
 
-func TestPlatformToIncusArch(t *testing.T) {
+func TestPlatformKey(t *testing.T) {
 	t.Parallel()
-	arch, ok := platformToIncusArch("linux/amd64", []string{"x86_64", "i686"})
-	require.True(t, ok)
-	require.Equal(t, "x86_64", arch)
+	tests := []struct {
+		platform string
+		key      string
+		arch     string
+	}{
+		{"linux/amd64", "amd64", "x86_64"},
+		{"amd64", "amd64", "x86_64"},
+		{"LINUX/AMD64", "amd64", "x86_64"},
+		{"linux/386", "386", "i686"},
+		{"linux/arm64", "arm64", "aarch64"},
+		{"linux/arm/v7", "arm/v7", "armv7l"},
+		{"linux/arm/v6", "arm/v6", "armv6l"},
 
-	_, ok = platformToIncusArch("linux/arm64", []string{"x86_64", "i686"})
-	require.False(t, ok)
+		// Incus' architecture table is what says a bare arm is ARMv6.
+		{"linux/arm", "arm/v6", "armv6l"},
+
+		// v8 is arm64 itself, so the registry's two spellings are one key.
+		{"linux/arm64/v8", "arm64", "aarch64"},
+
+		// Everywhere else the variant stays: the registry serves a different
+		// manifest for it, and the store keys on this string. busybox
+		// publishes arm v5 beside v6 and v7, and Incus has no ARMv5.
+		{"linux/amd64/v3", "amd64/v3", "x86_64"},
+		{"linux/arm/v5", "arm/v5", "armv6l"},
+		{"linux/arm/v9", "arm/v9", "armv6l"},
+
+		// Incus' aliases for one architecture reach one key, so two spellings
+		// cannot key two cache aliases for the same image.
+		{"linux/x86_64", "amd64", "x86_64"},
+		{"linux/armhf", "arm/v7", "armv7l"},
+		{"linux/ppc64el", "ppc64le", "ppc64le"},
+		{"linux/aarch64", "arm64", "aarch64"},
+
+		// The architectures both sides spell the same way.
+		{"linux/s390x", "s390x", "s390x"},
+		{"linux/riscv64", "riscv64", "riscv64"},
+		{"linux/loongarch64", "loongarch64", "loongarch64"},
+	}
+	for _, tt := range tests {
+		key, arch, ok := platformKey(tt.platform)
+		require.True(t, ok, tt.platform)
+		require.Equal(t, tt.key, key, tt.platform)
+		require.Equal(t, tt.arch, arch, tt.platform)
+	}
+
+	for _, bad := range []string{"", "linux", "windows/amd64", "linux/pdp11", "a/b/c/d"} {
+		_, _, ok := platformKey(bad)
+		require.False(t, ok, bad)
+	}
+}
+
+func TestArchPlatform(t *testing.T) {
+	t.Parallel()
+
+	// The server's own architecture has to produce a key platformKey accepts,
+	// or an image pulled without a platform cannot be found again.
+	for _, arch := range osarch.SupportedArchitectures() {
+		key := archPlatform(arch)
+
+		got, back, ok := platformKey(key)
+		require.True(t, ok, arch)
+		require.Equal(t, key, got, arch)
+		require.Equal(t, arch, back, arch)
+	}
+
+	require.Equal(t, "amd64", archPlatform("x86_64"))
+	require.Equal(t, "arm64", archPlatform("aarch64"))
+	require.Equal(t, "arm/v7", archPlatform("armv7l"))
+	require.Equal(t, "s390x", archPlatform("s390x"))
 }
 
 func TestBuildArgs_Podman(t *testing.T) {

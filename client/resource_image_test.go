@@ -490,8 +490,149 @@ func TestImageBuild_StoreHitSkipsBuilder(t *testing.T) {
 	require.True(t, b.IsEnsured())
 }
 
+func TestAddServicePlatform(t *testing.T) {
+	t.Parallel()
+
+	// A typo is one service's mistake, not two services disagreeing. Reporting
+	// it here would fail project load, which down needs to succeed, so it is
+	// resolveArch's at Ensure - and it must not surface as a conflict.
+	t.Run("a platform that does not parse", func(t *testing.T) {
+		t.Parallel()
+
+		img := &Image{incusName: "docker.io/library/nginx:alpine"}
+		img.Config.Platform = "linux/x86-64"
+
+		require.NoError(t, img.AddService("web", "linux/x86-64"))
+		require.NoError(t, img.AddService("api", "linux/x86-64"))
+
+		_, _, err := img.resolvePlatform("linux/x86-64")
+		require.ErrorIs(t, err, ErrNoPlatform)
+	})
+
+	// Services load in map order, so both orderings have to end up reporting
+	// the unusable one rather than one of them running on the other's.
+	t.Run("a typo beside a valid platform, either order", func(t *testing.T) {
+		t.Parallel()
+
+		for _, order := range [][2]string{
+			{"linux/amd64", "linux/pdp11"},
+			{"linux/pdp11", "linux/amd64"},
+		} {
+			img := &Image{incusName: "docker.io/library/nginx:alpine"}
+			img.Config.Platform = order[0]
+
+			require.NoError(t, img.AddService("a", order[0]))
+			require.NoError(t, img.AddService("b", order[1]))
+
+			_, _, err := img.resolvePlatform(img.requestedPlatform())
+			require.ErrorIs(t, err, ErrNoPlatform, "%v", order)
+		}
+	})
+
+	// One service's build.platforms and platform are not two services either.
+	t.Run("build.platforms against platform on one service", func(t *testing.T) {
+		t.Parallel()
+
+		img := &Image{incusName: "docker.io/me/app:dev"}
+		img.Config.Platform = "linux/amd64"
+		img.Config.Build = &BuildConfig{Context: ".", Platform: "linux/arm64"}
+
+		require.NoError(t, img.AddService("app", "linux/amd64"))
+	})
+
+	t.Run("one platform, spelled two ways", func(t *testing.T) {
+		t.Parallel()
+
+		img := &Image{incusName: "docker.io/library/nginx:alpine"}
+		img.Config.Platform = "linux/arm64"
+
+		require.NoError(t, img.AddService("web", "linux/arm64"))
+		require.NoError(t, img.AddService("api", "linux/arm64/v8"))
+		require.NoError(t, img.AddService("worker", ""))
+	})
+
+	t.Run("an unset platform takes the explicit one", func(t *testing.T) {
+		t.Parallel()
+
+		img := &Image{incusName: "docker.io/library/nginx:alpine"}
+
+		require.NoError(t, img.AddService("web", ""))
+		require.NoError(t, img.AddService("api", "linux/arm64"))
+		require.Equal(t, "linux/arm64", img.Config.Platform)
+	})
+
+	t.Run("two services, two architectures", func(t *testing.T) {
+		t.Parallel()
+
+		img := &Image{incusName: "docker.io/library/nginx:alpine"}
+		img.Config.Platform = "linux/amd64"
+
+		require.NoError(t, img.AddService("web", "linux/amd64"))
+
+		err := img.AddService("api", "linux/arm64")
+		require.ErrorIs(t, err, ErrPlatformConflict)
+	})
+}
+
+func TestProjectArchOK(t *testing.T) {
+	t.Parallel()
+
+	oci := &imageSource{info: &iclient.ConfigRemoteInfo{Protocol: "oci"}}
+
+	tests := []struct {
+		name     string
+		arch     string
+		platform string
+		build    *BuildConfig
+		source   *imageSource
+		stored   string
+		ok       bool
+	}{
+		{
+			name: "nothing resolved yet", stored: "x86_64", ok: true,
+		},
+		{
+			name: "the architecture asked for",
+			arch: "x86_64", platform: "amd64", source: oci, stored: "x86_64", ok: true,
+		},
+		{
+			name: "another architecture entirely",
+			arch: "aarch64", platform: "arm64", source: oci, stored: "x86_64", ok: false,
+		},
+		{
+			// incusd reads the manifest's architecture field, which has no
+			// variant, so a pinned v7 lands as armv6l.
+			name: "a pulled arm variant, as incusd labels it",
+			arch: "armv7l", platform: "arm/v7", source: oci, stored: "armv6l", ok: true,
+		},
+		{
+			// buildMetadataTar writes r.arch, so the same allowance would
+			// reject what the build just imported.
+			name: "a built arm variant, as we label it",
+			arch: "armv7l", platform: "arm/v7", source: oci, stored: "armv7l", ok: true,
+			build: &BuildConfig{Context: "."},
+		},
+		{
+			name: "a built image of another architecture",
+			arch: "armv7l", platform: "arm/v7", source: oci, stored: "x86_64", ok: false,
+			build: &BuildConfig{Context: "."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			img := &Image{arch: tt.arch, platform: tt.platform, source: tt.source}
+			img.Config.Build = tt.build
+
+			require.Equal(t, tt.ok, img.projectArchOK(tt.stored))
+		})
+	}
+}
+
 // lockableImage returns an Image with its cache resolved, ready for lockStore.
-func lockableImage(t *testing.T, c *Client, name string) *Image {
+func lockableImage(ctx context.Context, t *testing.T, c *Client, name string) *Image {
 	t.Helper()
 
 	r, err := c.Resource(KindImage, name, &ImageConfig{})
@@ -499,7 +640,7 @@ func lockableImage(t *testing.T, c *Client, name string) *Image {
 
 	img, ok := r.(*Image)
 	require.True(t, ok)
-	require.NoError(t, img.setupCacheAndSource())
+	require.NoError(t, img.setupCacheAndSource(ctx))
 
 	return img
 }
@@ -509,8 +650,8 @@ func TestImageLockStore_SameAliasSerializes(t *testing.T) {
 	ctx := t.Context()
 
 	name := "docker.io/library/ic-lock-" + strings.ToLower(RandString(8)) + ":latest"
-	a := lockableImage(t, newRandomTestClient(t, "image-lock-same-a-"), name)
-	b := lockableImage(t, newRandomTestClient(t, "image-lock-same-b-"), name)
+	a := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-same-a-"), name)
+	b := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-same-b-"), name)
 
 	release, err := a.lockStore(ctx)
 	require.NoError(t, err)
@@ -549,8 +690,8 @@ func TestImageLockStore_DifferentAliasesDoNotBlock(t *testing.T) {
 	ctx := t.Context()
 
 	suffix := strings.ToLower(RandString(8))
-	a := lockableImage(t, newRandomTestClient(t, "image-lock-diff-a-"), "docker.io/library/ic-locka-"+suffix+":latest")
-	b := lockableImage(t, newRandomTestClient(t, "image-lock-diff-b-"), "docker.io/library/ic-lockb-"+suffix+":latest")
+	a := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-diff-a-"), "docker.io/library/ic-locka-"+suffix+":latest")
+	b := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-diff-b-"), "docker.io/library/ic-lockb-"+suffix+":latest")
 
 	release, err := a.lockStore(ctx)
 	require.NoError(t, err)
@@ -667,7 +808,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	require.NotNil(t, img.cache)
 
 	// Another project prunes the cache entry out from under us.
-	cacheAlias, _, err := img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.incusName, nil)
+	cacheAlias, _, err := img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.cacheAlias(), nil)
 	require.NoError(t, err)
 
 	op, err := img.cache.incus.DeleteImage(ctx, img.cache.incusProject, cacheAlias.Target)
@@ -676,7 +817,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	_, err = iclient.WaitOperation(ctx, op)
 	require.NoError(t, err)
 
-	_, _, err = img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.incusName, nil)
+	_, _, err = img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.cacheAlias(), nil)
 	require.Error(t, err)
 
 	// The project still holds it, so Ensure must answer from there.
@@ -684,7 +825,7 @@ func TestImageEnsure_ProjectCopySurvivesCacheDeletion(t *testing.T) {
 	require.True(t, r.IsEnsured())
 
 	// A refill would mean it went looking past its own project.
-	_, _, err = img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.incusName, nil)
+	_, _, err = img.cache.incus.GetImageAlias(ctx, img.cache.incusProject, img.cacheAlias(), nil)
 	require.Error(t, err, "ensure repopulated the cache instead of using the project copy")
 }
 
@@ -708,7 +849,7 @@ func TestImageCreateDirect_NoSource(t *testing.T) {
 	c := newRandomTestClient(t, "image-nosource-")
 	c.imageCache = nil
 
-	img := lockableImage(t, c, "docker.io/library/alpine:3.21")
+	img := lockableImage(ctx, t, c, "docker.io/library/alpine:3.21")
 	img.source = nil
 
 	err := img.createDirect(ctx, NewOptions(OptionCreate()))
@@ -721,7 +862,7 @@ func TestImageLockStore_NoCacheIsNoop(t *testing.T) {
 	c := newRandomTestClient(t, "image-lock-nocache-")
 	c.imageCache = nil
 
-	img := lockableImage(t, c, "docker.io/library/alpine:3.21")
+	img := lockableImage(ctx, t, c, "docker.io/library/alpine:3.21")
 	require.Nil(t, img.cache)
 
 	release, err := img.lockStore(ctx)
@@ -736,7 +877,7 @@ func TestImageLockStore_CustomVolumeIsSeparate(t *testing.T) {
 
 	name := "docker.io/library/ic-lockvol-" + strings.ToLower(RandString(8)) + ":latest"
 
-	def := lockableImage(t, newRandomTestClient(t, "image-lockvol-def-"), name)
+	def := lockableImage(ctx, t, newRandomTestClient(t, "image-lockvol-def-"), name)
 
 	other, err := newRandomTestClient(t, "image-lockvol-alt-").Resource(KindImage, name, &ImageConfig{
 		LockVolume: "ic-lock-" + strings.ToLower(RandString(6)),
@@ -745,7 +886,7 @@ func TestImageLockStore_CustomVolumeIsSeparate(t *testing.T) {
 
 	alt, ok := other.(*Image)
 	require.True(t, ok)
-	require.NoError(t, alt.setupCacheAndSource())
+	require.NoError(t, alt.setupCacheAndSource(ctx))
 
 	release, err := def.lockStore(ctx)
 	require.NoError(t, err)
@@ -790,7 +931,7 @@ func TestImageLockStore_ConcurrentVolumeCreate(t *testing.T) {
 
 		img, ok := r.(*Image)
 		require.True(t, ok)
-		require.NoError(t, img.setupCacheAndSource())
+		require.NoError(t, img.setupCacheAndSource(ctx))
 		images[i] = img
 	}
 
@@ -993,12 +1134,15 @@ func TestImageDeleteCache(t *testing.T) {
 
 			require.NoError(t, RunAction(ctx, r, ActionEnsure, OptionCreate()))
 
-			_, _, err = cache.incus.GetImageAlias(ctx, cache.incusProject, tt.image, nil)
-			require.NoError(t, err, "the ensure should have left %q in the cache", tt.image)
+			img, ok := r.(*Image)
+			require.True(t, ok)
+
+			_, _, err = cache.incus.GetImageAlias(ctx, cache.incusProject, img.cacheAlias(), nil)
+			require.NoError(t, err, "the ensure should have left %q in the cache", img.cacheAlias())
 
 			require.NoError(t, RunAction(ctx, r, ActionDelete, tt.opts...))
 
-			_, _, err = cache.incus.GetImageAlias(ctx, cache.incusProject, tt.image, nil)
+			_, _, err = cache.incus.GetImageAlias(ctx, cache.incusProject, img.cacheAlias(), nil)
 			if tt.cached {
 				require.NoError(t, err, "a plain delete must leave the cache alone")
 
