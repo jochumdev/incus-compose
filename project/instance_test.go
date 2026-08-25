@@ -778,6 +778,51 @@ func TestServiceExtraDevices(t *testing.T) {
 	})
 }
 
+func TestServiceExtraProfiles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("profiles list", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{
+				"profiles": []any{"lan", "gpu"},
+			},
+		}}
+
+		profiles, err := serviceExtraProfiles(service)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"lan", "gpu"}, profiles)
+	})
+
+	t.Run("non-string entry errors", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{
+				"profiles": []any{"lan", 5},
+			},
+		}}
+		_, err := serviceExtraProfiles(service)
+		require.Error(t, err)
+	})
+
+	t.Run("no extension", func(t *testing.T) {
+		t.Parallel()
+		profiles, err := serviceExtraProfiles(types.ServiceConfig{Name: "web"})
+		require.NoError(t, err)
+		assert.Nil(t, profiles)
+	})
+
+	t.Run("empty list is nil", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{"profiles": []any{}},
+		}}
+		profiles, err := serviceExtraProfiles(service)
+		require.NoError(t, err)
+		assert.Nil(t, profiles)
+	})
+}
+
 func TestInstanceImage(t *testing.T) {
 	t.Parallel()
 

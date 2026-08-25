@@ -85,6 +85,13 @@ type InstanceConfig struct {
 	// ExtraDevices contains additional raw device configurations.
 	ExtraDevices map[string]map[string]string
 
+	// Profiles is the instance's full Incus profile list, from
+	// x-incus-compose.profiles. Same semantics as `incus launch --profile`:
+	// set verbatim, not merged with the implicit "default" profile - a list
+	// that omits "default" means the instance won't carry it. Nil leaves
+	// Incus's own default (the "default" profile) untouched.
+	Profiles []string
+
 	// NoRootDevice takes the root disk from the instance's profile instead.
 	NoRootDevice bool
 
@@ -668,6 +675,7 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 			Description: fmt.Sprintf(r.client.Config().DescriptionFormat, r.Name()),
 			Config:      config,
 			Devices:     devices,
+			Profiles:    r.Config.Profiles,
 		},
 	}
 
