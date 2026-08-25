@@ -1,7 +1,6 @@
 # incus-compose
 
 [![CI](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml/badge.svg?branch=main)](https://github.com/lxc/incus-compose/actions?query=event%3Apush+branch%3Amain)
-[![Go Reference](https://pkg.go.dev/badge/github.com/lxc/incus-compose.svg)](https://pkg.go.dev/github.com/lxc/incus-compose)
 [![Coverage 75%](https://img.shields.io/badge/coverage-75%25-yellow)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml)
 
 A drop-in replacement for `docker compose` that runs your `compose.yaml` on
@@ -173,9 +172,9 @@ Fixes and new features are greatly appreciated. Make sure to read our
 ## Credits
 
 incus-compose wouldn't be what it is without the people who tested it, filed
-reports, and pushed on ideas along the way: @Sagi, @neitsab, @pyrodogg, @kgoetz,
-@edorgeville, @bburky, @blurry, @stgraber, @ishaan-jindal, @code-by-tanveer, and
-@Tofil.
+reports, and pushed on ideas along the way: @alien43, @Sagi, @neitsab,
+@pyrodogg, @kgoetz, @edorgeville, @bburky, @blurry, @stgraber, @ishaan-jindal,
+@code-by-tanveer, and @Tofil.
 
 It also stands on a few libraries that make maintaining it far easier:
 

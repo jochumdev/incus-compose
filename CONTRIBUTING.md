@@ -267,16 +267,14 @@ chore(client): rename Resource interface method
 same commit as the change, under the unreleased heading, in
 `Added`/`Changed`/`Fixed`, ending with `(by @handle)`.
 
-An entry is needed when a user or a library consumer can observe the difference:
+An entry is needed when a user can observe the difference:
 
 - behaviour, CLI flags, or command output
 - a bug they could have hit, even when the cause was internal
-- anything exported from `client/` or `project/`; prefix those with
-  `**library**:` and spell out breaking changes
 
 No entry for contributor docs (`AGENTS.md`, `CONTRIBUTING.md`, `docs/`), dev
-tooling (`justfile`, `scripts/`), tests, or refactors with no observable
-difference.
+tooling (`justfile`, `scripts/`), tests, refactors with no observable
+difference, or a change to an exported symbol that no CLI user can see.
 
 Write what changed for the reader, not what you did to the code - "concurrent
 `up` runs no longer fail creating the same network", not "added a retry to
