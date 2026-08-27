@@ -115,8 +115,8 @@ func TestE2EUpgradesAnAgedCacheEntry(t *testing.T) {
 	conn, err := gc.Connection()
 	require.NoError(t, err)
 
-	cached, _, err := conn.GetImageAlias(ctx, cacheProject, alias, nil)
-	require.NoError(t, err, "the pull above should have left %q in the cache", alias)
+	cached, _, err := conn.GetImageAlias(ctx, cacheProject, alias+"/amd64", nil)
+	require.NoError(t, err, "the pull above should have left %q in the cache", alias+"/amd64")
 
 	img, eTag, err := conn.GetImage(ctx, cacheProject, cached.Target, nil)
 	require.NoError(t, err)
