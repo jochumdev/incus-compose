@@ -11,6 +11,14 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
+## [Unreleased]
+
+### Fixed
+
+- `cp`, `top` and `events` are actually there. v1.3.0 documented and announced
+  all three, but the commit adding them never landed in the release. (by
+  @jochumdev)
+
 ## [v1.3.0] - 2026-08-25
 
 ### Added

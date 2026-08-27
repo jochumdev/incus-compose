@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"os"
-	"os/exec"
 
 	"github.com/urfave/cli/v3"
 
@@ -32,22 +29,7 @@ func newIncusCommand() *cli.Command {
 
 			incusProject := client.SanitizeProjectName(p.Name)
 
-			execPath, err := exec.LookPath("incus")
-			if err != nil {
-				globalClient.LogError("`incus` not found in PATH")
-				return errLogged.Wrap(errors.New("'incus' not found in PATH"))
-			}
-
-			execCmd := exec.CommandContext(ctx, execPath, cmd.Args().Slice()...) //nolint:gosec
-			execCmd.Stdin = os.Stdin
-			execCmd.Stdout = cmd.Root().Writer
-			execCmd.Stderr = cmd.Root().ErrWriter
-			execCmd.Env = append(os.Environ(), "INCUS_PROJECT="+incusProject)
-
-			if err := execCmd.Run(); err != nil {
-				return errLogged.Wrap(err)
-			}
-			return nil
+			return runIncus(ctx, cmd.Root().Writer, cmd.Root().ErrWriter, []string{"INCUS_PROJECT=" + incusProject}, cmd.Args().Slice()...)
 		},
 	}
 }

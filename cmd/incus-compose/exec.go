@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -102,12 +101,6 @@ func newExecCommand() *cli.Command {
 				return err
 			}
 
-			execPath, err := exec.LookPath("incus")
-			if err != nil {
-				c.LogError("`incus` not found in PATH")
-				return errLogged.Wrap(errors.New("'incus' not found in PATH"))
-			}
-
 			iArgs := []string{"exec"}
 			if cmd.Bool("no-tty") {
 				iArgs = append(iArgs, "--mode", "non-interactive")
@@ -140,20 +133,16 @@ func newExecCommand() *cli.Command {
 			iArgs = append(iArgs, args...)
 
 			if cmd.Bool("dry-run") {
+				execPath, err := exec.LookPath("incus")
+				if err != nil {
+					return errors.New("'incus' not found in PATH")
+				}
+
 				_, err = fmt.Fprintf(cmd.Root().Writer, "%s %s", execPath, strings.Join(iArgs, " "))
 				return err
 			}
 
-			execCmd := exec.CommandContext(ctx, execPath, iArgs...) //nolint:gosec
-			execCmd.Stdin = os.Stdin
-			execCmd.Stdout = cmd.Root().Writer
-			execCmd.Stderr = cmd.Root().ErrWriter
-			execCmd.Env = append(os.Environ(), "INCUS_PROJECT="+c.IncusProject())
-
-			if err := execCmd.Run(); err != nil {
-				return errLogged.Wrap(err)
-			}
-			return nil
+			return runIncus(ctx, cmd.Root().Writer, cmd.Root().ErrWriter, []string{"INCUS_PROJECT=" + c.IncusProject()}, iArgs...)
 		},
 	}
 }
