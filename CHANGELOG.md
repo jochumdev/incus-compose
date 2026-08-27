@@ -11,7 +11,7 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
-## [Unreleased]
+## [v1.3.1] - 2026-08-27
 
 ### Fixed
 
