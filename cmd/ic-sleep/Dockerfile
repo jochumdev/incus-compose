@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.6-alpine3.24 AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.7-alpine3.24 AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"net"
-	"os"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -210,31 +209,19 @@ func newPortForwardCommand() *cli.Command {
 				return err
 			}
 
-			execPath, err := exec.LookPath("incus")
-			if err != nil {
-				c.LogError("`incus` not found in PATH")
-				return errLogged.Wrap(errors.New("'incus' not found in PATH"))
-			}
-
 			iArgs := []string{"port-forward", inst.IncusName(), target, listen}
 
 			if cmd.Bool("dry-run") {
+				execPath, err := exec.LookPath("incus")
+				if err != nil {
+					return errors.New("'incus' not found in PATH")
+				}
+
 				_, err = fmt.Fprintf(cmd.Root().Writer, "%s %s", execPath, strings.Join(iArgs, " "))
 				return err
 			}
 
-			execCmd := exec.CommandContext(ctx, execPath, iArgs...) //nolint:gosec
-			execCmd.Stdin = os.Stdin
-			execCmd.Stdout = cmd.Root().Writer
-			execCmd.Stderr = cmd.Root().ErrWriter
-			execCmd.Env = append(os.Environ(), "INCUS_PROJECT="+c.IncusProject())
-
-			err = execCmd.Run()
-			if err != nil {
-				return errLogged.Wrap(err)
-			}
-
-			return nil
+			return runIncus(ctx, cmd.Root().Writer, cmd.Root().ErrWriter, []string{"INCUS_PROJECT=" + c.IncusProject()}, iArgs...)
 		},
 	}
 }

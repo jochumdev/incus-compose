@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"slices"
 
 	"github.com/urfave/cli/v3"
@@ -10,6 +14,28 @@ import (
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/project"
 )
+
+// runIncus runs the local incus binary with env on top of the process's own.
+func runIncus(ctx context.Context, stdout, stderr io.Writer, env []string, args ...string) error {
+	path, err := exec.LookPath("incus")
+	if err != nil {
+		return errors.New("'incus' not found in PATH")
+	}
+
+	execCmd := exec.CommandContext(ctx, path, args...) //nolint:gosec
+	execCmd.Stdin = os.Stdin
+	execCmd.Stdout = stdout
+	execCmd.Stderr = stderr
+	execCmd.Env = append(os.Environ(), env...)
+
+	// The child wrote its own stderr, so reporting the error again would say it twice.
+	err = execCmd.Run()
+	if err != nil {
+		return errLogged.Wrap(err)
+	}
+
+	return nil
+}
 
 // loadProject loads the compose project and gets its per-project Incus client,
 // which the caller has to Open() unless it only reads. The Incus project has to

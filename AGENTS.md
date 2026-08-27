@@ -59,7 +59,7 @@ Licensing is in [CONTRIBUTING.md](CONTRIBUTING.md). What is specific to you:
 
 ## Architectural decisions
 
-Six rules. A1 is why the rest exist; most of them push in one direction: fewer
+Seven rules. A1 is why the rest exist; most of them push in one direction: fewer
 hops and plainer types.
 
 ### A1. Code is written once and read many times
@@ -108,6 +108,19 @@ settles it is where the project is going, which is not in the tree. Adding one
 is a decision for whoever is directing the work. Taking one away is welcome
 where it is genuinely unearned, but "I cannot see what this is for" is not the
 same finding as "this is for nothing", and the difference is one question.
+
+### A7. A parameter carries no more than the body uses
+
+Take the values the function reads, not the object they came from. `runIncus`
+needs two writers, so it takes `stdout, stderr io.Writer` rather than the
+`*cli.Command` they hang off - one parameter more, not fewer. Where the list is
+long, name it: `downArgs` holds the flags `down` reads and nothing else. That it
+is one struct is not the point - the caller fills it for this callee, where
+`*cli.Command` carries the framework's whole world.
+
+Forwarding the wide one is an invitation: the next change reaches for a flag off
+the object the function was already handed, and a helper that execs a binary now
+depends on the CLI framework.
 
 ## Testing
 
