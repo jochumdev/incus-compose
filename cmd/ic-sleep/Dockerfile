@@ -12,6 +12,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH:-$(go env GOARCH)}" GOARM="${TARGETVARIANT#v}" \
       go build -tags=netgo -ldflags="-w -s" -trimpath -o /sleep ./cmd/ic-sleep
 
-FROM busybox:glibc
+FROM docker.io/library/busybox:glibc
 COPY --from=build /sleep /sleep
 ENTRYPOINT ["/sleep"]
