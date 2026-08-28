@@ -8,11 +8,19 @@ set -euo pipefail
 # lives on a ramdisk, so the GitHub runner is published into the "runner" image
 # on the way down and restored from it on the way up.
 
+# shellcheck source=/dev/null
+source .env
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RUNNER="${RUNNER:-runner}"
 POOL="${RUNNER_POOL:-tmpfs}"
 POOL_SOURCE="${RUNNER_POOL_SOURCE:-/mnt/tmpfs}"
+
+# Where the nested daemons live, the runner's own pool unless it is set. Only
+# POOL is the ramdisk, so only POOL is created here and dropped again on the way
+# down; an ICT pool of its own is expected to exist already and is left alone.
+ICT_POOL="${RUNNER_ICT_POOL:-${POOL}}"
 TMPFS_SIZE="${RUNNER_TMPFS_SIZE:-32g}"
 CERT="${RUNNER_CERT:-work/runner.crt}"
 COMPRESSION="${RUNNER_COMPRESSION:-none}"
@@ -50,14 +58,37 @@ select_ict() {
 
 cd "${SCRIPT_DIR}/.."
 
-# .env points INCUS_REMOTE at a nested daemon, the exports below have to win.
-# shellcheck source=/dev/null
-source .env
-
 export INCUS_REMOTE="${RUNNER_INCUS_REMOTE}"
 export INCUS_PROJECT="${RUNNER_INCUS_PROJECT}"
 
 # --- Shared steps -----------------------------------------------------------
+
+# runner_exec runs a shell command inside the runner, as the runner user.
+#
+# The cd is not optional: exec lands in /root, a login shell does not leave it,
+# and the runner user cannot stat it.
+runner_exec() { incus exec "${RUNNER}" -- sudo -u runner -H bash -lc "cd \"\${HOME}\" && $*"; }
+
+# Points the runner at the nested daemons. Each one is new and carries a
+# certificate of its own, so the remote it replaces has to go first.
+readd_remotes() {
+    local -a names=("${ICTS[@]%% *}")
+
+    step "Re-adding ${names[*]} on ${RUNNER}"
+
+    for name in "${names[@]}"; do
+        runner_exec "INCUS_REMOTE=local incus remote rm ${name} || true"
+        runner_exec "INCUS_REMOTE=local incus remote add ${name} ${name} --accept-certificate"
+    done
+
+    runner_exec "incus remote list"
+
+    # Adding a remote says nothing about reaching it, so each one is read once.
+    for name in "${names[@]}"; do
+        step "Testing ${name}"
+        runner_exec "incus list ${name}: >/dev/null"
+    done
+}
 
 stop_runner() {
     step "Stopping ${RUNNER} (project ${INCUS_PROJECT})"
@@ -97,6 +128,15 @@ up() {
     step "Creating storage pool ${POOL}"
     incus storage create "${POOL}" dir source="${POOL_SOURCE}" || true
 
+    # A pool of its own is somebody else's, so say so here rather than let
+    # setup-nested-incus.sh fail on it four times.
+    if [[ "${ICT_POOL}" != "${POOL}" ]]; then
+        incus storage show "${ICT_POOL}" >/dev/null 2>&1 ||
+            die "pool ${ICT_POOL} does not exist, RUNNER_ICT_POOL is not created here"
+
+        step "Putting the nested daemons on ${ICT_POOL}"
+    fi
+
     # --- The nested Incus daemons -------------------------------------------
 
     # setup-nested-incus.sh pushes the runner's own client certificate into each
@@ -113,7 +153,7 @@ up() {
     fi
 
     setup_nested=("${SCRIPT_DIR}/setup-nested-incus.sh"
-        -c "$(realpath "${CERT}")" -o -s "${POOL}" -f "${apt_opts[@]}")
+        -c "$(realpath "${CERT}")" -o -s "${ICT_POOL}" -f "${apt_opts[@]}")
 
     for ict in "${ICTS[@]}"; do
         read -ra spec <<<"${ict}"
@@ -138,7 +178,7 @@ up() {
             -c security.privileged=true
     fi
 
-    incus exec "${RUNNER}" -- sudo -u runner /home/runner/readd-runner.sh
+    readd_remotes
 }
 
 # --- down -------------------------------------------------------------------

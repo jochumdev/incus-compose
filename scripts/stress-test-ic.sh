@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 René Jochum <rene@jochum.dev>
+# This script is released into the public domain or under CC0-1.0.
+# Use it however you want, no restrictions.
+
 #
 # Usage: ./stress-test.sh [PAIRS_PER_BATCH] [BATCHES]
 #
