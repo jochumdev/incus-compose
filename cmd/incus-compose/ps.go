@@ -24,7 +24,7 @@ func newPsCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "ps",
 		Usage:     "List containers (instances)",
-		Category:  "project",
+		Category:  "compose",
 		ArgsUsage: "[SERVICE...]",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
