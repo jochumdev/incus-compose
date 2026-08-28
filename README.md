@@ -40,6 +40,7 @@ A plain compose file, running unchanged.
 
 ## Demos
 
+- [backup in action](https://asciinema.org/a/1263992)
 - [30-service dependency graph, 30 parallel workers](https://asciinema.org/a/1260145)
 - [Immich - a full photo-management stack](https://asciinema.org/a/1259458)
 
@@ -76,6 +77,12 @@ isolation; live progress for pulls and lifecycle. See
 `down`/`up` and dodges rate limits, and local builds via Podman/Docker. See
 [Builds](https://docs.incus-compose.org/builds).
 
+**Air-gapped ready.** `pull` is the only command that needs a registry, so a
+project pulls on a connected machine and runs on a disconnected one;
+`--pull never` makes that a guarantee rather than a hope, and the sidecar and
+one-off helper images point at your own mirror like any other. See
+[Air-gapped and Proxied Installs](https://docs.incus-compose.org/air-gapped).
+
 **Real networking and storage.** Bridge networks with static IPs, port
 publishing via proxy devices or kernel NAT, volumes with UID/GID shifting,
 seeded bind mounts, and per-volume pool placement.
@@ -83,14 +90,14 @@ seeded bind mounts, and per-volume pool placement.
 **Incus-native when you want it.** Every instance, network, and volume option
 passes straight through via `x-incus`; `x-incus-compose` adds devices (GPU, USB,
 raw disk), project-wide resource limits, and healthd tuning. See
-[Compose Compatibility](https://docs.incus-compose.org/compose-compatibility).
+[Extras](https://docs.incus-compose.org/extras).
 
 **Extensions.** `incus-compose backup` snapshots a project's data volumes into a
 backup project - create, list, verify, restore, and prune - so a stack's state
 survives the project itself, and `incus-compose port-forward` forwards a local
 TCP port into an instance, published or not. See
-[backup](https://docs.incus-compose.org/cli-reference#backup) and
-[port-forward](https://docs.incus-compose.org/cli-reference#port-forward).
+[backup](https://docs.incus-compose.org/cli-reference/extensions/backup) and
+[port-forward](https://docs.incus-compose.org/cli-reference/extensions#port-forward).
 
 ## Quick Start
 
@@ -138,8 +145,12 @@ All docs: [docs.incus-compose.org](https://docs.incus-compose.org)
   and options
 - **[Compose Compatibility](https://docs.incus-compose.org/compose-compatibility)** -
   What works and what doesn't
-- **[Architecture](https://docs.incus-compose.org/architecture)** - the
-  resource-first design behind incus-compose
+- **[Air-gapped](https://docs.incus-compose.org/air-gapped)** - pull once
+  connected, run disconnected
+- **[Extras](https://docs.incus-compose.org/extras)** - `x-incus`,
+  `x-incus-compose`, and the `compose.incus.yaml` override file
+- **[Developer](https://docs.incus-compose.org/developer)** - the resource-first
+  design behind incus-compose
 - **[Why Incus?](https://docs.incus-compose.org/why-incus)** - What Incus brings
   over a classic OCI engine setup
 - **[Changelog](CHANGELOG.md)** - what changed since 0.0.1-beta1

@@ -42,7 +42,7 @@ Follow the [Go proverbs](https://go-proverbs.github.io/).
 ## Architecture and design rules
 
 Its core design principles are documented in
-[docs/root/architecture/index.md](docs/root/architecture/index.md).
+[docs/root/developer/index.md](docs/root/developer/index.md).
 
 Read the documentation in your own checkout, not the published site: `docs/` is
 a submodule, and a feature branch may carry a version of it that the site does
@@ -99,7 +99,7 @@ layers "for future flexibility".
 
 Everything runs through `just`; use it instead of raw `go`. `just --list` shows
 all of them, and
-[docs/root/architecture/testing.md](docs/root/architecture/testing.md) documents
+[docs/root/developer/testing.md](docs/root/developer/testing.md) documents
 each in full, along with fixtures, coverage and the environment they need.
 
 ```bash
@@ -283,7 +283,7 @@ Ensure".
 ## Testing
 
 Tiers, fixtures, coverage, and how to drive the CLI from a test are documented
-in [docs/root/architecture/testing.md](docs/root/architecture/testing.md). Read
+in [docs/root/developer/testing.md](docs/root/developer/testing.md). Read
 it before writing a test.
 
 One policy rather than a technique, so it lives here: **do not add mocks.** A

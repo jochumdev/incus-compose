@@ -206,8 +206,3 @@ Two invariants a change must not break:
 
 The sidecar's `limits.cpu`/`limits.memory` are charged against the user's
 project quota, so raising them can break projects that fit before.
-
-## Claude agents
-
-Use `.claude/settings*.json` (permissions, deny list) and `.claude/commands/*`.
-Run `/hello` to load full context.
