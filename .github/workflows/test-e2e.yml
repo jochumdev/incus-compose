@@ -4,9 +4,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The self-hosted runners share the ict-* remotes, so only one run at a time.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 env:
   # https://stackoverflow.com/a/79780883/3368468

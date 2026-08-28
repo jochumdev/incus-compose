@@ -1,13 +1,19 @@
 #!/usr/bin/bash
+# Copyright (c) 2026 René Jochum <rene@jochum.dev>
+# This script is released into the public domain or under CC0-1.0.
+# Use it however you want, no restrictions.
+
+# shellcheck source=/dev/null
+source .env
 
 POOL="${RUNNER_POOL:-tmpfs}"
 POOL_SOURCE="${RUNNER_POOL_SOURCE:-/mnt/tmpfs}"
 TMPFS_SIZE="${RUNNER_TMPFS_SIZE:-32g}"
-TMPFS_INCUS_REMOTE="local-https"
-TMPFS_INCUS_PROJECT="ic-runner"
+TMPFS_INCUS_REMOTE="${ICT_INCUS_REMOTE:-local-https}"
+TMPFS_INCUS_PROJECT="${ICT_INCUS_PROJECT:-default}"
 
 ICTS=(
-    "ict-daily-dev01-default"
+    "ict-daily-dev01-main"
     "ict-daily-dev01-wt01"
     "ict-daily-dev01-wt02"
 )
@@ -35,10 +41,6 @@ select_ict() {
 }
 
 cd "${ROOT}" || exit 1
-
-# .env points INCUS_REMOTE at a nested daemon, the exports below have to win.
-# shellcheck source=/dev/null
-source .env
 
 export INCUS_REMOTE="${TMPFS_INCUS_REMOTE}"
 export INCUS_PROJECT="${TMPFS_INCUS_PROJECT}"

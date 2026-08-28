@@ -223,11 +223,7 @@ echo "    Host storage pool: ${HOST_STORAGE_POOL:-<host default>}"
 echo "    apt-cacher-ng: ${APT_PROXY:-<none>}"
 DB_POOL_LABEL="<none>"
 if [[ -n "${DB_ON_POOL}" ]]; then
-    if [[ -n "${HOST_STORAGE_POOL}" ]]; then
-        DB_POOL_LABEL="${HOST_STORAGE_POOL}"
-    else
-        DB_POOL_LABEL="<none>, INCUS_DB_ON_POOL needs -s"
-    fi
+      DB_POOL_LABEL="${DB_ON_POOL}"
 fi
 echo "    Database pool: ${DB_POOL_LABEL}"
 echo "    OVN: ${OVN}"
@@ -261,17 +257,17 @@ CONTAINER_CREATED="true"
 
 # Before incus-base is installed: the package starts the daemon, and a daemon
 # that has already written its database would have it hidden by this mount.
-if [[ -n "${DB_ON_POOL}" ]] && [[ -n "${HOST_STORAGE_POOL}" ]]; then
+if [[ -n "${DB_ON_POOL}" ]];  then
     DB_VOLUME="${CONTAINER_NAME}-db"
 
-    echo "==> Putting the nested database on pool ${HOST_STORAGE_POOL}, volume ${DB_VOLUME}"
+    echo "==> Putting the nested database on pool ${DB_ON_POOL}, volume ${DB_VOLUME}"
 
     # A leftover volume carries a stale database the new daemon would adopt.
-    incus storage volume delete "${HOST_STORAGE_POOL}" "${DB_VOLUME}" >/dev/null 2>&1 || true
-    incus storage volume create "${HOST_STORAGE_POOL}" "${DB_VOLUME}"
+    incus storage volume delete "${DB_ON_POOL}" "${DB_VOLUME}" >/dev/null 2>&1 || true
+    incus storage volume create "${DB_ON_POOL}" "${DB_VOLUME}"
 
     incus config device add "${CONTAINER_NAME}" incusdb disk \
-        pool="${HOST_STORAGE_POOL}" source="${DB_VOLUME}" path=/var/lib/incus/database
+        pool="${DB_ON_POOL}" source="${DB_VOLUME}" path=/var/lib/incus/database
 fi
 
 INSTALL_SCRIPT=$(

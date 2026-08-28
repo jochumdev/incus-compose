@@ -13,7 +13,9 @@ docker-registry.example.com {
     output file /var/log/caddy/docker-registry.example.com-access.log
   }
 
-  reverse_proxy 10.132.32.17:5000
+  reverse_proxy 10.132.32.17:8080 {
+    header_up X-Registry docker.io
+  }
 }
 
 ghcr-registry.example.com {
@@ -22,7 +24,9 @@ ghcr-registry.example.com {
     output file /var/log/caddy/ghcr-registry.example.com-access.log
   }
 
-  reverse_proxy 10.132.32.18:5000
+  reverse_proxy 10.132.32.17:8080 {
+    header_up X-Registry ghcr.io
+  }
 }
 
 gitlab-registry.example.com {
@@ -31,7 +35,9 @@ gitlab-registry.example.com {
     output file /var/log/caddy/gitlab-registry.example.com-access.log
   }
 
-  reverse_proxy 10.132.32.19:5000
+  reverse_proxy 10.132.32.17:8080 {
+    header_up X-Registry registry.gitlab.com
+  }
 }
 
 clock.example.com {
