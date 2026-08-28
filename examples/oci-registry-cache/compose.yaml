@@ -1,44 +1,46 @@
 services:
-  docker-registry:
-    image: direct-docker.io/library/registry:${VERSION:-3}
-    container_name: docker-registry
-    environment:
-      REGISTRY_HTTP_ADDR: ":5000"
-      REGISTRY_PROXY_REMOTEURL: "https://registry-1.docker.io"
-      REGISTRY_PROXY_TTL: "168h"
-      REGISTRY_LOG_LEVEL: "${REGISTRY_LOG_LEVEL:-info}"
-      REGISTRY_LOG_FIELDS_ENVIRONMENT: "production"
+  registry:
+    # https://quay.io/repository/appzygy/ociregistry
+    image: direct-quay.io/appzygy/ociregistry:${VERSION:-1.17.0}
+    container_name: registry
+    command:
+      - /ociregistry/server
+      - --config-file=/etc/ociregistry/config.yaml
+      - serve
+    configs:
+      - source: ociregistry
+        target: /etc/ociregistry/config.yaml
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
     volumes:
-      - docker:/var/lib/registry
-    restart: unless-stopped
-
-  ghcr-registry:
-    image: direct-docker.io/library/registry:${VERSION:-3}
-    container_name: ghcr-registry
-    environment:
-      REGISTRY_HTTP_ADDR: ":5000"
-      REGISTRY_PROXY_REMOTEURL: "https://ghcr.io"
-      REGISTRY_PROXY_TTL: "168h"
-      REGISTRY_LOG_LEVEL: "${REGISTRY_LOG_LEVEL:-info}"
-      REGISTRY_LOG_FIELDS_ENVIRONMENT: "production"
-    volumes:
-      - ghcr:/var/lib/registry
-    restart: unless-stopped
-
-  gitlab-registry:
-    image: direct-docker.io/library/registry:${VERSION:-3}
-    container_name: gitlab-registry
-    environment:
-      REGISTRY_HTTP_ADDR: ":5000"
-      REGISTRY_PROXY_REMOTEURL: "https://registry.gitlab.com"
-      REGISTRY_PROXY_TTL: "168h"
-      REGISTRY_LOG_LEVEL: "${REGISTRY_LOG_LEVEL:-info}"
-      REGISTRY_LOG_FIELDS_ENVIRONMENT: "production"
-    volumes:
-      - gitlab:/var/lib/registry
+      - cache:/var/lib/ociregistry
     restart: unless-stopped
 
 volumes:
-  docker:
-  ghcr:
-  gitlab:
+  cache:
+
+# https://aceeric.github.io/ociregistry/configuring-the-server/
+configs:
+  ociregistry:
+    content: |
+      port: 8080
+      logLevel: ${LOG_LEVEL:-info}
+      imagePath: /var/lib/ociregistry
+
+      # Leave both empty to pull from Docker Hub anonymously. The user is your
+      # Docker Hub account name, the password a personal access token.
+      registries:
+        - name: docker.io
+          auth:
+            user: ${DOCKERIO_USER:-}
+            password: ${DOCKERIO_TOKEN:-}
+
+      # The server has no revalidation TTL, so eviction is what bounds the cache:
+      # an image not pulled for 7d is dropped and refetched on the next request.
+      pruneConfig:
+        enabled: true
+        type: accessed
+        duration: 7d
+        frequency: 12h
+        count: 100

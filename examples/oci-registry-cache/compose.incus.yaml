@@ -1,53 +1,32 @@
 services:
-  docker-registry:
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
-      interval: 5s
-      timeout: 5s
-      retries: 6
-      start_period: 30s
-      start_interval: 5s
-    networks:
-      default:
-        ipv4_address: ${DOCKERIO_IPV4}/${IPV4_NETMASK}
+  registry:
+    build:
+      dockerfile_inline: |
+        FROM docker.io/library/busybox:1.37-musl AS busybox
 
-  ghcr-registry:
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
-      interval: 5s
-      timeout: 5s
-      retries: 6
-      start_period: 30s
-      start_interval: 5s
-    networks:
-      default:
-        ipv4_address: ${GHCRIO_IPV4}/${IPV4_NETMASK}
+        FROM quay.io/appzygy/ociregistry:${VERSION:-1.17.0}
+        COPY --from=busybox /bin/busybox /bin/busybox
 
-  gitlab-registry:
+    networks:
+      default:
+        ipv4_address: ${REGISTRY_IPV4}/${IPV4_NETMASK}
+
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
+      test: ["CMD", "/bin/busybox", "wget", "-q", "--spider", "http://127.0.0.1:8080/v2/"]
       interval: 5s
       timeout: 5s
       retries: 6
       start_period: 30s
       start_interval: 5s
-    networks:
-      default:
-        ipv4_address: ${GITLAB_IPV4}/${IPV4_NETMASK}
 
 networks:
   default:
+    external: ${NETWORK_EXTERNAL}
+    name: ${NETWORK}
     x-incus:
       ipv4.address: ${GATEWAY_IPV4}/${IPV4_NETMASK}
-    x-incus-compose:
-      network: ${NETWORK}
+
 volumes:
-  docker:
-    x-incus-compose:
-      pool: ${STORAGE_POOL}
-  ghcr:
-    x-incus-compose:
-      pool: ${STORAGE_POOL}
-  gitlab:
+  cache:
     x-incus-compose:
       pool: ${STORAGE_POOL}
