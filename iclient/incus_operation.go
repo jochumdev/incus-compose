@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
 )
@@ -16,6 +17,13 @@ const incusOperationsPath = "/operations"
 
 // incusOperationBuffer holds updates for a caller that is between reads.
 const incusOperationBuffer = 8
+
+// incusOperationRetry is how long an operation whose event socket died keeps
+// trying to reach the server before it gives up on it.
+const incusOperationRetry = 30 * time.Second
+
+// incusOperationRetryDelay is the pause between those attempts.
+const incusOperationRetryDelay = 2 * time.Second
 
 // asyncOperation issues a request the server answers asynchronously and
 // returns the operation's updates.
@@ -83,12 +91,15 @@ func (c *Connection) async(ctx context.Context, project string, what string, sen
 		return nil, fmt.Errorf("decoding the operation of %s: %w", what, err)
 	}
 
-	return c.followOperation(listenCtx, cancel, events, started), nil
+	return c.followOperation(listenCtx, cancel, project, events, started), nil
 }
 
 // followOperation feeds the caller's channel: the operation as it stands, then
 // every update the event stream carries for it, until it reaches an end state.
-func (c *Connection) followOperation(ctx context.Context, cancel context.CancelFunc, events <-chan api.Event, started api.Operation) <-chan api.Operation {
+//
+// A dead event socket is not a dead operation, so a stream that ends first is
+// waited out on the wait endpoint rather than reported as a failure.
+func (c *Connection) followOperation(ctx context.Context, cancel context.CancelFunc, project string, events <-chan api.Event, started api.Operation) <-chan api.Operation {
 	updates := make(chan api.Operation, incusOperationBuffer)
 
 	go func() {
@@ -101,6 +112,8 @@ func (c *Connection) followOperation(ctx context.Context, cancel context.CancelF
 			return
 		}
 
+		current := started
+
 		for event := range events {
 			update := api.Operation{}
 
@@ -109,13 +122,63 @@ func (c *Connection) followOperation(ctx context.Context, cancel context.CancelF
 				continue
 			}
 
+			current = update
+
 			if !emitOperation(ctx, updates, update) {
 				return
 			}
 		}
+
+		// The caller let go, so there is nobody left to report the outcome to.
+		if ctx.Err() != nil {
+			return
+		}
+
+		final, err := c.waitOutOperation(ctx, project, started.ID)
+		if err != nil {
+			// Say what is known: the operation was lost, not that it failed.
+			current.StatusCode = api.Failure
+			current.Status = api.Failure.String()
+			current.Err = fmt.Sprintf("lost the event socket and could not reach the operation: %v", err)
+
+			emitOperation(ctx, updates, current)
+
+			return
+		}
+
+		emitOperation(ctx, updates, *final)
 	}()
 
 	return updates
+}
+
+// waitOutOperation picks an operation back up on the wait endpoint, which the
+// server holds open and so costs no socket of its own. It keeps trying while
+// the server is unreachable and gives up after incusOperationRetry of that.
+func (c *Connection) waitOutOperation(ctx context.Context, project string, id string) (*api.Operation, error) {
+	deadline := time.Now().Add(incusOperationRetry)
+
+	for {
+		op, err := c.WaitOperationID(ctx, project, id)
+		if err == nil {
+			return op, nil
+		}
+
+		// The server answered and does not have it, so there is nothing left to wait for.
+		if api.StatusErrorCheck(err, http.StatusNotFound) {
+			return nil, err
+		}
+
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return nil, err
+		}
+
+		select {
+		case <-time.After(incusOperationRetryDelay):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
 }
 
 // emitOperation delivers one update and reports whether to keep going.
@@ -172,7 +235,7 @@ func (c *Connection) ListenOperation(ctx context.Context, project string, op api
 		return nil, err
 	}
 
-	return c.followOperation(listenCtx, cancel, events, current), nil
+	return c.followOperation(listenCtx, cancel, project, events, current), nil
 }
 
 // WaitOperationID blocks until the operation ends and returns how it ended.

@@ -1,6 +1,7 @@
 package iclient
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -247,6 +248,130 @@ func TestIncusListenOperationCatchesUp(t *testing.T) {
 	requests := server.all()
 	require.Equal(t, "/1.0/events", requests[0].url.Path, "subscribe before the catch-up read")
 	require.Equal(t, "/1.0/operations/op-1", requests[1].url.Path)
+}
+
+// droppingServer answers the async request, then drops the event socket under
+// the still-running operation. wait is what the wait endpoint answers with.
+func droppingServer(t *testing.T, wait func(w http.ResponseWriter)) (*Connection, *recorder) {
+	t.Helper()
+
+	seen := &recorder{}
+	upgrader := websocket.Upgrader{}
+	op := running("op-1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.add(r)
+
+		if strings.HasSuffix(r.URL.Path, "/events") {
+			socket, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+
+			// Nothing is ever sent on it: the socket goes away under the operation.
+			_ = socket.Close()
+
+			return
+		}
+
+		if strings.HasSuffix(r.URL.Path, "/wait") {
+			wait(w)
+
+			return
+		}
+
+		metadata, _ := json.Marshal(op)
+		_, _ = io.WriteString(w,
+			`{"type":"async","status_code":100,"operation":"/1.0/operations/`+op.ID+`","metadata":`+string(metadata)+`}`)
+	}))
+
+	t.Cleanup(server.Close)
+
+	conn, err := NewConnection(&ConfigRemoteInfo{
+		Name:  "operations",
+		Addrs: []string{server.URL},
+	})
+	require.NoError(t, err)
+
+	return conn, seen
+}
+
+// waits counts how many times the wait endpoint was asked.
+func waits(seen *recorder) int {
+	count := 0
+
+	for _, req := range seen.all() {
+		if strings.HasSuffix(req.url.Path, "/wait") {
+			count++
+		}
+	}
+
+	return count
+}
+
+// TestIncusAsyncOperationOutlivesItsEventSocket: a socket that dies is not an
+// operation that failed, so the outcome is picked back up on the wait endpoint
+// rather than reported as an operation that ended while running.
+func TestIncusAsyncOperationOutlivesItsEventSocket(t *testing.T) {
+	t.Parallel()
+
+	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
+		metadata, _ := json.Marshal(api.Operation{ID: "op-1", StatusCode: api.Success, Status: "Success"})
+		_, _ = io.WriteString(w, `{"type":"sync","status_code":200,"metadata":`+string(metadata)+`}`)
+	})
+
+	updates, err := conn.asyncOperation(t.Context(), "myproject", http.MethodPost, "/instances", nil, "")
+	require.NoError(t, err)
+
+	final, err := WaitOperation(t.Context(), updates)
+	require.NoError(t, err, "a dropped socket must not fail an operation the server finished")
+	require.Equal(t, api.Success, final.StatusCode)
+
+	require.Equal(t, 1, waits(seen), "the wait endpoint answered, so it is asked once")
+}
+
+// TestIncusAsyncOperationReportsALostOperation: a server that no longer has the
+// operation answers rather than fails, so the wait ends at once, and the error
+// says the operation was lost instead of claiming it failed.
+func TestIncusAsyncOperationReportsALostOperation(t *testing.T) {
+	t.Parallel()
+
+	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"type":"error","error_code":404,"error":"Operation not found"}`)
+	})
+
+	updates, err := conn.asyncOperation(t.Context(), "myproject", http.MethodPost, "/instances", nil, "")
+	require.NoError(t, err)
+
+	_, err = WaitOperation(t.Context(), updates)
+	require.ErrorContains(t, err, "lost the event socket")
+	require.ErrorContains(t, err, "Operation not found")
+
+	require.Equal(t, 1, waits(seen), "a 404 is an answer, so it is not retried")
+}
+
+// TestIncusAsyncOperationCancelledDoesNotWait: a caller that let go is not a
+// lost socket, so nothing is picked back up on its behalf.
+func TestIncusAsyncOperationCancelledDoesNotWait(t *testing.T) {
+	t.Parallel()
+
+	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
+		metadata, _ := json.Marshal(api.Operation{ID: "op-1", StatusCode: api.Success, Status: "Success"})
+		_, _ = io.WriteString(w, `{"type":"sync","status_code":200,"metadata":`+string(metadata)+`}`)
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	updates, err := conn.asyncOperation(ctx, "myproject", http.MethodPost, "/instances", nil, "")
+	require.NoError(t, err)
+
+	cancel()
+
+	for range updates {
+	}
+
+	require.Equal(t, 0, waits(seen), "a cancelled caller has nobody to report an outcome to")
 }
 
 func TestIncusCancelOperation(t *testing.T) {
