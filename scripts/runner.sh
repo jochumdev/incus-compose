@@ -25,8 +25,8 @@ TMPFS_SIZE="${RUNNER_TMPFS_SIZE:-32g}"
 CERT="${RUNNER_CERT:-work/runner.crt}"
 COMPRESSION="${RUNNER_COMPRESSION:-none}"
 STOP_TIMEOUT="${RUNNER_STOP_TIMEOUT:-120}"
-RUNNER_INCUS_REMOTE="local-https"
-RUNNER_INCUS_PROJECT="ic-runner"
+RUNNER_INCUS_REMOTE="${RUNNER_INCUS_REMOTE:-local}"
+RUNNER_INCUS_PROJECT="${RUNNER_INCUS_PROJECT:-ic-runner}"
 
 # Each entry is the instance name followed by its setup-nested-incus.sh flags.
 ICTS=(

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,18 +71,32 @@ func (r *StorageVolume) Lock(ctx context.Context, sc *sftp.Client, name string, 
 	).Do(func() error {
 		f, err := sc.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 		if err != nil {
-			// Another holder has it; if stale, reap it and let the retry race for it - two reapers racing is benign, exactly one O_EXCL create wins.
 			if stale > 0 {
-				fi, statErr := sc.Stat(lockPath)
-				if statErr == nil && time.Since(fi.ModTime()) > stale {
+				// The stamp inside says how long it has gone unrefreshed; its mtime is the fallback for a holder killed before it could write one.
+				_, stamp, readErr := readLock(sc, lockPath)
+				if readErr != nil {
+					fi, statErr := sc.Stat(lockPath)
+					if statErr == nil {
+						stamp = fi.ModTime()
+					}
+				}
+
+				// Reap it and let the retry race for it - two reapers racing is benign, exactly one O_EXCL create wins.
+				if !stamp.IsZero() && time.Since(stamp) > stale {
 					_ = sc.Remove(lockPath)
 				}
 			}
+
 			return err
 		}
-		defer r.client.WarnError(f.Close, "Failed to close a sFTP file")
 
-		_, err = f.Write([]byte(owner))
+		_, err = f.Write(fmt.Appendf(nil, "%s\n%019d", owner, time.Now().UnixNano()))
+		r.client.WarnError(f.Close, "Failed to close a sFTP file")
+		if err != nil {
+			// The create already won the race, so this holder is the only one that can take back the file it is about to abandon.
+			_ = sc.Remove(lockPath)
+		}
+
 		return err
 	})
 	if err != nil {
@@ -104,7 +120,34 @@ func (r *StorageVolume) Lock(ctx context.Context, sc *sftp.Client, name string, 
 	return lock, nil
 }
 
-// heartbeat periodically touches the lock file's mtime so other holders don't consider it stale.
+// readLock answers who holds the lock file and when they last wrote to it.
+func readLock(sc *sftp.Client, path string) (string, time.Time, error) {
+	f, err := sc.Open(path)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	owner, stamp, ok := strings.Cut(string(data), "\n")
+	if !ok {
+		return "", time.Time{}, fmt.Errorf("lock file %s carries no timestamp", path)
+	}
+
+	nanos, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("lock file %s carries an unreadable timestamp: %w", path, err)
+	}
+
+	return owner, time.Unix(0, nanos), nil
+}
+
+// heartbeat periodically rewrites the lock file so other holders don't consider it stale.
 func (l *VolumeLock) heartbeat(ctx context.Context, stale time.Duration) {
 	defer l.wg.Done()
 
@@ -114,38 +157,50 @@ func (l *VolumeLock) heartbeat(ctx context.Context, stale time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			// l.client.LogWarn("volume lock heartbeat stopped", "path", l.path)
 			return
 		case now := <-ticker.C:
-			if err := l.sc.Chtimes(l.path, now, now); err != nil {
+			err := l.refresh(now)
+			if err != nil {
 				l.client.LogWarn("failed to refresh volume lock", "path", l.path, "error", err)
 			}
 		}
 	}
 }
 
-// Unlock releases the lock, deleting the lock file only if it still names this holder as owner -
-// a stale takeover may have replaced it, and deleting unconditionally would delete the new holder's lock instead.
-// It does not close sc; the caller that passed it to Lock owns it.
+// refresh writes t into the lock file, in place so no reader sees it empty, and
+// truncates in case a record ever comes out shorter than the one it replaces.
+func (l *VolumeLock) refresh(t time.Time) error {
+	f, err := l.sc.OpenFile(l.path, os.O_WRONLY)
+	if err != nil {
+		return err
+	}
+
+	defer l.client.WarnError(f.Close, "Failed to close a sFTP file")
+
+	data := fmt.Appendf(nil, "%s\n%019d", l.owner, t.UnixNano())
+
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+
+	return f.Truncate(int64(len(data)))
+}
+
+// Unlock releases the lock, deleting the lock file only if it still names this holder as owner.
 func (l *VolumeLock) Unlock() error {
 	if l.cancel != nil {
 		l.cancel()
 		l.wg.Wait()
 	}
 
-	f, err := l.sc.Open(l.path)
+	owner, _, err := readLock(l.sc, l.path)
 	if err != nil {
-		l.client.LogWarn("volume lock file missing on unlock", "path", l.path, "error", err)
+		l.client.LogWarn("volume lock file unreadable on unlock", "path", l.path, "error", err)
 		return nil
 	}
 
-	data, readErr := io.ReadAll(f)
-	l.client.WarnError(f.Close, "Failed to close a sFTP file")
-	if readErr != nil {
-		return readErr
-	}
-
-	if string(data) != l.owner {
+	if owner != l.owner {
 		return nil
 	}
 

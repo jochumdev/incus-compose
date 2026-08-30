@@ -99,8 +99,8 @@ layers "for future flexibility".
 
 Everything runs through `just`; use it instead of raw `go`. `just --list` shows
 all of them, and
-[docs/root/developer/testing.md](docs/root/developer/testing.md) documents
-each in full, along with fixtures, coverage and the environment they need.
+[docs/root/developer/testing.md](docs/root/developer/testing.md) documents each
+in full, along with fixtures, coverage and the environment they need.
 
 ```bash
 just build                  # Dev binary, and the sidecar image it is stamped with
@@ -283,8 +283,8 @@ Ensure".
 ## Testing
 
 Tiers, fixtures, coverage, and how to drive the CLI from a test are documented
-in [docs/root/developer/testing.md](docs/root/developer/testing.md). Read
-it before writing a test.
+in [docs/root/developer/testing.md](docs/root/developer/testing.md). Read it
+before writing a test.
 
 One policy rather than a technique, so it lives here: **do not add mocks.** A
 fake `incus.InstanceServer` encodes a guess about what the daemon returns, and a

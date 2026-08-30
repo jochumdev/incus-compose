@@ -351,9 +351,9 @@ func TestIncusAsyncOperationReportsALostOperation(t *testing.T) {
 	require.Equal(t, 1, waits(seen), "a 404 is an answer, so it is not retried")
 }
 
-// TestIncusAsyncOperationCancelledDoesNotWait: a caller that let go is not a
+// TestIncusAsyncOperationCanceledDoesNotWait: a caller that let go is not a
 // lost socket, so nothing is picked back up on its behalf.
-func TestIncusAsyncOperationCancelledDoesNotWait(t *testing.T) {
+func TestIncusAsyncOperationCanceledDoesNotWait(t *testing.T) {
 	t.Parallel()
 
 	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
@@ -371,7 +371,7 @@ func TestIncusAsyncOperationCancelledDoesNotWait(t *testing.T) {
 	for range updates {
 	}
 
-	require.Equal(t, 0, waits(seen), "a cancelled caller has nobody to report an outcome to")
+	require.Equal(t, 0, waits(seen), "a canceled caller has nobody to report an outcome to")
 }
 
 func TestIncusCancelOperation(t *testing.T) {

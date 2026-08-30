@@ -258,6 +258,95 @@ func TestStorageVolumeLock_StaleTakeoverAfterCrash(t *testing.T) {
 	require.NoError(t, err, "lockB should have reaped and taken over the stale lock")
 }
 
+func TestStorageVolumeLock_StaleFromStampNotMtime(t *testing.T) {
+	t.Parallel()
+	skipLocal(t)
+	c := newRandomTestClient(t, "volume-lock-stamp-")
+	vol := ensuredLockTestVolume(t, c, "stamp-vol")
+
+	// Well clear of the one-second granularity SFTP reports mtimes at, so a
+	// touched file is unambiguously fresh by that measure and stale by the stamp.
+	stale := 3 * time.Second
+
+	scA := lockTestSFTP(t, vol)
+	lockA, err := vol.Lock(t.Context(), scA, "test.lock", stale)
+	require.NoError(t, err)
+
+	// Simulate a crash: kill the heartbeat without releasing the lock file.
+	lockA.cancel()
+	lockA.wg.Wait()
+
+	time.Sleep(2 * stale)
+
+	// Whoever holds the volume can touch the file for reasons of their own, so a
+	// fresh mtime must not keep a dead holder's lock alive.
+	probe := lockTestSFTP(t, vol)
+	now := time.Now()
+	require.NoError(t, probe.Chtimes(lockA.path, now, now))
+
+	// Shorter than stale on purpose: a takeover that measured the touched mtime
+	// would have to wait the file out again, and runs out of context first.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	scB := lockTestSFTP(t, vol)
+	lockB, err := vol.Lock(ctx, scB, "test.lock", stale)
+	require.NoError(t, err, "the stamp in the file is what decides staleness, not its mtime")
+	t.Cleanup(func() { _ = lockB.Unlock() })
+}
+
+// writeForeignLock leaves a lock file carrying content no stamp can be read from.
+func writeForeignLock(t *testing.T, vol *StorageVolume) {
+	t.Helper()
+
+	probe := lockTestSFTP(t, vol)
+	f, err := probe.OpenFile("/test.lock", os.O_CREATE|os.O_EXCL|os.O_WRONLY)
+	require.NoError(t, err)
+	_, err = f.Write([]byte("someone-else"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+}
+
+func TestStorageVolumeLock_UnstampedIsHeldWhileFresh(t *testing.T) {
+	t.Parallel()
+	skipLocal(t)
+	c := newRandomTestClient(t, "volume-lock-unstamped-fresh-")
+	vol := ensuredLockTestVolume(t, c, "unstamped-fresh-vol")
+
+	// A file created but not yet written reads like this too, and it belongs to
+	// whoever is between those two calls, so mtime has to keep it alive.
+	writeForeignLock(t, vol)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	sc := lockTestSFTP(t, vol)
+	_, err := vol.Lock(ctx, sc, "test.lock", 5*time.Second)
+	require.Error(t, err, "a lock file with no stamp is still held while its mtime is fresh")
+}
+
+func TestStorageVolumeLock_UnstampedIsReapedWhenOld(t *testing.T) {
+	t.Parallel()
+	skipLocal(t)
+	c := newRandomTestClient(t, "volume-lock-unstamped-old-")
+	vol := ensuredLockTestVolume(t, c, "unstamped-old-vol")
+
+	// Above the one-second granularity SFTP reports mtimes at.
+	stale := 2 * time.Second
+
+	writeForeignLock(t, vol)
+
+	time.Sleep(2 * stale)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+
+	sc := lockTestSFTP(t, vol)
+	lock, err := vol.Lock(ctx, sc, "test.lock", stale)
+	require.NoError(t, err, "a lock file nobody is refreshing must not be permanent")
+	t.Cleanup(func() { _ = lock.Unlock() })
+}
+
 func TestStorageVolumeLock_HeartbeatPreventsStaleTakeover(t *testing.T) {
 	t.Parallel()
 	skipLocal(t)
