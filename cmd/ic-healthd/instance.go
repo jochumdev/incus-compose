@@ -109,9 +109,23 @@ type instanceConfig struct {
 	timeout       time.Duration
 	retries       int
 
+	// The image's own process, from oci.cwd/oci.uid/oci.gid. A check is
+	// written for that process and an exec is none of it by default.
+	cwd string
+	uid uint32
+	gid uint32
+
 	restart string
 
 	running bool
+}
+
+// command is what to run in an instance, and as what.
+type command struct {
+	cmd []string
+	cwd string
+	uid uint32
+	gid uint32
 }
 
 func (ic *instanceConfig) equals(other *instanceConfig) bool {
@@ -121,6 +135,9 @@ func (ic *instanceConfig) equals(other *instanceConfig) bool {
 		ic.interval == other.interval &&
 		ic.timeout == other.timeout &&
 		ic.retries == other.retries &&
+		ic.cwd == other.cwd &&
+		ic.uid == other.uid &&
+		ic.gid == other.gid &&
 		ic.restart == other.restart &&
 		ic.running == other.running
 }
@@ -240,8 +257,20 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		interval:      defaultInterval,
 		timeout:       defaultTimeout,
 		retries:       defaultRetries,
+		cwd:           inst.Config["oci.cwd"],
 		restart:       inst.Config[shared.HealthKeyPrefix+"restart"],
 		running:       inst.StatusCode == incusApi.Running,
+	}
+
+	// Absent parses to 0, which is root, which is where an exec landed anyway.
+	uid, err := strconv.ParseUint(inst.Config["oci.uid"], 10, 32)
+	if err == nil {
+		cfg.uid = uint32(uid)
+	}
+
+	gid, err := strconv.ParseUint(inst.Config["oci.gid"], 10, 32)
+	if err == nil {
+		cfg.gid = uint32(gid)
 	}
 
 	testRaw := inst.Config[shared.HealthKeyPrefix+"test"]
@@ -460,10 +489,12 @@ func setInstanceState(ctx context.Context, conn *iclient.Connection, project str
 	})
 }
 
-func instanceExec(ctx context.Context, conn *iclient.Connection, project string, name string, cmd []string) (int, string, string, error) {
+func instanceExec(ctx context.Context, conn *iclient.Connection, project string, name string, run command) (int, string, string, error) {
 	var stdout, stderr bytes.Buffer
 
-	updates, err := conn.ExecInstance(ctx, project, name, incusApi.InstanceExecPost{Command: cmd}, &iclient.InstanceExecArgs{
+	post := incusApi.InstanceExecPost{Command: run.cmd, Cwd: run.cwd, User: run.uid, Group: run.gid}
+
+	updates, err := conn.ExecInstance(ctx, project, name, post, &iclient.InstanceExecArgs{
 		Stdout: &stdout,
 		Stderr: &stderr,
 	})
@@ -530,20 +561,20 @@ func instanceCheckAction(ctx context.Context, conn *iclient.Connection, project 
 		return res
 	}
 
-	var cmd []string
+	run := command{cwd: cfg.cwd, uid: cfg.uid, gid: cfg.gid}
 	switch cfg.test[0] {
 	case "CMD":
-		cmd = cfg.test[1:]
+		run.cmd = cfg.test[1:]
 	case "CMD-SHELL":
-		cmd = []string{"/bin/sh", "-c", cfg.test[1]}
+		run.cmd = []string{"/bin/sh", "-c", cfg.test[1]}
 	case "NONE":
 		return res
 	default:
 		// Assume it's a direct command
-		cmd = cfg.test
+		run.cmd = cfg.test
 	}
 
-	exitCode, stdout, stderr, err := instanceExec(ctx, conn, project, name, cmd)
+	exitCode, stdout, stderr, err := instanceExec(ctx, conn, project, name, run)
 	if err != nil {
 		log.Debug("exec error", "error", err, "stdout", stdout, "stderr", stderr)
 		res.err = err

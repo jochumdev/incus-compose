@@ -11,6 +11,34 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
+## [Unreleased]
+
+### Changed
+
+- A service whose image ships a Dockerfile `HEALTHCHECK` and whose compose file
+  says nothing about health now inherits that check, as `docker compose` does.
+  The service is watched by ic-healthd, so with a restart policy set a check
+  nobody reviewed can restart it, and a `depends_on: condition: service_healthy`
+  on it now resolves on the image's check rather than on its run state. Opt out
+  with `healthcheck: {disable: true}`, which is also honoured now, or with
+  `user.healthcheck.enabled: "false"` via `x-incus`. The image's own
+  `HEALTHCHECK NONE` is honoured the same way. Images already in the cache are
+  not re-read, so this reaches an existing stack only on a fresh pull, and only
+  when the instance is created. (by @jochumdev)
+
+### Fixed
+
+- `healthcheck: {disable: true}` no longer enrolls the service for health
+  checking and writes a `null` test command. The compose spec's own way to say
+  "no check" was read as a check being declared. (by @jochumdev)
+
+- ic-healthd runs a healthcheck as the image's own process - its working
+  directory, user and group (`oci.cwd`, `oci.uid`, `oci.gid`) - instead of as
+  root in `/root`, which is where an `exec` lands. A test using a relative path
+  failed outright, and one depending on the service's user could pass as root
+  where it would not have for the service itself. Both are normal ways to write
+  a test, because that is how docker runs them. (by @jochumdev)
+
 ## [v1.3.1] - 2026-08-27
 
 ### Fixed

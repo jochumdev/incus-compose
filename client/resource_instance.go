@@ -627,6 +627,13 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 	// Store the image name
 	config["user.image_alias"] = image.IncusName()
 
+	// A healthcheck the compose file declares replaces the image's, disabled or
+	// not, so the image is only read where compose said nothing about health.
+	_, composeTest := r.Config.Extensions[HealthKeyPrefix+"test"]
+	if !composeTest && !util.IsFalse(r.Config.Extensions[shared.HealthEnabledKey]) {
+		ociHealthConfig(config, imageState.Healthcheck)
+	}
+
 	err = r.prefetchVolumes(ctx, image, owner)
 	if err != nil {
 		return err

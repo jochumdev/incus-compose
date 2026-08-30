@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kballard/go-shellquote"
 	incusApi "github.com/lxc/incus/v7/shared/api"
@@ -18,13 +19,45 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // dockerManifestList is docker's spelling of an OCI image index.
 const dockerManifestList = "application/vnd.docker.distribution.manifest.list.v2+json"
 
+// ociImage is an image document whose config keeps the fields ocispec drops.
+type ociImage struct {
+	ocispec.Image
+
+	Config ociImageConfig `json:"config"`
+}
+
+// ociImageConfig is an image config plus HEALTHCHECK, which the OCI spec has no
+// field for and every builder writes anyway, OCI media type or not.
+type ociImageConfig struct {
+	ocispec.ImageConfig
+
+	Healthcheck *ociHealthcheck `json:"Healthcheck,omitempty"`
+}
+
+// ociHealthcheck is docker's HealthConfig as it appears in an image config.
+// Absent fields mean docker's defaults rather than zero, so they stay unwritten.
+type ociHealthcheck struct {
+	Test          []string
+	Interval      time.Duration
+	Timeout       time.Duration
+	StartPeriod   time.Duration
+	StartInterval time.Duration
+	Retries       int
+}
+
+// Disabled reports HEALTHCHECK NONE, and an image with no check at all.
+func (h *ociHealthcheck) Disabled() bool {
+	return h == nil || len(h.Test) == 0 || h.Test[0] == "NONE"
+}
+
 // ociStoreConfig writes an image's OCI config into its properties.
-func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, project string, fingerprint string, config *ocispec.ImageConfig) error {
+func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, project string, fingerprint string, config *ociImageConfig) error {
 	img, eTag, err := server.GetImage(ctx, project, fingerprint, nil)
 	if err != nil {
 		return ErrNotFound.WithText("the image the properties belong to").Wrap(err)
@@ -81,7 +114,7 @@ func (r *Image) ociStoreConfig(ctx context.Context, server *iclient.Connection, 
 // index when the reference is multi-arch, and answers the three questions it
 // holds: the manifest digest to pin a pull to, the fingerprint Incus would give
 // the image, and the image's config.
-func (r *Image) ociResolveSource(ctx context.Context, platform string) (string, string, *ocispec.ImageConfig, error) {
+func (r *Image) ociResolveSource(ctx context.Context, platform string) (string, string, *ociImageConfig, error) {
 	repo, err := iclient.NewRepository(r.source.info, r.image)
 	if err != nil {
 		return "", "", nil, err
@@ -134,7 +167,7 @@ func (r *Image) ociResolveSource(ctx context.Context, platform string) (string, 
 		return "", "", nil, ErrImageSource.WithText("fetching the config of " + repo.Reference.String()).Wrap(err)
 	}
 
-	var image ocispec.Image
+	var image ociImage
 
 	err = json.Unmarshal(body, &image)
 	if err != nil {
@@ -209,7 +242,7 @@ func ociPlatform(p *ocispec.Platform) string {
 }
 
 // ociStateFromConfig reads an image's own OCI config into s.
-func ociStateFromConfig(s *ImageState, config *ocispec.ImageConfig) {
+func ociStateFromConfig(s *ImageState, config *ociImageConfig) {
 	// A named USER lands as 0 here; oci.uid takes nothing else, and only the
 	// image's own /etc/passwd resolves it, a project away from this one.
 	s.UID, s.GID = 0, 0
@@ -228,6 +261,48 @@ func ociStateFromConfig(s *ImageState, config *ocispec.ImageConfig) {
 	s.Cwd = config.WorkingDir
 	if s.Cwd == "" {
 		s.Cwd = "/"
+	}
+
+	// NONE and no check at all both mean the image's is not to be used, so only
+	// one of the two ever reaches an instance.
+	s.Healthcheck = config.Healthcheck
+	if s.Healthcheck.Disabled() {
+		s.Healthcheck = nil
+	}
+}
+
+// ociHealthConfig writes an image's own HEALTHCHECK into the instance config.
+func ociHealthConfig(config map[string]string, hc *ociHealthcheck) {
+	if hc.Disabled() {
+		return
+	}
+
+	// Marshaling a []string cannot fail.
+	test, _ := json.Marshal(hc.Test)
+
+	config[shared.HealthEnabledKey] = "true"
+	config[HealthKeyPrefix+"test"] = string(test)
+
+	// An absent field is docker's default rather than zero, so it stays
+	// unwritten and ic-healthd's own default applies.
+	if hc.Interval > 0 {
+		config[HealthKeyPrefix+"interval"] = hc.Interval.String()
+	}
+
+	if hc.Timeout > 0 {
+		config[HealthKeyPrefix+"timeout"] = hc.Timeout.String()
+	}
+
+	if hc.StartPeriod > 0 {
+		config[HealthKeyPrefix+"start_period"] = hc.StartPeriod.String()
+	}
+
+	if hc.StartInterval > 0 {
+		config[HealthKeyPrefix+"start_interval"] = hc.StartInterval.String()
+	}
+
+	if hc.Retries > 0 {
+		config[HealthKeyPrefix+"retries"] = strconv.Itoa(hc.Retries)
 	}
 }
 
@@ -249,6 +324,14 @@ func ociWriteProperties(s *ImageState, props map[string]string) {
 
 	if s.OCIUser != "" {
 		props[OCIUserKey] = s.OCIUser
+	}
+
+	delete(props, "oci.healthcheck")
+
+	if s.Healthcheck != nil {
+		// Marshaling a struct of strings, ints and durations cannot fail.
+		blob, _ := json.Marshal(s.Healthcheck)
+		props["oci.healthcheck"] = string(blob)
 	}
 }
 
@@ -276,5 +359,19 @@ func ociReadProperties(s *ImageState, props map[string]string) {
 		if at != "" {
 			s.Volumes = append(s.Volumes, at)
 		}
+	}
+
+	s.Healthcheck = nil
+
+	blob := props["oci.healthcheck"]
+	if blob == "" {
+		return
+	}
+
+	hc := &ociHealthcheck{}
+
+	err = json.Unmarshal([]byte(blob), hc)
+	if err == nil {
+		s.Healthcheck = hc
 	}
 }

@@ -16,7 +16,6 @@ import (
 	"github.com/avast/retry-go/v5"
 	"github.com/distribution/reference"
 	incusApi "github.com/lxc/incus/v7/shared/api"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/sftp"
 
 	"github.com/lxc/incus-compose/iclient"
@@ -172,6 +171,9 @@ type ImageState struct {
 	Cmd        string
 	Cwd        string
 	Volumes    []string
+
+	// Healthcheck is the image's own HEALTHCHECK, nil when it declares none.
+	Healthcheck *ociHealthcheck
 
 	// Size is the total image size in bytes as reported by the source server,
 	// resolved best-effort before a download. 0 when unknown.
@@ -586,7 +588,7 @@ func (r *Image) pullRequest(alias string, fingerprint string) incusApi.ImagesPos
 // resolves an unpinned reference with skopeo on whichever cluster member
 // handles the pull - which is how the store ends up holding one member's
 // architecture for everybody.
-func (r *Image) pullSource(ctx context.Context) (string, *ocispec.ImageConfig, error) {
+func (r *Image) pullSource(ctx context.Context) (string, *ociImageConfig, error) {
 	if r.NativeIncus() {
 		fingerprint, err := r.sourceFingerprint(ctx)
 
@@ -1162,7 +1164,7 @@ type imageTarget struct {
 
 // importBuilt imports a built rootfs into the store, holding the per-alias lock
 // for that alone: the builder ran unlocked, so a stuck build blocks nobody else.
-func (r *Image) importBuilt(ctx context.Context, args Options, target imageTarget, meta io.Reader, rootfs io.Reader, ociCfg *ocispec.ImageConfig) (*incusApi.ImageAliasesEntry, error) {
+func (r *Image) importBuilt(ctx context.Context, args Options, target imageTarget, meta io.Reader, rootfs io.Reader, ociCfg *ociImageConfig) (*incusApi.ImageAliasesEntry, error) {
 	r.client.LogDebug("Taking the image build lock", "resource", r)
 
 	release, err := r.lockStore(ctx)
