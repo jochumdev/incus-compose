@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"slices"
 	"strings"
@@ -1052,14 +1053,6 @@ func (r *Image) ensureBuild(ctx context.Context, args Options) error {
 			ErrCreate.WithText("the built image is missing and creating it was not requested").Wrap(err))
 	}
 
-	r.client.LogDebug("Taking the image build lock", "resource", r)
-
-	release, err := r.lockStore(ctx)
-	if err != nil {
-		return r.client.hookAfter(ctx, ActionEnsure, r, args, err)
-	}
-	defer release()
-
 	// Hop A: the store already holds it, so copy rather than rebuild.
 	if r.cache != nil && args.Build.Mode != BuildForce {
 		cacheAlias, _, storeErr := r.cache.incus.GetImageAlias(ctx, r.cache.incusProject, r.cacheAlias(), nil)
@@ -1136,23 +1129,59 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 
 	// Without a usable cache the project is the import target, and hop B is a no-op.
 	cached := r.cache != nil && !buildCfg.NoCache
-	target, targetProject, targetAlias := conn, r.client.incusProject, r.incusName
-	targetName := "project"
+
+	target := imageTarget{conn: conn, project: r.client.incusProject, alias: r.incusName, logName: "project"}
 	if cached {
-		target, targetProject, targetAlias = r.cache.incus, r.cache.incusProject, r.cacheAlias()
-		targetName = "cache"
+		target = imageTarget{conn: r.cache.incus, project: r.cache.incusProject, alias: r.cacheAlias(), logName: "cache"}
 	}
 
-	stale, _, err := target.GetImageAlias(ctx, targetProject, targetAlias, nil)
-	if err == nil {
-		err = deleteImage(ctx, target, targetProject, stale.Target)
+	built, err := r.importBuilt(ctx, args, target, meta, rootfs, ociCfg)
+	if err != nil {
+		return err
+	}
+
+	if cached {
+		err = r.copyToProject(ctx, args, built)
 		if err != nil {
-			return ErrCreate.WithText("while removing the image from the " + targetName).Wrap(err)
+			return err
 		}
 	}
 
-	op, err := target.CreateImage(ctx, targetProject, incusApi.ImagesPost{
-		Aliases: []incusApi.ImageAlias{{Name: targetAlias}},
+	r.client.LogInfo("Built image for", "image", r.incusName, "services", r.Config.Services)
+
+	return nil
+}
+
+// imageTarget is where a built image is imported, and what to call that place in an error.
+type imageTarget struct {
+	conn    *iclient.Connection
+	project string
+	alias   string
+	logName string
+}
+
+// importBuilt imports a built rootfs into the store, holding the per-alias lock
+// for that alone: the builder ran unlocked, so a stuck build blocks nobody else.
+func (r *Image) importBuilt(ctx context.Context, args Options, target imageTarget, meta io.Reader, rootfs io.Reader, ociCfg *ocispec.ImageConfig) (*incusApi.ImageAliasesEntry, error) {
+	r.client.LogDebug("Taking the image build lock", "resource", r)
+
+	release, err := r.lockStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer release()
+
+	stale, _, err := target.conn.GetImageAlias(ctx, target.project, target.alias, nil)
+	if err == nil {
+		err = deleteImage(ctx, target.conn, target.project, stale.Target)
+		if err != nil {
+			return nil, ErrCreate.WithText("while removing the image from the " + target.logName).Wrap(err)
+		}
+	}
+
+	op, err := target.conn.CreateImage(ctx, target.project, incusApi.ImagesPost{
+		Aliases: []incusApi.ImageAlias{{Name: target.alias}},
 	}, &iclient.ImageCreateArgs{
 		MetaFile:   meta,
 		MetaName:   "metadata.tar",
@@ -1161,19 +1190,19 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 	})
 	err = r.client.hookOperation(ctx, ActionEnsure, r, args, op, err)
 	if err != nil {
-		return ErrCreate.WithText("importing built image on " + targetName).Wrap(err)
+		return nil, ErrCreate.WithText("importing built image on " + target.logName).Wrap(err)
 	}
 
-	built, eTag, err := target.GetImageAlias(ctx, targetProject, targetAlias, nil)
+	built, eTag, err := target.conn.GetImageAlias(ctx, target.project, target.alias, nil)
 	if err != nil {
-		return ErrCreate.WithText("fetching alias after build").Wrap(err)
+		return nil, ErrCreate.WithText("fetching alias after build").Wrap(err)
 	}
 
 	// The builder already said what the entrypoint and command are, so a built
 	// image needs no registry to read its own config back from.
-	err = r.ociStoreConfig(ctx, target, targetProject, built.Target, ociCfg)
+	err = r.ociStoreConfig(ctx, target.conn, target.project, built.Target, ociCfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	r.updateState(func(s *ImageState) {
@@ -1182,18 +1211,7 @@ func (r *Image) buildImage(ctx context.Context, c *Client, args Options) error {
 	})
 	r.created = true
 
-	if cached {
-		err = r.copyToProject(ctx, args, built)
-		if err != nil {
-			return err
-		}
-
-		r.created = true
-	}
-
-	r.client.LogInfo("Built image for", "image", r.incusName, "services", r.Config.Services)
-
-	return nil
+	return built, nil
 }
 
 // deleteImage removes an image and waits for the removal to land.
@@ -1208,8 +1226,8 @@ func deleteImage(ctx context.Context, conn *iclient.Connection, project string, 
 	return err
 }
 
-// deleteCached removes the store's copy, under the per-alias lock so that a
-// concurrent hop A is not pulled out from under.
+// deleteCached removes the store's copy, under the per-alias lock so it cannot
+// land inside a concurrent pull's hop A or a build's import.
 func (r *Image) deleteCached(ctx context.Context) error {
 	release, err := r.lockStore(ctx)
 	if err != nil {
