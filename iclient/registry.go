@@ -2,7 +2,6 @@ package iclient
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -60,7 +59,6 @@ func NewRepository(info *ConfigRemoteInfo, image string) (*remote.Repository, er
 	transport := incusTransport()
 	transport.TLSClientConfig = tlsConfig
 	transport.Proxy = http.ProxyFromEnvironment
-	transport.DialContext = (&net.Dialer{Timeout: incusDialTimeout}).DialContext
 	transport.ResponseHeaderTimeout = registryResponseHeaderTimeout
 
 	client := &auth.Client{

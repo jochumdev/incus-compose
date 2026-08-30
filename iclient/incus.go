@@ -90,7 +90,6 @@ func NewConnection(info *ConfigRemoteInfo) (*Connection, error) {
 
 	transport.TLSClientConfig = tlsConfig
 	transport.Proxy = http.ProxyFromEnvironment
-	transport.DialContext = (&net.Dialer{Timeout: incusDialTimeout}).DialContext
 
 	c.baseURL = strings.TrimSuffix(addr, "/")
 	c.http = &http.Client{Transport: transport}
@@ -104,7 +103,13 @@ func NewConnection(info *ConfigRemoteInfo) (*Connection, error) {
 // which would cut off the event stream, an operation long-poll and every
 // console or SFTP transfer.
 func incusTransport() *http.Transport {
+	resolverDial := &net.Dialer{Timeout: incusDialTimeout}
+	resolver := &net.Resolver{PreferGo: true, Dial: resolverDial.DialContext}
+	dialer := &net.Dialer{Timeout: incusDialTimeout, Resolver: resolver}
+
 	return &http.Transport{
+		DialContext: dialer.DialContext,
+
 		// Upstream sets DisableKeepAlives, paying a TCP and TLS handshake per request.
 		DisableKeepAlives:   false,
 		MaxIdleConns:        incusMaxIdleConns,
