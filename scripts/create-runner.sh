@@ -27,6 +27,7 @@ PROJECT="${RUNNER_INCUS_PROJECT:-ic-runner}"
 IMAGE="${RUNNER_IMAGE:-images:debian/trixie}"
 BRIDGE="${RUNNER_BRIDGE:-icrunner0}"
 CERT="${RUNNER_CERT:-work/runner.crt}"
+RUNNER_INCUS_REMOTE="${RUNNER_INCUS_REMOTE:-local}"
 
 # The pool the project's default profile puts a root disk on.
 ROOT_POOL="${RUNNER_ROOT_POOL:-default}"
@@ -36,6 +37,15 @@ POOL="${RUNNER_POOL:-}"
 
 # The domain the OCI mirrors live under. Without it there are no mirror remotes.
 REGISTRY_DOMAIN="${RUNNER_REGISTRY_DOMAIN:-}"
+
+# The registry each mirror stands in for, and the host it lives on under
+# REGISTRY_DOMAIN. Both incus and podman are pointed at these.
+declare -A MIRRORS=(
+    [docker.io]=docker-registry
+    [ghcr.io]=ghcr-registry
+    [registry.gitlab.com]=gitlab-registry
+    [quay.io]=quay-registry
+)
 
 # The apt-cacher-ng the container's apt goes through, a host or a full URL.
 APT_CACHER="${APT_CACHER_NG:-}"
@@ -102,6 +112,8 @@ if [[ -n "${APT_CACHER}" ]]; then
     fi
 fi
 
+export INCUS_REMOTE="${RUNNER_INCUS_REMOTE}"
+
 cd "${SCRIPT_DIR}/.."
 
 # inc runs an incus command against the runner's project.
@@ -143,6 +155,9 @@ create_container() {
 
     step "Creating the project ${PROJECT}"
     incus project create "${PROJECT}" || true
+
+    step "Creating the network ${BRIDGE}"
+    incus --project=ic-runner network create "${BRIDGE}" || true
 
     step "Giving its default profile a root disk and a nic"
     inc profile device add default root disk path=/ pool="${ROOT_POOL}" || true
@@ -203,7 +218,7 @@ install_base() {
     # curl and ca-certificates are not in the guide's list, but every step below
     # this one fetches something over HTTPS.
     as_root env DEBIAN_FRONTEND=noninteractive apt-get install -qy \
-        sudo sudo-rs vim golang git shellcheck podman jq curl ca-certificates
+        sudo sudo-rs vim golang git shellcheck podman jq curl ca-certificates nano
 
     as_root ln -sf /usr/sbin/sudo-rs /usr/local/sbin/sudo
     as_root ln -sf /usr/share/zoneinfo/Europe/Vienna /etc/timezone
@@ -283,6 +298,8 @@ install_tools() {
     as_runner 'printf "[engine]\ncgroup_manager = \"cgroupfs\"\n" > ~/.config/containers/containers.conf'
     as_root loginctl enable-linger runner
 
+    add_podman_mirrors
+
     step "Restarting ${RUNNER} to pick all of it up"
     inc restart "${RUNNER}"
 
@@ -292,22 +309,42 @@ install_tools() {
 
 # --- 8. The OCI mirrors -----------------------------------------------------
 
+# podman reads a mirror per registry out of registries.conf, so a pull of
+# docker.io/... goes to the mirror and only falls back to the real registry.
+add_podman_mirrors() {
+    if [[ -z "${REGISTRY_DOMAIN}" ]]; then
+        warn "RUNNER_REGISTRY_DOMAIN is unset, skipping podman's mirrors"
+        return
+    fi
+
+    # This file replaces /etc/containers/registries.conf rather than adding to
+    # it, so the distribution's search registries are repeated here.
+    local conf="unqualified-search-registries = [\"docker.io\"]\n"
+    local registry
+
+    # Sorted so the file comes out the same on every run.
+    for registry in $(printf '%s\n' "${!MIRRORS[@]}" | sort); do
+        step "Pointing podman's ${registry} at its mirror"
+        # location is not optional next to a non-wildcard prefix; without it the
+        # file does not parse and every podman lookup fails.
+        conf+="\n[[registry]]\nprefix = \"${registry}\"\nlocation = \"${registry}\"\n"
+        conf+="\n[[registry.mirror]]\nlocation = \"${MIRRORS[${registry}]}.${REGISTRY_DOMAIN}\"\n"
+    done
+
+    as_runner 'mkdir -p ~/.config/containers/'
+    as_runner "printf '%b' '${conf}' > ~/.config/containers/registries.conf"
+}
+
 add_registry_remotes() {
     if [[ -z "${REGISTRY_DOMAIN}" ]]; then
         warn "RUNNER_REGISTRY_DOMAIN is unset, skipping the OCI mirror remotes"
         return
     fi
 
-    local -A mirrors=(
-        [docker.io]=docker-registry
-        [ghcr.io]=ghcr-registry
-        [registry.gitlab.com]=gitlab-registry
-    )
-
-    for remote in "${!mirrors[@]}"; do
+    for remote in "${!MIRRORS[@]}"; do
         step "Adding the ${remote} mirror"
         as_runner "incus remote rm ${remote} || true"
-        as_runner "incus remote add --protocol=oci ${remote} https://${mirrors[${remote}]}.${REGISTRY_DOMAIN}"
+        as_runner "incus remote add --protocol=oci ${remote} https://${MIRRORS[${remote}]}.${REGISTRY_DOMAIN}"
     done
 }
 
