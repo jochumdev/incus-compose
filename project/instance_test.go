@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/stretchr/testify/assert"
@@ -213,6 +214,89 @@ func TestInstanceConfig(t *testing.T) {
 	assert.Equal(t, "8.8.8.8,1.1.1.1", config["oci.dns.nameservers"])
 	assert.Equal(t, "example.com", config["oci.dns.search"])
 	assert.Equal(t, "example.com", config["oci.dns.domain"])
+}
+
+// What the compose file says about health is what stops the image's own
+// HEALTHCHECK being read in client.Instance.create, so these two keys carry it.
+func TestInstanceConfigHealthCheckDisable(t *testing.T) {
+	t.Parallel()
+
+	gc, err := client.NewTestClient(t.Context())
+	require.NoError(t, err)
+	c, err := gc.EnsureProject("default")
+	require.NoError(t, err)
+
+	interval := types.Duration(5 * time.Second)
+
+	for _, tt := range []struct {
+		name    string
+		check   *types.HealthCheckConfig
+		restart string
+		enabled string
+		test    string
+	}{
+		{
+			name: "saying nothing leaves both unset, which is what lets the image speak",
+		},
+		{
+			name:    "a restart policy alone is watched without a test of its own",
+			restart: "always",
+			enabled: "true",
+		},
+		{
+			name:    "a declared check is enabled and carries its test",
+			check:   &types.HealthCheckConfig{Test: types.HealthCheckTest{"CMD", "true"}},
+			enabled: "true",
+			test:    `["CMD","true"]`,
+		},
+		{
+			// The test key is what stops the image being read, so overriding a
+			// duration alone must not write one.
+			name:    "a block overriding only a duration keeps the image's test",
+			check:   &types.HealthCheckConfig{Interval: &interval},
+			enabled: "true",
+		},
+		{
+			name:    "disable leaves nothing to watch",
+			check:   &types.HealthCheckConfig{Disable: true},
+			enabled: "false",
+		},
+		{
+			name:    "disable with a restart policy is watched with a no-op probe",
+			check:   &types.HealthCheckConfig{Disable: true},
+			restart: "always",
+			enabled: "true",
+			test:    `["NONE"]`,
+		},
+		{
+			name:    "test NONE is the spelling of disable the image uses",
+			check:   &types.HealthCheckConfig{Test: types.HealthCheckTest{"NONE"}},
+			enabled: "false",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			config, err := instanceConfig(c, types.ServiceConfig{
+				Name:        "web",
+				Restart:     tt.restart,
+				HealthCheck: tt.check,
+			}, "", nil)
+			require.NoError(t, err)
+
+			if tt.enabled == "" {
+				assert.NotContains(t, config, shared.HealthEnabledKey)
+			} else {
+				assert.Equal(t, tt.enabled, config[shared.HealthEnabledKey])
+			}
+
+			if tt.test == "" {
+				assert.NotContains(t, config, client.HealthKeyPrefix+"test")
+			} else {
+				assert.Equal(t, tt.test, config[client.HealthKeyPrefix+"test"])
+			}
+		})
+	}
 }
 
 func TestInstanceConfigResourceLimits(t *testing.T) {

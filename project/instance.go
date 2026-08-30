@@ -271,18 +271,37 @@ func instanceConfig(c *client.Client, service types.ServiceConfig, projectName s
 	// Resource limits
 	applyResourceLimits(config, resourceLimits(service))
 
+	// `disable: true` and `test: [NONE]` are the compose spec's two ways to say
+	// "no check". A block overriding only a duration keeps the image's test.
+	suppressed := service.HealthCheck != nil &&
+		(service.HealthCheck.Disable ||
+			(len(service.HealthCheck.Test) > 0 && service.HealthCheck.Test[0] == "NONE"))
+
+	restarts := slices.Contains(healthdRestartPolicies, service.Restart)
+
 	// The opt-in ic-healthd requires. Set before x-incus, so a service can turn
 	// it off again with `user.healthcheck.enabled: "false"`.
-	if service.HealthCheck != nil || slices.Contains(healthdRestartPolicies, service.Restart) {
+	if (service.HealthCheck != nil && !suppressed) || restarts {
 		config[shared.HealthEnabledKey] = "true"
+	} else if service.HealthCheck != nil {
+		config[shared.HealthEnabledKey] = "false"
 	}
 
-	if service.HealthCheck != nil {
-		testB, err := json.Marshal(service.HealthCheck.Test)
-		if err != nil {
-			return nil, fmt.Errorf("converting service %q healthcheck test: %w", service.Name, err)
+	// Written only where healthd would synthesize it anyway, so a declared but
+	// disabled check still says the image's must not be read in its place.
+	if suppressed && restarts {
+		config[client.HealthKeyPrefix+"test"] = `["NONE"]`
+	}
+
+	if service.HealthCheck != nil && !suppressed {
+		if len(service.HealthCheck.Test) > 0 {
+			testB, err := json.Marshal(service.HealthCheck.Test)
+			if err != nil {
+				return nil, fmt.Errorf("converting service %q healthcheck test: %w", service.Name, err)
+			}
+
+			config[client.HealthKeyPrefix+"test"] = string(testB)
 		}
-		config[client.HealthKeyPrefix+"test"] = string(testB)
 
 		if service.HealthCheck.StartPeriod != nil {
 			config[client.HealthKeyPrefix+"start_period"] = service.HealthCheck.StartPeriod.String()

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/shared"
 )
 
 func TestOCIReadProperties(t *testing.T) {
@@ -95,17 +97,24 @@ func TestOCIStateRoundTrip(t *testing.T) {
 
 	for _, tt := range []struct {
 		name   string
-		config ocispec.ImageConfig
+		config ociImageConfig
 		want   ImageState
 	}{
 		{
 			name: "a config declaring everything",
-			config: ocispec.ImageConfig{
-				User:       "999:998",
-				Entrypoint: []string{"docker-entrypoint.sh"},
-				Cmd:        []string{"redis-server", "--appendonly", "yes"},
-				WorkingDir: "/data",
-				Volumes:    map[string]struct{}{"/var/log": {}, "/data": {}},
+			config: ociImageConfig{
+				ImageConfig: ocispec.ImageConfig{
+					User:       "999:998",
+					Entrypoint: []string{"docker-entrypoint.sh"},
+					Cmd:        []string{"redis-server", "--appendonly", "yes"},
+					WorkingDir: "/data",
+					Volumes:    map[string]struct{}{"/var/log": {}, "/data": {}},
+				},
+				Healthcheck: &ociHealthcheck{
+					Test:     []string{"CMD", "redis-cli", "ping"},
+					Interval: 5 * time.Second,
+					Retries:  4,
+				},
 			},
 			want: ImageState{
 				UID: 999, GID: 998,
@@ -114,18 +123,31 @@ func TestOCIStateRoundTrip(t *testing.T) {
 				Cmd:        "redis-server --appendonly yes",
 				Cwd:        "/data",
 				Volumes:    []string{"/data", "/var/log"},
+				Healthcheck: &ociHealthcheck{
+					Test:     []string{"CMD", "redis-cli", "ping"},
+					Interval: 5 * time.Second,
+					Retries:  4,
+				},
 			},
 		},
 		{
 			name:   "an image declaring nothing still gets a working directory",
-			config: ocispec.ImageConfig{},
+			config: ociImageConfig{},
 			want:   ImageState{Cwd: "/"},
 		},
 		{
 			// oci.uid takes a number, so a name survives only in its own key.
 			name:   "a named user leaves the ids at zero",
-			config: ocispec.ImageConfig{User: "nobody"},
+			config: ociImageConfig{ImageConfig: ocispec.ImageConfig{User: "nobody"}},
 			want:   ImageState{OCIUser: "nobody", Cwd: "/"},
+		},
+		{
+			// HEALTHCHECK NONE is an image saying its check must not be used.
+			name: "a disabled healthcheck is not carried",
+			config: ociImageConfig{
+				Healthcheck: &ociHealthcheck{Test: []string{"NONE"}},
+			},
+			want: ImageState{Cwd: "/"},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,6 +163,64 @@ func TestOCIStateRoundTrip(t *testing.T) {
 			back := ImageState{}
 			ociReadProperties(&back, props)
 			assert.Equal(t, tt.want, back, "what is written to properties must read back the same")
+		})
+	}
+}
+
+// An absent duration is docker's default rather than zero, so it must not be
+// written: ic-healthd's own defaults are what stand in for it.
+func TestOCIHealthConfig(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		hc   *ociHealthcheck
+		want map[string]string
+	}{
+		{
+			name: "an image with no healthcheck writes nothing at all",
+		},
+		{
+			name: "NONE is an image saying its check must not be used",
+			hc:   &ociHealthcheck{Test: []string{"NONE"}},
+		},
+		{
+			name: "a test alone enrolls the instance and leaves every default alone",
+			hc:   &ociHealthcheck{Test: []string{"CMD-SHELL", "immich-healthcheck"}},
+			want: map[string]string{
+				shared.HealthEnabledKey:  "true",
+				HealthKeyPrefix + "test": `["CMD-SHELL","immich-healthcheck"]`,
+			},
+		},
+		{
+			name: "nanoseconds become the duration strings ic-healthd parses",
+			hc: &ociHealthcheck{
+				Test:        []string{"CMD", "dnslookup", ".", "NS", "127.0.0.1"},
+				Interval:    5 * time.Second,
+				Timeout:     2 * time.Second,
+				StartPeriod: 5 * time.Second,
+			},
+			want: map[string]string{
+				shared.HealthEnabledKey:          "true",
+				HealthKeyPrefix + "test":         `["CMD","dnslookup",".","NS","127.0.0.1"]`,
+				HealthKeyPrefix + "interval":     "5s",
+				HealthKeyPrefix + "timeout":      "2s",
+				HealthKeyPrefix + "start_period": "5s",
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := map[string]string{}
+			ociHealthConfig(got, tt.hc)
+
+			want := tt.want
+			if want == nil {
+				want = map[string]string{}
+			}
+
+			assert.Equal(t, want, got)
 		})
 	}
 }
@@ -308,14 +388,22 @@ func ociTestImage(addr string) *Image {
 func TestOCIResolveSource(t *testing.T) {
 	t.Parallel()
 
-	config, err := json.Marshal(ocispec.Image{
-		Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"},
-		Config: ocispec.ImageConfig{
-			Entrypoint: []string{"docker-entrypoint.sh"},
-			Cmd:        []string{"redis-server"},
-			WorkingDir: "/data",
-			User:       "999:999",
-			Volumes:    map[string]struct{}{"/data": {}},
+	// ociImage rather than ocispec.Image: HEALTHCHECK only survives the round
+	// trip because the outer Config shadows the embedded one.
+	config, err := json.Marshal(ociImage{
+		Image: ocispec.Image{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}},
+		Config: ociImageConfig{
+			ImageConfig: ocispec.ImageConfig{
+				Entrypoint: []string{"docker-entrypoint.sh"},
+				Cmd:        []string{"redis-server"},
+				WorkingDir: "/data",
+				User:       "999:999",
+				Volumes:    map[string]struct{}{"/data": {}},
+			},
+			Healthcheck: &ociHealthcheck{
+				Test:     []string{"CMD", "redis-cli", "ping"},
+				Interval: 5 * time.Second,
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -363,12 +451,18 @@ func TestOCIResolveSource(t *testing.T) {
 		_, _, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.NoError(t, err)
 
-		assert.Equal(t, &ocispec.ImageConfig{
-			User:       "999:999",
-			Entrypoint: []string{"docker-entrypoint.sh"},
-			Cmd:        []string{"redis-server"},
-			WorkingDir: "/data",
-			Volumes:    map[string]struct{}{"/data": {}},
+		assert.Equal(t, &ociImageConfig{
+			ImageConfig: ocispec.ImageConfig{
+				User:       "999:999",
+				Entrypoint: []string{"docker-entrypoint.sh"},
+				Cmd:        []string{"redis-server"},
+				WorkingDir: "/data",
+				Volumes:    map[string]struct{}{"/data": {}},
+			},
+			Healthcheck: &ociHealthcheck{
+				Test:     []string{"CMD", "redis-cli", "ping"},
+				Interval: 5 * time.Second,
+			},
 		}, got)
 	})
 
@@ -485,6 +579,6 @@ func TestOCIResolveSource(t *testing.T) {
 		_, _, got, err := ociTestImage(server.URL).ociResolveSource(t.Context(), "amd64")
 		require.NoError(t, err)
 
-		assert.Equal(t, &ocispec.ImageConfig{User: "nobody"}, got)
+		assert.Equal(t, &ociImageConfig{ImageConfig: ocispec.ImageConfig{User: "nobody"}}, got)
 	})
 }

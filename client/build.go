@@ -231,7 +231,7 @@ func buildDetectBuilder(preferredBuilder string) (string, error) {
 // buildRootfs runs the container builder and returns both the rootfs tar and
 // the OCI runtime config.json bytes. The rootfs is a ReadCloser that deletes
 // its temp file on Close. stdout/stderr are forwarded.
-func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfig, stdout io.Writer, stderr io.Writer) (io.ReadCloser, []byte, *ocispec.ImageConfig, error) {
+func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfig, stdout io.Writer, stderr io.Writer) (io.ReadCloser, []byte, *ociImageConfig, error) {
 	isPodman := strings.HasSuffix(builder, "podman") || strings.HasSuffix(builder, "buildah")
 	tmpTag := fmt.Sprintf("ic-compose-build-%x", time.Now().UnixNano())
 
@@ -363,12 +363,15 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 
 	// The runtime spec has one argv, so the split is kept alongside it rather
 	// than read back out of Args, which cannot say where the entrypoint ended.
-	config := &ocispec.ImageConfig{
-		User:       user,
-		Entrypoint: toStrings(imgCfg["Entrypoint"]),
-		Cmd:        toStrings(imgCfg["Cmd"]),
-		WorkingDir: cwd,
-		Volumes:    volumes,
+	config := &ociImageConfig{
+		ImageConfig: ocispec.ImageConfig{
+			User:       user,
+			Entrypoint: toStrings(imgCfg["Entrypoint"]),
+			Cmd:        toStrings(imgCfg["Cmd"]),
+			WorkingDir: cwd,
+			Volumes:    volumes,
+		},
+		Healthcheck: buildHealthcheck(imgCfg["Healthcheck"]),
 	}
 
 	configJSON, err := json.Marshal(rspecs.Spec{
@@ -390,6 +393,41 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 		return nil, nil, nil, fmt.Errorf("opening rootfs: %w", err)
 	}
 	return &tempFile{File: f, path: rootfsPath}, configJSON, config, nil
+}
+
+// buildHealthcheck reads a Dockerfile HEALTHCHECK out of the loosely decoded
+// image config, where every builder reports durations as nanosecond numbers.
+func buildHealthcheck(v any) *ociHealthcheck {
+	raw, _ := v.(map[string]any)
+	if len(raw) == 0 {
+		return nil
+	}
+
+	hc := &ociHealthcheck{}
+
+	test, _ := raw["Test"].([]any)
+	for _, e := range test {
+		s, ok := e.(string)
+		if ok {
+			hc.Test = append(hc.Test, s)
+		}
+	}
+
+	nanos := func(key string) time.Duration {
+		n, _ := raw[key].(float64)
+
+		return time.Duration(n)
+	}
+
+	hc.Interval = nanos("Interval")
+	hc.Timeout = nanos("Timeout")
+	hc.StartPeriod = nanos("StartPeriod")
+	hc.StartInterval = nanos("StartInterval")
+
+	retries, _ := raw["Retries"].(float64)
+	hc.Retries = int(retries)
+
+	return hc
 }
 
 // ociDefaultEnv is what umoci seeds a runtime spec with, so a built image gets the environment.* keys a pulled one does.
