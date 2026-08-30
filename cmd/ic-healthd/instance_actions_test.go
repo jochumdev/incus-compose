@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestInstanceExecReportsTheExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			code, _, _, err := instanceExec(t.Context(), conn, project, name, tt.cmd)
+			code, _, _, err := instanceExec(t.Context(), conn, project, name, command{cmd: tt.cmd})
 
 			require.NoError(t, err, "a command that ran is not an error, whatever it returned")
 			require.Equal(t, tt.want, code)
@@ -51,12 +52,38 @@ func TestInstanceExecCapturesOutput(t *testing.T) {
 	name := testContainer(t, c, "web", nil, true)
 
 	code, stdout, stderr, err := instanceExec(t.Context(), testConn(t, c), c.Project(), name,
-		[]string{"/bin/sh", "-c", "echo to-stdout; echo to-stderr >&2; exit 3"})
+		command{cmd: []string{"/bin/sh", "-c", "echo to-stdout; echo to-stderr >&2; exit 3"}})
 
 	require.NoError(t, err)
 	require.Equal(t, 3, code)
 	require.Contains(t, stdout, "to-stdout")
 	require.Contains(t, stderr, "to-stderr")
+}
+
+// TestInstanceExecHonoursOCIProcess is what an inherited HEALTHCHECK rests on:
+// an image writes one for its own process, and an exec is none of those things
+// by default.
+func TestInstanceExecHonoursOCIProcess(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	c := testProject(t, "healthd-exec-proc-")
+	name := testContainer(t, c, "web", nil, true)
+	conn, project := testConn(t, c), c.Project()
+
+	report := []string{"/bin/sh", "-c", "pwd; id -u; id -g"}
+
+	code, stdout, _, err := instanceExec(t.Context(), conn, project, name,
+		command{cmd: report, cwd: "/tmp", uid: 1000, gid: 1001})
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+	require.Equal(t, []string{"/tmp", "1000", "1001"}, strings.Fields(stdout))
+
+	// Leaving them unset is what every caller passed before this, and has to
+	// keep meaning "wherever exec lands, as root".
+	_, stdout, _, err = instanceExec(t.Context(), conn, project, name, command{cmd: report})
+	require.NoError(t, err)
+	require.Equal(t, []string{"/root", "0", "0"}, strings.Fields(stdout))
 }
 
 // TestInstanceExecHonoursTheContext is the guarantee the whole daemon rests on:
@@ -73,7 +100,7 @@ func TestInstanceExecHonoursTheContext(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, _, err := instanceExec(ctx, testConn(t, c), c.Project(), name, []string{"/bin/sh", "-c", "sleep 300"})
+		_, _, _, err := instanceExec(ctx, testConn(t, c), c.Project(), name, command{cmd: []string{"/bin/sh", "-c", "sleep 300"}})
 		done <- err
 	}()
 

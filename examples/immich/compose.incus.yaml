@@ -1,8 +1,8 @@
 services:
   server:
     ports: !reset []
+    # No test: the image ships one, and these only retune it.
     healthcheck:
-      test: ["CMD", "/usr/src/app/server/bin/immich-healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -14,7 +14,6 @@ services:
 
   microservices:
     healthcheck:
-      test: ["CMD", "/usr/src/app/server/bin/immich-healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -23,7 +22,6 @@ services:
 
   machine-learning:
     healthcheck:
-      test: ["CMD", "python3", "/usr/src/healthcheck.py"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -40,7 +38,6 @@ services:
 
   database:
     healthcheck:
-      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
       interval: 10s
       timeout: 5s
       retries: 3
