@@ -206,9 +206,8 @@ adapted from [docker compose](https://github.com/docker/compose). The
 `install.sh` script is adapted from
 [golangci-lint](https://github.com/golangci/golangci-lint).
 
-This project uses AI tools as development aids (drafting, iteration, reviews,
-tests, and documentation). Architecture, constraints, and final code decisions
-are owned by the human committers.
+This project has been using AI tools as development aids (drafting, iteration,
+reviews, tests, and documentation).
 
 Earlier development was on [Gitlab](https://gitlab.com/r3j0/incus-compose/).
 
