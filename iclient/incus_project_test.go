@@ -6,6 +6,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestIncusGetProjectNames pins the non-recursive listing and the URL stripping.
+func TestIncusGetProjectNames(t *testing.T) {
+	t.Parallel()
+
+	conn, seen := recordingServer(t, `["/1.0/projects/default","/1.0/projects/other"]`)
+
+	names, err := conn.GetProjectNames(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"default", "other"}, names)
+	require.Equal(t, []string{"/1.0/projects"}, seen.uris())
+}
+
 // TestIncusDeleteProjectForce pins the one thing that separates a delete from a
 // force delete. Losing the parameter turns a teardown into "project not empty";
 // sending it by mistake takes the instances and volumes with it.

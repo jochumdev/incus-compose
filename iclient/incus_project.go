@@ -23,6 +23,19 @@ func (c *Connection) GetProject(ctx context.Context, name string) (*api.Project,
 	return &project, etag, nil
 }
 
+// GetProjectNames returns the names of every project the certificate may see.
+func (c *Connection) GetProjectNames(ctx context.Context) ([]string, error) {
+	// Without recursion the collection is a list of resource URLs.
+	uris := []string{}
+
+	_, err := c.getStruct(ctx, "", incusProjectsPath, nil, &uris)
+	if err != nil {
+		return nil, err
+	}
+
+	return resourceNames(incusProjectsPath, uris)
+}
+
 // GetProjects returns every project the certificate may see.
 func (c *Connection) GetProjects(ctx context.Context) ([]api.Project, error) {
 	projects := []api.Project{}
