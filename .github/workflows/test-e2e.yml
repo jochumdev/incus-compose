@@ -24,8 +24,8 @@ jobs:
             remote: ict-stable
           - name: custom
             remote: ict-custom
-          - name: lts
-            remote: ict-lts
+          # - name: lts
+          #   remote: ict-lts
           - name: daily
             remote: ict-daily
     runs-on: [self-hosted, incus-compose, default]
