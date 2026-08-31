@@ -1,0 +1,11 @@
+FROM docker.io/library/debian:trixie-slim
+
+ENV DEBIAN_FRONTEND="non-interactive"
+
+# dnsperf so a benchmark runs from inside the nested daemon, on the same wire as
+# the server. Driving it from the host measures whatever sits between the two
+# instead, and a remote daemon has no route back at all.
+RUN apt-get -qy update && apt-get install -qy \
+      knot-dnsutils iproute2 inetutils-ping curl dnsperf wget
+
+CMD ["bash"]

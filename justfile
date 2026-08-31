@@ -6,7 +6,7 @@
 #   just test           # Run tests against nested Incus
 #   just test-local     # Unit tests only, no Incus needed
 #
-# Recipes live in just/*.just by topic. Everything the coredns merge brings is
+# Recipes live in just/*.just by topic. Everything the ic-dns merge brings is
 # an import of its own, so it lands here without touching these.
 
 set dotenv-load
@@ -23,6 +23,9 @@ import 'just/build.just'
 import 'just/docs.just'
 import 'just/fleet.just'
 import 'just/incus.just'
+
+import 'just/ic-dns-build.just'
+import 'just/ic-dns-compose.just'
 
 [private]
 default:

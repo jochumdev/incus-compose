@@ -1,4 +1,4 @@
-# Standing fleets to point CoreDNS at.
+# Standing fleets to point ic-dns at.
 
 # Builds a standing fleet and leaves it up.
 #
@@ -12,9 +12,10 @@
 #            projects. What the design assumes.
 #   nested   one gateway per network and two workers on one each, so no two
 #            instances share a network set - one view per instance, nothing
-#            collapsing. The pathological case for byView, which is views x names.
+#            collapsing. Every querier still shares exactly one network with any
+#            name it can see, so answering never joins.
 #
-# Both stamp user.coredns.stress=true, so one scope_marker serves either.
+# Both stamp user.dns.stress=true, so one scope_marker serves either.
 #
 # down forces out everything whose name starts with PREFIX, and it is the same
 # PREFIX up built with, so nothing is looked up.
@@ -24,6 +25,12 @@
 #   PREFIX    project name prefix, default "flat" or "stress" by topology
 #   NETWORKS  bridges per project, nested only, default 3
 #   SERVICE   the shared fan-out name, flat only, default "web". Empty drops it
+#   ALIAS     domain to alias the first host of every project into, default
+#             "shadow.example". An alias landing outside every served zone makes
+#             the source invent a zone for its parent, marked Fallthrough - so
+#             the fleet then holds a domain it answers a handful of names in and
+#             falls through for everything else, which is the shape a query set
+#             needs to measure that path. Empty stamps no aliases
 #   OVN=0     opts out of OVN. On by default: projects then own OVN networks of
 #             their own rather than referencing bridges in the default project,
 #             which is the case netKey exists for - two projects can each own a
@@ -66,7 +73,7 @@ fleet topology action *args:
     IMAGE="${IMAGE:-docker.io:library/nginx:alpine}"
     POOL="${POOL:-default}"
     UPLINK="${UPLINK:-incusbr0}"
-    MARKER="user.coredns.stress"
+    MARKER="user.dns.stress"
     OVN="${OVN:-1}"
 
     RESULTS_DIR=$(mktemp -d)
@@ -80,7 +87,13 @@ fleet topology action *args:
       local h
 
       local -a svc=()
-      [[ -n "${SERVICE-web}" ]] && svc=(-c "user.label.coredns.service=${SERVICE-web}")
+      [[ -n "${SERVICE-web}" ]] && svc=(-c "user.label.dns.service=${SERVICE-web}")
+
+      # Absolute, so it lands outside this project's zone and the source has to
+      # invent one for shadow.example - which is the whole point of stamping it.
+      local -a alias=()
+      [[ -n "${ALIAS-shadow.example}" ]] &&
+        alias=(-c "user.label.dns.aliases=${project}.${ALIAS-shadow.example}.")
 
       incus network create "${net_args[@]}" "${project}-net1" "${ovn_type[@]}" || return 1
 
@@ -90,8 +103,11 @@ fleet topology action *args:
         network="${project}-net1" || return 1
 
       for ((h = 1; h <= HOSTS; h++)); do
+        local -a first=()
+        ((h == 1)) && first=("${alias[@]}")
+
         INCUS_PROJECT="${project}" incus launch "${IMAGE}" "host${h}" \
-          -p "${project}-host" "${svc[@]}" || return 1
+          -p "${project}-host" "${svc[@]}" "${first[@]}" || return 1
       done
     }
 
@@ -323,10 +339,10 @@ fleet topology action *args:
 
         if [[ "${topology}" == flat ]]; then
           echo "Instances: $((projects * HOSTS)), views: ${projects}"
-          echo "Check with: PREFIX=${PREFIX} NAMES='host1 host2' just coredns-verify-dns 53 ${PREFIX}"
+          echo "Check with: PREFIX=${PREFIX} NAMES='host1 host2' just ic-dns-verify-dns 53 ${PREFIX}"
         else
           echo "Instances: $((projects * (WORKERS + 1))), NICs: $((projects * (NETWORKS + WORKERS)))"
-          echo "Check with: PREFIX=${PREFIX} just coredns-verify-dns 53 ${PREFIX}"
+          echo "Check with: PREFIX=${PREFIX} just ic-dns-verify-dns 53 ${PREFIX}"
         fi
 
         echo "Tear down with: just fleet ${topology} down ${concurrency}"

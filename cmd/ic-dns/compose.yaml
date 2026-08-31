@@ -1,0 +1,153 @@
+name: ic-dns
+
+# This binary as an Incus instance rather than a host process.
+#
+# The same rig and the same knobs, built from this working tree. What it is not
+# is the deployment guide - see docs/ for that, which mints a trust token and
+# pins an address. This one borrows your own incus client identity and exists to
+# be started and thrown away.
+#
+#   just ic-dns-compose up -d
+#
+# --os-env is required rather than a convenience, and `just ic-dns-compose`
+# passes it: incus-compose reads .env files only, so without it every variable
+# below is empty. Everything here is deliberately an OS variable, the way
+# INCUS_REMOTE already is.
+#
+# There is no Corefile. main composes the chain at compile time and takes its
+# configuration from flags and environment, so every knob below is one of
+# `ic-dns run --help` and nothing is mounted to configure it.
+#
+# INCUS_ENDPOINT is required. The gateway below is this bridge's, and incusd is
+# only on it when it happens to listen there.
+
+services:
+  # Built from the repository root, so the image under test is this working
+  # tree. The context is ../.. because this file lives in cmd/ic-dns and a
+  # build context is relative to the compose file.
+  #
+  # It has no dns: of its own - it reaches the Incus API by address, and would
+  # otherwise be asking itself.
+  ic-dns:
+    image: ghcr.io/lxc/incus-compose/ic-dns:latest
+    container_name: ic-dns
+    build:
+      context: ../..
+      dockerfile: container/ic-dns/Containerfile
+
+    # entrypoint rather than command: incus-compose has no command, and
+    # entrypoint.sh is what sets GOMEMLIMIT from the cgroup limit before handing
+    # over. run is the subcommand; everything else is environment.
+    entrypoint: ["entrypoint.sh", "run"]
+
+    environment:
+      DNS_INCUS: "${INCUS_ENDPOINT:?give the Incus HTTPS API, e.g. https://10.0.0.1:8443}"
+      DNS_LISTEN: ":${DNS_PORT-53}"
+
+      # /metrics, /health and /ready. Every interface rather than loopback,
+      # because the scraper is outside the instance.
+      DNS_HTTP: "${DNS_HTTP-:9153}"
+
+      # Your own incus client identity, already in the trust store, so nothing
+      # is generated and no token is redeemed.
+      DNS_CLIENT_CERT: /etc/ic-dns/incus/client.crt
+      DNS_CLIENT_KEY: /etc/ic-dns/incus/client.key
+
+      # Records and zone serials survive a restart from here, in the data volume
+      # below. `just ic-dns-cold-stats` reads cold.json straight out of it.
+      DNS_DATA_DIR: /var/lib/dns-incus
+
+      # Serves only what the stress scripts stamp. Empty serves every project
+      # the certificate can see instead.
+      DNS_PROJECT_MARKER: "${DNS_PROJECT_MARKER-user.dns.stress}"
+
+      DNS_TTL: "${DNS_TTL-5}"
+
+      # A plain address; cache and loop go before the forwarder in the
+      # chain main composes. Never for a benchmark: it turns every unmatched
+      # name into upstream traffic, so the run measures the upstream.
+      DNS_FORWARD: "${DNS_FORWARD-}"
+
+      # Echoes the RFC 7871 client subnet back with a scope, for the ECS-aware
+      # cache before it. Off by default, as the plugin's own default is.
+      DNS_ECHO_SUBNET: "${DNS_ECHO_SUBNET-}"
+
+      DNS_METRICS: "${DNS_METRICS-false}"
+
+      # /debug/pprof on the metrics port, for finding where a query's time goes
+      # when the wire number and the in-process one disagree. Off by default,
+      # and it takes the HTTP write timeout off with it - so this is a knob for
+      # a rig, not for a deployment.
+      DNS_PPROF: "${DNS_PPROF-}"
+
+      # The level the chain's log positions print a routine event at, and the
+      # process's own level - TRACE, DEBUG, INFO, WARN, ERROR. TRACE is a line
+      DNS_LOG: "${DNS_LOG:-INFO}"
+
+    # Pinned, so a client can be pointed at it before the stack is up and a
+    # benchmark's SERVER does not have to be read back out of Incus. It sits
+    # below the DHCP range incus-compose derives for a network with an explicit
+    # address, which on a /24 starts at .64.
+    networks:
+      default:
+        ipv4_address: "${IPV4_IC_DNS}/24"
+
+    # Live heap is 6 MB for a 480-instance fleet. The rest of what cgroup2
+    # charges is anon the Go runtime has not returned, the binary's text as page
+    # cache, kernel stacks and socket buffers - so this is headroom rather than
+    # a fit.
+    #
+    # cpus is cores, as compose-spec defines it, and incus-compose turns it into
+    # a hard quota rather than a cpuset. That is the form the Go runtime can
+    # see: entrypoint.sh sizes GOMAXPROCS from cpu.max.
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 100M
+
+    secrets:
+      - source: client-crt
+        target: /etc/ic-dns/incus/client.crt
+      - source: client-key
+        target: /etc/ic-dns/incus/client.key
+
+    volumes:
+      - data:/var/lib/dns-incus
+
+  # Where a check or a benchmark runs from. It sits on the same network as
+  # ic-dns, inside the same daemon, so it asks over the wire the fleet's own
+  # clients ask over. Driving dnsperf from the host would measure whatever is
+  # between here and there, and a remote daemon has no route back at all.
+  #
+  # sleep rather than the image's shell: an application container with no tty
+  # exits the moment that does, and this one has to be there to exec into.
+  debug:
+    image: ghcr.io/lxc/incus-compose/debug:latest
+    container_name: debug
+    build:
+      context: ../../container/debug
+      dockerfile: Containerfile
+    entrypoint: ["sleep", "infinity"]
+
+secrets:
+  client-crt:
+    file: $HOME/.config/incus/client.crt
+  client-key:
+    file: $HOME/.config/incus/client.key
+
+volumes:
+  # Named data, and read back as vol-data by `just ic-dns-cold-stats`. It is
+  # the only thing in this stack that outlives a down: the certificate is
+  # borrowed and the records can be re-read, but the zone serials cannot be
+  # recovered from anywhere.
+  data:
+
+networks:
+  default:
+    x-incus:
+      # An explicit address, which is what lets ic-dns pin one - and what makes
+      # incus-compose derive a DHCP range that leaves room below it. nat has to
+      # be said out loud with it: Incus turns it on by itself only for a subnet
+      # it drew, so an explicit one without this line has no route out.
+      ipv4.address: "${IPV4_GATEWAY}/24"

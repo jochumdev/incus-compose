@@ -1,0 +1,43 @@
+name: beta
+
+x-incus:
+  "user.label.dns.scope": "${SUITE_SCOPE}"
+
+# The mirror of alpha/. See that file for what this fixture is for.
+#
+#   beta-api   shared, beta-net
+#   beta-db            beta-net
+x-container-template: &template
+  image: ghcr.io/lxc/incus-compose/debug:latest
+  build:
+    context: ${PROJECT_ROOT}/container/debug/
+    dockerfile: Containerfile
+  dns:
+    - "${IPV4_IC_DNS}"
+  dns_search:
+    - ${DNS_SEARCH}
+  deploy:
+    resources:
+      limits:
+        cpus: 1
+
+services:
+  beta-api:
+    <<: *template
+    networks:
+      shared:
+      beta-net:
+
+  beta-db:
+    <<: *template
+    networks:
+      beta-net:
+
+networks:
+  # See alpha/compose.yaml.
+  shared:
+    external: true
+    name: ${DNS_PROJECT}:dns
+
+  beta-net:
+    internal: true

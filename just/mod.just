@@ -26,7 +26,7 @@ modules:
 
     echo "{{ justfile_directory() }}"
 
-    for m in benchmarks/coredns/ecs_view benchmarks/coredns/kubernetes; do
+    for m in benchmarks/ic-dns/ecs_view benchmarks/ic-dns/kubernetes; do
         if [ -f "{{ justfile_directory() }}/$m/go.mod" ]; then
             echo "{{ justfile_directory() }}/$m"
         fi
@@ -45,13 +45,13 @@ modules:
 #   client/, iclient/,   the library packages, at the root because that is where
 #   shared/, incustrust/ incus-compose has them and their import path is what a
 #                        library user wrote down. Imported downward only: never
-#                        reaches coredns/, cmd/, ievent/ or benchmarks/.
+#                        reaches cmd/, ievent/ or benchmarks/.
 #   internal/testlib     the same direction. internal/ keeps it off a library
 #                        user, this keeps it off the packages it serves.
 #
-# A package that does not exist is a failure, not a pass. The rule above used to
-# name coredns/plugin/ecs_view, and when that moved the check went quietly
-# vacuous - which is exactly the thing a check is for.
+# A package that does not exist is a failure, not a pass: a rule naming one that
+# has since moved goes quietly vacuous, which is exactly the thing a check is
+# for.
 #
 # A tree the branch simply does not carry yet is the one exception, and it is
 # announced rather than passed over in silence. The gate is the top directory,
@@ -104,7 +104,7 @@ boundary:
         fi
 
         check "$dir" \
-            '^github.com/lxc/incus-compose/(coredns|cmd|ievent|benchmarks)(/|$)' \
+            '^github.com/lxc/incus-compose/(cmd|ievent|benchmarks)(/|$)' \
             'anything that consumes it'
     done
 
@@ -133,13 +133,13 @@ fix path="./...":
 #
 # Plain tidy, in every module, with nothing injected. The replace-and-strip
 # dance is gone with go.work: the root module needs no help resolving itself,
-# and benchmarks/coredns/ecs_view carries a permanent replace back to it.
+# and benchmarks/ic-dns/ecs_view carries a permanent replace back to it.
 [doc("Run `go mod tidy` in every module")]
 tidy:
     #!/usr/bin/env bash
     set -uo pipefail
 
-    # Reported rather than fatal: benchmarks/coredns/kubernetes cannot be tidied
+    # Reported rather than fatal: benchmarks/ic-dns/kubernetes cannot be tidied
     # at all, since the CoreDNS kubernetes plugin needs k8s.io/api packages
     # @latest has dropped.
     failed=()
