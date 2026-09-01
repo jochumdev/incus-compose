@@ -393,6 +393,7 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 
 // updateDNSAliases reads raw.dnsmasq from Incus, replaces records for
 // ownedServices with newIPs (preserving all other records), and writes back.
+// Non-bridge networks are skipped: raw.dnsmasq is a bridge-only option.
 // Setting raw.dnsmasq disables AppArmor for the dnsmasq process (not containers).
 // The update is idempotent: if the resulting config is unchanged, dnsmasq is not restarted.
 func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, newIPs map[string][]string) error {
@@ -408,6 +409,11 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 	net, etag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
 	if err != nil {
 		return fmt.Errorf("reading network %q: %w", r.Name(), err)
+	}
+
+	if net.Type != "bridge" {
+		r.client.LogDebug("skipping service DNS records: network is not a bridge", "network", r.Name(), "type", net.Type)
+		return nil
 	}
 
 	cAddresses, cCnames, cExtra := DNSmasqParse(net.Config["raw.dnsmasq"])
