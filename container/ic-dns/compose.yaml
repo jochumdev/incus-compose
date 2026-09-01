@@ -22,16 +22,12 @@ name: ic-dns
 # only on it when it happens to listen there.
 
 services:
-  # Built from the repository root, so the image under test is this working
-  # tree. The context is ../.. because this file lives in cmd/ic-dns and a
-  # build context is relative to the compose file.
-  #
-  # It has no dns: of its own - it reaches the Incus API by address, and would
-  # otherwise be asking itself.
   ic-dns:
-    image: ghcr.io/lxc/incus-compose/ic-dns:latest
+    image: ghcr.io/lxc/incus-compose/ic-dns:${VERSION}
     container_name: ic-dns
     build:
+      args:
+        VERSION: ${VERSION}
       context: ../..
       dockerfile: container/ic-dns/Containerfile
 
@@ -90,7 +86,9 @@ services:
     # address, which on a /24 starts at .64.
     networks:
       default:
-        ipv4_address: "${IPV4_IC_DNS}/24"
+        ipv4_address: "${DNS_IPV4}/24"
+        x-incus:
+          ipv4.gateway: "${IC_IPV4_GATEWAY}"
 
     # Live heap is 6 MB for a 480-instance fleet. The rest of what cgroup2
     # charges is anon the Go runtime has not returned, the binary's text as page
@@ -123,12 +121,11 @@ services:
   # sleep rather than the image's shell: an application container with no tty
   # exits the moment that does, and this one has to be there to exec into.
   debug:
-    image: ghcr.io/lxc/incus-compose/debug:latest
+    image: ghcr.io/lxc/incus-compose/debug:${VERSION}
     container_name: debug
     build:
       context: ../../container/debug
       dockerfile: Containerfile
-    entrypoint: ["sleep", "infinity"]
 
 secrets:
   client-crt:
@@ -145,9 +142,5 @@ volumes:
 
 networks:
   default:
-    x-incus:
-      # An explicit address, which is what lets ic-dns pin one - and what makes
-      # incus-compose derive a DHCP range that leaves room below it. nat has to
-      # be said out loud with it: Incus turns it on by itself only for a subnet
-      # it drew, so an explicit one without this line has no route out.
-      ipv4.address: "${IPV4_GATEWAY}/24"
+    external: true
+    name: icompose0

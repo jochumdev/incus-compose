@@ -24,8 +24,7 @@ import 'just/docs.just'
 import 'just/fleet.just'
 import 'just/incus.just'
 
-import 'just/ic-dns-build.just'
-import 'just/ic-dns-compose.just'
+import 'just/dns.just'
 
 [private]
 default:

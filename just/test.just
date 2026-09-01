@@ -19,6 +19,7 @@ v_test_timeout := env("TEST_TIMEOUT", "20m")
 [env("INCUS_COMPOSE_IMAGE_CACHE", "incus-compose-tests-cache")]
 test folder="./..." *args:
     mkdir -p work/logs
+    export PROJECT_ROOT={{ justfile_directory() }}; \
     export DATE=`date +%Y%m%d-%H%M%S`; \
       export INCUS_COMPOSE_TEST_COVERDIR="${PWD}/work/covdata/${DATE}"; \
       mkdir -p "${INCUS_COMPOSE_TEST_COVERDIR}"; \

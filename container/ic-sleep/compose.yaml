@@ -3,4 +3,4 @@ services:
     image: ghcr.io/lxc/incus-compose/ic-sleep:${VERSION}
     build:
       context: ../../
-      dockerfile: cmd/ic-sleep/Dockerfile
+      dockerfile: container/ic-sleep/Containerfile

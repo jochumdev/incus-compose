@@ -1,0 +1,9 @@
+FROM busybox:glibc
+
+ARG TARGETPLATFORM
+ARG VERSION
+
+COPY ${TARGETPLATFORM}/ic-dns /usr/local/bin/ic-dns
+
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/ic-dns", "run"]

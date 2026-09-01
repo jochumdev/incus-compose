@@ -1,0 +1,9 @@
+services:
+  ic-dns:
+    image: ghcr.io/lxc/incus-compose/ic-dns:${VERSION}
+    container_name: ic-dns
+    build:
+      args:
+        VERSION: ${VERSION}
+      context: ../..
+      dockerfile: container/ic-dns/Containerfile

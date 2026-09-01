@@ -2,11 +2,10 @@
 
 # Drive the ic-dns compose stack. Args go to incus-compose, so `up -d`, `down`,
 # `logs` and `incus ...` all work.
-ic-dns-compose *args:
+dns-compose *args:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Using remote '${INCUS_REMOTE-"local"}':" >&2
-    command -v incus-compose >/dev/null || { echo "incus-compose is missing" >&2; exit 1; }
 
     # Values, not directives. There is no Corefile any more: every one of these
     # is a flag of `ic-dns run`, so what goes in is what comes out.
@@ -25,21 +24,8 @@ ic-dns-compose *args:
     # /metrics, /health and /ready off with it.
     export DNS_HTTP="${DNS_HTTP-:${PROMETHEUS_PORT}}"
 
-    # Drawn from the checkout path, not at random: two checkouts get different
-    # /24s, and one checkout gets the same /24 every time - a fresh draw would
-    # move the network out from under a stack already up.
-    if [[ -z "${DNS_SUBNET:-}" ]]; then
-      hash=$(printf '%s' "${PWD}" | cksum | cut -d' ' -f1)
-      DNS_SUBNET="10.$(( (hash / 256) % 256 )).$(( hash % 256 ))"
-    fi
-
-    # .1 is the bridge. incus-compose starts the DHCP range a quarter in - .64 on
-    # a /24 - so a pinned address has to sit below that.
-    export IPV4_GATEWAY="${DNS_SUBNET}.1"
-    export IPV4_IC_DNS="${DNS_SUBNET}.10"
-
-    # The cache in front, beside ic-dns rather than instead of it.
-    export IPV4_UNBOUND="${DNS_SUBNET}.11"
+    export DNS_IPV4="${IC_SUBNET}.10"
+    export IC_IPV4_GATEWAY="${IC_SUBNET}.1"
 
     # The identity `incus` itself uses - compose.yaml reads client.crt and
     # client.key out of it, which is what makes this a no-token setup.
@@ -75,7 +61,7 @@ ic-dns-compose *args:
       # precisely because it listens on all of them.
       [[ -n "${listen}" ]] || { echo "incusd has no core.https_address, set INCUS_ENDPOINT" >&2; exit 1; }
 
-      host="${IPV4_GATEWAY}"
+      host="${IC_IPV4_GATEWAY}"
     elif [[ ! "${host}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
       # A named remote on some other host. Resolve it here, where the name still
       # means what it does to us.
@@ -87,19 +73,15 @@ ic-dns-compose *args:
 
     export INCUS_ENDPOINT="https://${host}:${port}"
 
-    echo "remote ${remote}  endpoint ${INCUS_ENDPOINT}  port ${DNS_PORT}  marker '${DNS_PROJECT_MARKER}'" >&2
-
-    # What a stack started now would get, not what the running one has - the two
-    # part company once a stack outlives the shell that started it. Skipped for
-    # `incus ...`, which only proxies the CLI at a stack already up.
-    if [[ "${1:-}" != incus ]]; then
-      echo "renders  subnet ${DNS_SUBNET}.0/24  ic-dns ${IPV4_IC_DNS}  echo_subnet=${DNS_ECHO_SUBNET:-false}" >&2
-    fi
-
     # --os-env because incus-compose reads .env files only, and everything above
     # is an OS variable. -P names the project directory, since compose.yaml lives
     # in cmd/ic-dns. exec, so Ctrl-C reaches incus-compose and not this script.
-    exec go run ./cmd/incus-compose -P {{ justfile_directory() }}/cmd/ic-dns --os-env "$@"
+    just run -P container/ic-dns --os-env "$@"
+
+# Run the ServeDNS benchmarks. No -race: that would measure the race detector.
+# Two modules since the restructure - ecs_view is ours, kubernetes the yardstick.
+dns-bench module="benchmarks/ic-dns/ecs_view" *args:
+    go -C {{ module }} test -run '^$' -bench . -benchmem ./... "${@:2}"
 
 # The numbers a benchmark row is written in, taken from the cold store rather
 # than from Incus - so it is the fleet as this binary saw it, and readable while
@@ -122,7 +104,7 @@ ic-dns-compose *args:
 #                          be low - every one of them at 1 means the serials did
 #                          not survive, and every secondary re-transfers.
 [doc("Fleet shape from the enricher store, and the serials dns published")]
-ic-dns-cold-stats:
+dns-cold-stats:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -226,11 +208,11 @@ ic-dns-cold-stats:
 # Asks ic-dns for every instance in the stress fleet and counts what answers.
 # Addresses are ignored - an answer is an answer, which is the whole question.
 #
-#   just ic-dns-verify-dns                          # count what answers
-#   just ic-dns-verify-dns -b -- -c 50 -l 30        # hand the same names to dnsperf
-#   just ic-dns-verify-dns -u                       # through the unbound in front
-#   just ic-dns-verify-dns -r                       # after a fleet went up or down
-#   just ic-dns-verify-dns --help                   # every option, and its variable
+#   just dns-verify                          # count what answers
+#   just dns-verify -b -- -c 50 -l 30        # hand the same names to dnsperf
+#   just dns-verify -u                       # through the unbound in front
+#   just dns-verify -r                       # after a fleet went up or down
+#   just dns-verify --help                   # every option, and its variable
 #
 # -u asks unbound instead of ic-dns, with the same queries: the client subnet
 # asserted per query is what ic-dns keys a view on and what unbound keys its
@@ -246,7 +228,7 @@ ic-dns-cold-stats:
 # every instance to compute UsedBy per network - so paying it per run makes the
 # daemon look like the queries are loading it.
 [doc("Ask ic-dns for every instance in the fleet, from the debug instance. -b runs dnsperf, -u asks unbound")]
-ic-dns-verify-dns *args:
+dns-verify *args:
     #!/usr/bin/env bash
     set -u
 
@@ -430,7 +412,7 @@ ic-dns-verify-dns *args:
     }
 
     push "${list}" debug/tmp/dns-targets
-    push just/ic-dns-verify-dns.sh debug/tmp/verify.sh --mode 0755
+    push just/dns-verify-dns.sh debug/tmp/verify.sh --mode 0755
 
     # A pushed queries.txt is used as it stands, which is what makes it worth
     # curating by hand. -r rebuilds it from the fleet instead.

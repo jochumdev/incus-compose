@@ -5,4 +5,4 @@ services:
       args:
         VERSION: ${VERSION}
       context: ../../
-      dockerfile: cmd/ic-healthd/Dockerfile
+      dockerfile: container/ic-healthd/Containerfile

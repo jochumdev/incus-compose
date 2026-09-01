@@ -1,10 +1,9 @@
 FROM busybox:glibc
 
 ARG TARGETPLATFORM
-ARG APP_PATH=/usr/local/bin/ic-healthd
 ARG VERSION
 
-COPY ${TARGETPLATFORM}/ic-healthd ${APP_PATH}
+COPY ${TARGETPLATFORM}/ic-healthd /usr/local/bin/ic-healthd
 
 USER 65534:65534
 ENTRYPOINT ["/usr/local/bin/ic-healthd", "run"]
