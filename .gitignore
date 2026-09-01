@@ -1,9 +1,3 @@
-.claude/
-*.local.json
-*.local.md
-
-.mcp.json
-
 work/
 
 # Its generated with random host only data, still no need to commit.
