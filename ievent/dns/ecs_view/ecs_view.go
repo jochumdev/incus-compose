@@ -2,6 +2,7 @@ package ecs_view
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/coredns/coredns/plugin"
@@ -27,6 +28,8 @@ type Sink interface {
 // ECSView serves records filtered per querier: a read-only view onto what a
 // source publishes, deriving and accumulating nothing.
 type ECSView struct {
+	logger *slog.Logger
+
 	Next plugin.Handler
 
 	// Server labels this engine's metrics. A field rather than the context key
@@ -54,8 +57,8 @@ type ECSView struct {
 
 // New returns an ECSView already holding an empty snapshot, so the query path
 // never has to check for nil.
-func New() *ECSView {
-	v := &ECSView{}
+func New(logger *slog.Logger) *ECSView {
+	v := &ECSView{logger: logger}
 	v.current.Store(EmptySnapshot())
 
 	return v

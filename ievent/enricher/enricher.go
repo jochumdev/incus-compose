@@ -86,6 +86,8 @@ const poolDelay = 20 * time.Millisecond
 // Everything below the inbox belongs to the goroutine Run owns; a pool worker
 // touches nothing here, which is what keeps this package free of a mutex.
 type Plugin struct {
+	logger *slog.Logger
+
 	args iutil.SetupArgs
 	opts options
 
@@ -120,6 +122,8 @@ type Plugin struct {
 	// it creates: those never pass the source, so nothing else would.
 	chain iutil.ChainState
 }
+
+var _ iutil.Plugin = (*Plugin)(nil)
 
 // options is what main decides about this plugin, kept separate from a shared
 // iutil options type since nothing here has a debounce window.
@@ -185,7 +189,7 @@ func StoreInterval(d time.Duration) Option { return func(o *options) { o.StoreIn
 //
 // ReadTimeout starts when a worker picks a read up, not when it is offered to
 // the pool, so time spent waiting for a worker is never charged to the daemon.
-func New(opts ...Option) *Plugin {
+func New(logger *slog.Logger, opts ...Option) *Plugin {
 	o := options{
 		Workers:       defaultWorkers,
 		ReadTimeout:   defaultReadTimeout,
@@ -199,12 +203,13 @@ func New(opts ...Option) *Plugin {
 		opt(&o)
 	}
 
-	slog.Info("Starting", "plugin", name, "config", o)
+	logger.Info("Starting", "plugin", name, "config", o)
 
 	// Unbuffered, so the sweeper's pace is felt rather than run ahead of.
 	sweeps := make(chan sweepMsg)
 
 	p := &Plugin{
+		logger: logger,
 		opts:   o,
 		inbox:  make(chan *iutil.Event, o.InboxSize),
 		sweeps: sweeps,
@@ -322,7 +327,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 		}
 	}()
 
-	runSweeper(sweepCtx, p.sweepArgs(), p.opts.SweepInterval)
+	runSweeper(sweepCtx, p.logger, p.sweepArgs(), p.opts.SweepInterval)
 
 	if p.storeIn != nil {
 		ticker := time.NewTicker(p.opts.StoreInterval)
@@ -341,12 +346,12 @@ func (p *Plugin) Run(ctx context.Context) error {
 			select {
 			case <-p.storeDone:
 			case <-time.After(storeStopTimeout):
-				slog.Warn("the fleet was still being written when this stopped waiting",
+				p.logger.Warn("the fleet was still being written when this stopped waiting",
 					"plugin", name)
 			}
 		}()
 
-		runStore(storeCtx, p.storeArgs())
+		runStore(storeCtx, p.logger, p.storeArgs())
 	}
 
 	drain := func(cmd iutil.Command) {

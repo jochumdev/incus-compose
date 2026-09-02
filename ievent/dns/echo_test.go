@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"log/slog"
 	"net"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 func answering(t *testing.T, echo bool) *adapter {
 	t.Helper()
 
-	p := New(EchoSubnet(echo), TTL(30), Suffix("incus"))
+	p := New(slog.Default(), EchoSubnet(echo), TTL(30), Suffix("incus"))
 
 	// Answering is all this needs, so it never runs: a successor to hand each
 	// event to, and no chain after it.

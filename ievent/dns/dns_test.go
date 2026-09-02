@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"testing"
 	"time"
@@ -21,14 +22,13 @@ import (
 func plugged(t *testing.T, opts ...Option) (*Plugin, chan *iutil.Event, chan iutil.Command, chan iutil.Command) {
 	t.Helper()
 
-	p := New(opts...)
+	p := New(slog.Default(), opts...)
 
 	seen := make(chan *iutil.Event, 64)
 	in := make(chan iutil.Command)
 	raised := make(chan iutil.Command, 8)
 
 	err := p.Setup(iutil.SetupArgs{
-		Context:    t.Context(),
 		Next:       func(ev *iutil.Event) { seen <- ev },
 		CommandIn:  in,
 		CommandOut: raised,
@@ -268,7 +268,7 @@ func TestReadinessIsEdges(t *testing.T) {
 func TestLiveFoldPublishesOnceWarm(t *testing.T) {
 	t.Parallel()
 
-	p := New(Suffix("incus"))
+	p := New(slog.Default(), Suffix("incus"))
 	p.next = func(_ *iutil.Event) {}
 
 	// Two instances, so the zone survives web's delete and the answer below is

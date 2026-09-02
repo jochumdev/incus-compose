@@ -2,6 +2,7 @@ package ecs_view
 
 import (
 	"context"
+	"log/slog"
 	"net/netip"
 	"testing"
 
@@ -147,7 +148,7 @@ func testPiece() *Snapshot {
 func engineWith(t *testing.T) *ECSView {
 	t.Helper()
 
-	v := New()
+	v := New(slog.Default())
 	v.Replace(testPiece())
 	v.SetHealthy(true)
 
@@ -354,7 +355,7 @@ func TestShadowingClaimsItsNamesAndNothingElse(t *testing.T) {
 		at("10.0.1.0/24", apiView).
 		done()
 
-	v := New()
+	v := New(slog.Default())
 	v.Replace(snap)
 	v.SetHealthy(true)
 
@@ -458,7 +459,7 @@ func TestAmbiguousViewRefuses(t *testing.T) {
 		at("10.0.1.0/24", apiView).
 		done()
 
-	v := New()
+	v := New(slog.Default())
 	v.Replace(snap)
 	v.SetHealthy(true)
 
@@ -519,7 +520,7 @@ func TestZoneOfMatchesTheLongestZone(t *testing.T) {
 func TestUnhealthyClampsTheTTL(t *testing.T) {
 	t.Parallel()
 
-	v := New()
+	v := New(slog.Default())
 	v.Replace(testPiece())
 	v.SetHealthy(false)
 

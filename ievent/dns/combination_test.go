@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"log/slog"
 	"testing"
 
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
@@ -201,8 +202,8 @@ func TestAContestedAliasIsAnsweredForNobody(t *testing.T) {
 	s.apply("shop/api",
 		instanceOn("shop", "api", map[string]string{metaAliases: "www"}, map[string]string{"net-a": "10.0.0.6"}), 5)
 
-	view := ecs_view.New()
-	wire(newXFR(nil), view, nil)
+	view := ecs_view.New(slog.Default())
+	wire(newXFR(slog.Default(), nil), view, nil)
 
 	view.Replace(s.snapshot())
 	view.SetHealthy(true)

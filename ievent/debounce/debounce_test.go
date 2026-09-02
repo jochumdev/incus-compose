@@ -3,6 +3,7 @@ package debounce
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -49,16 +50,15 @@ func newFixture(t *testing.T) *fixture {
 	ctx, cancel := context.WithCancel(t.Context())
 	h := &fixture{
 		t:     t,
-		p:     New(Window(window)),
+		p:     New(slog.Default(), Window(window)),
 		out:   make(chan *iutil.Event, 64),
 		ran:   make(chan error, 1),
 		chain: iutil.ChainWarm,
 	}
 
 	err := h.p.Setup(iutil.SetupArgs{
-		Context: ctx,
-		Wanted:  wanted,
-		Next:    func(ev *iutil.Event) { h.out <- ev },
+		Wanted: wanted,
+		Next:   func(ev *iutil.Event) { h.out <- ev },
 	})
 	if err != nil {
 		t.Fatalf("Setup: %s", err)
@@ -393,10 +393,9 @@ func TestDrainClosesOpenWindows(t *testing.T) {
 	raised := make(chan iutil.Command, 1)
 
 	// An hour, so the window is one only the shutdown can close.
-	p := New(Window(time.Hour))
+	p := New(slog.Default(), Window(time.Hour))
 
 	err := p.Setup(iutil.SetupArgs{
-		Context:    ctx,
 		Wanted:     wanted,
 		Next:       func(ev *iutil.Event) { out <- ev },
 		CommandIn:  in,
@@ -445,9 +444,9 @@ func TestRunReturnsAfterCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	p := New(Window(window))
+	p := New(slog.Default(), Window(window))
 
-	err := p.Setup(iutil.SetupArgs{Context: ctx, Wanted: wanted, Next: func(_ *iutil.Event) {}})
+	err := p.Setup(iutil.SetupArgs{Wanted: wanted, Next: func(_ *iutil.Event) {}})
 	if err != nil {
 		t.Fatalf("Setup: %s", err)
 	}
@@ -473,7 +472,7 @@ func TestFullInboxDropsRatherThanBlocks(t *testing.T) {
 
 	// No Setup, so nothing drains the inbox: Handle has to cope on its own.
 	seen := []*iutil.Event{}
-	p := New(Window(window))
+	p := New(slog.Default(), Window(window))
 	p.next = func(ev *iutil.Event) { seen = append(seen, ev) }
 
 	for range defaultInboxSize {

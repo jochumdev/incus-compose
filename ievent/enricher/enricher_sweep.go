@@ -2,7 +2,6 @@ package enricher
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
@@ -34,7 +33,7 @@ func (p *Plugin) restartSweep(ctx context.Context) {
 	sweepCtx, stopSweeping := context.WithCancel(ctx)
 	p.sweeperCancel = stopSweeping
 
-	runSweeper(sweepCtx, p.sweepArgs(), p.opts.SweepInterval)
+	runSweeper(sweepCtx, p.logger, p.sweepArgs(), p.opts.SweepInterval)
 }
 
 // acceptSweep takes one message from the sweeper.
@@ -91,7 +90,7 @@ func (p *Plugin) acceptSweep(ctx context.Context, msg sweepMsg) {
 		p.sweepEnd(ctx)
 
 	case sweepActionFailed:
-		slog.Warn("the run could not read part of the fleet, serving what is held",
+		p.logger.Warn("the run could not read part of the fleet, serving what is held",
 			"plugin", name, "err", msg.err)
 	}
 }

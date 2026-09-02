@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -151,7 +152,7 @@ func (l *listener) open(_ context.Context) (<-chan incusapi.Event, error) {
 func mustSource(t *testing.T, plugins ...iutil.Plugin) *Source {
 	t.Helper()
 
-	s, err := New(t.Context(), nil, plugins)
+	s, err := New(slog.Default(), nil, plugins)
 	require.NoError(t, err)
 
 	return s
@@ -180,7 +181,7 @@ func TestNewRefusesAPluginListedTwice(t *testing.T) {
 
 	twice := newRecorder("trace", nil)
 
-	_, err := New(t.Context(), nil, []iutil.Plugin{twice, newRecorder("dns", nil), twice})
+	_, err := New(slog.Default(), nil, []iutil.Plugin{twice, newRecorder("dns", nil), twice})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "trace")
 }
@@ -193,7 +194,7 @@ func TestNewStopsOnASetupError(t *testing.T) {
 	bad := newRecorder("dns", nil)
 	bad.setupErr = errors.New("no data_dir")
 
-	_, err := New(t.Context(), nil, []iutil.Plugin{newRecorder("log", nil), bad})
+	_, err := New(slog.Default(), nil, []iutil.Plugin{newRecorder("log", nil), bad})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dns")
 }
@@ -317,7 +318,7 @@ func TestDrainSkipsAPluginThatIsNotRunning(t *testing.T) {
 	var asked []string
 
 	// log has no Run at all, so the source never asks it.
-	quiet := log.New(log.At("quiet"))
+	quiet := log.New(slog.Default(), log.At("quiet"))
 	gone := newDrainer("gone", &asked)
 	live := newDrainer("live", &asked)
 

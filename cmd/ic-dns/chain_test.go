@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"testing"
 
@@ -16,9 +17,9 @@ import (
 // between them that may not go.
 func positions() []position {
 	return []position{
-		{plugin: log.New(log.At("arrival")), optional: true},
-		{plugin: log.New(log.At("enricher")), optional: false},
-		{plugin: log.New(log.At("served")), optional: true},
+		{plugin: log.New(slog.Default(), log.At("arrival")), optional: true},
+		{plugin: log.New(slog.Default(), log.At("enricher")), optional: false},
+		{plugin: log.New(slog.Default(), log.At("served")), optional: true},
 	}
 }
 
@@ -58,7 +59,7 @@ func TestChainLogPositionsNeedALevel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			composed := chain(tc.cfg)
+			composed := chain(slog.Default(), tc.cfg)
 
 			plugins := make([]iutil.Plugin, 0, len(composed))
 			for _, p := range composed {
@@ -143,8 +144,8 @@ func TestAssemble(t *testing.T) {
 // takes it out of both lists at once. A runner left behind is a Wait on nothing.
 func TestAssembleFindsRunners(t *testing.T) {
 	ps := []position{
-		{plugin: log.New(log.At("arrival")), optional: true},
-		{plugin: &runnerPlugin{Plugin: log.New(log.At("worker"))}, optional: true},
+		{plugin: log.New(slog.Default(), log.At("arrival")), optional: true},
+		{plugin: &runnerPlugin{Plugin: log.New(slog.Default(), log.At("worker"))}, optional: true},
 	}
 
 	_, runners, err := assemble(ps, nil)

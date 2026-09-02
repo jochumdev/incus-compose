@@ -44,7 +44,7 @@ type runner interface {
 
 // chain is the compiled-in list, in the order events travel it. debounce sits
 // before the enricher so a burst costs one read instead of one per event.
-func chain(cfg config) []position {
+func chain(logger *slog.Logger, cfg config) []position {
 	out := []position{}
 
 	dnsPlugins, stop := queryChain(cfg)
@@ -54,19 +54,50 @@ func chain(cfg config) []position {
 	trace := shared.StringToSlogLevel(cfg.Log) <= shared.LevelTrace
 
 	if trace {
-		out = append(out, logAt(cfg, "arrival")...)
+		out = append(out, logAt(logger, cfg, "arrival")...)
 	}
 
 	out = append(out,
-		position{plugin: debounce.New(debounce.Window(cfg.DebounceWindow)), optional: true},
+		position{plugin: debounce.New(logger, debounce.Window(cfg.DebounceWindow)), optional: true},
 	)
 
 	if trace {
-		out = append(out, logAt(cfg, "received")...)
+		out = append(out, logAt(logger, cfg, "received")...)
+	}
+
+	serves := func(cfg config) func(*incusapi.Project) bool {
+		if len(cfg.Projects) > 0 {
+			return func(p *incusapi.Project) bool {
+				serve := slices.Contains(cfg.Projects, p.Name)
+				if !serve {
+					logger.Debug("Not serving project", "project", p.Name)
+				} else {
+					logger.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
+				}
+				return serve
+			}
+		}
+
+		if cfg.ProjectMarker == "" {
+			// Every project the certificate can see, which is the only answer that
+			// works on a plain Incus.
+			return nil
+		}
+
+		return func(p *incusapi.Project) bool {
+			serve := p.Config[cfg.ProjectMarker] == cfg.ProjectMarkerValue
+			if !serve {
+				logger.Debug("Not serving project", "project", p.Name)
+			} else {
+				logger.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
+			}
+			return serve
+		}
 	}
 
 	out = append(out,
 		position{plugin: enricher.New(
+			logger,
 			enricher.Workers(cfg.Workers),
 			enricher.ReadTimeout(cfg.ReadTimeout),
 			enricher.ReadDelay(cfg.ReadDelay),
@@ -75,10 +106,11 @@ func chain(cfg config) []position {
 		)},
 	)
 
-	out = append(out, logAt(cfg, "enriched")...)
+	out = append(out, logAt(logger, cfg, "enriched")...)
 
 	out = append(out,
 		position{plugin: dns.New(
+			logger,
 			dns.Listen(cfg.DNSAddr),
 			dns.Chain(dnsPlugins),
 			dns.Stop(stop),
@@ -92,10 +124,10 @@ func chain(cfg config) []position {
 		)},
 		// After dns, so a readiness it raises is folded before this position
 		// sees the event that caused it. Any position works; this one reads best.
-		position{plugin: http.New(http.Listen(cfg.HTTPAddr), http.Metrics(cfg.Metrics), http.Pprof(cfg.Pprof)), optional: true},
+		position{plugin: http.New(logger, http.Listen(cfg.HTTPAddr), http.Metrics(cfg.Metrics), http.Pprof(cfg.Pprof)), optional: true},
 	)
 
-	out = append(out, logAt(cfg, "served")...)
+	out = append(out, logAt(logger, cfg, "served")...)
 
 	return out
 }
@@ -103,12 +135,12 @@ func chain(cfg config) []position {
 // logAt is one log position, or nothing at all when --log is empty. Every
 // position prints a line per event, so a run not reading them does not pay for
 // them - which is the default, and why this returns a slice rather than a plugin.
-func logAt(cfg config, at string) []position {
+func logAt(logger *slog.Logger, cfg config, at string) []position {
 	if cfg.Log == "" {
 		return nil
 	}
 
-	return []position{{plugin: log.New(log.At(at), log.Level(cfg.Log)), optional: true}}
+	return []position{{plugin: log.New(logger, log.At(at), log.Level(cfg.Log)), optional: true}}
 }
 
 // queryChain is what answers after the engine, in CoreDNS's own order: cache,
@@ -141,38 +173,6 @@ func queryChain(cfg config) ([]plugin.Plugin, func()) {
 
 	// forward is the only one here with anything to stop: its health checkers.
 	return dnsPlugins, func() { _ = fwd.OnShutdown() }
-}
-
-// serves decides which projects this binary reads: an explicit list, otherwise
-// the marker a project opts in with.
-func serves(cfg config) func(*incusapi.Project) bool {
-	if len(cfg.Projects) > 0 {
-		return func(p *incusapi.Project) bool {
-			serve := slices.Contains(cfg.Projects, p.Name)
-			if !serve {
-				slog.Debug("Not serving project", "project", p.Name)
-			} else {
-				slog.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
-			}
-			return serve
-		}
-	}
-
-	if cfg.ProjectMarker == "" {
-		// Every project the certificate can see, which is the only answer that
-		// works on a plain Incus.
-		return nil
-	}
-
-	return func(p *incusapi.Project) bool {
-		serve := p.Config[cfg.ProjectMarker] == cfg.ProjectMarkerValue
-		if !serve {
-			slog.Debug("Not serving project", "project", p.Name)
-		} else {
-			slog.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
-		}
-		return serve
-	}
 }
 
 // assemble drops what --exclude named and reports what is left, plus the ones

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log/slog"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func ready(t *testing.T, p *Plugin) int {
 func TestReadinessLatchesRatherThanLevels(t *testing.T) {
 	t.Parallel()
 
-	p := New()
+	p := New(slog.Default())
 	p.next = func(_ *iutil.Event) {}
 
 	send(p, iutil.ActionConnected, iutil.ChainCold)
@@ -55,7 +56,7 @@ func TestReadinessLatchesRatherThanLevels(t *testing.T) {
 func TestReadinessNamesWhichHalfIsMissing(t *testing.T) {
 	t.Parallel()
 
-	p := New()
+	p := New(slog.Default())
 	p.next = func(_ *iutil.Event) {}
 
 	w := httptest.NewRecorder()

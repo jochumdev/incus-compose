@@ -30,6 +30,8 @@ type coldState struct {
 }
 
 type coldStore struct {
+	logger *slog.Logger
+
 	// path is empty when no data directory was configured, which disables every
 	// method here unless mem is on.
 	path string
@@ -48,14 +50,14 @@ type coldStore struct {
 
 // newColdStore prepares the store under dir. An empty dir disables it, and so
 // does one that cannot be created: the plugin serves either way.
-func newColdStore(dir string) *coldStore {
+func newColdStore(logger *slog.Logger, dir string) *coldStore {
 	if dir == "" {
 		return &coldStore{}
 	}
 
 	err := os.MkdirAll(dir, 0o700)
 	if err != nil {
-		slog.Warn("creating the data directory, continuing without a cold store",
+		logger.Warn("creating the data directory, continuing without a cold store",
 			"dir", dir, "err", err)
 
 		return &coldStore{}
@@ -125,7 +127,7 @@ func (c *coldStore) write(b []byte) {
 
 	f, err := os.CreateTemp(filepath.Dir(c.path), ".cold-*")
 	if err != nil {
-		slog.Warn("writing the cold store", "err", err)
+		c.logger.Warn("writing the cold store", "err", err)
 
 		return
 	}
@@ -137,7 +139,7 @@ func (c *coldStore) write(b []byte) {
 	discard := func(err error) {
 		_ = os.Remove(tmp)
 
-		slog.Warn("writing the cold store", "err", err)
+		c.logger.Warn("writing the cold store", "err", err)
 	}
 
 	_, err = f.Write(b)
@@ -185,7 +187,7 @@ func (c *coldStore) load() map[string]zoneSerial {
 	b, err := os.ReadFile(c.path)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			slog.Warn("reading the cold store, starting cold", "path", c.path, "err", err)
+			c.logger.Warn("reading the cold store, starting cold", "path", c.path, "err", err)
 		}
 
 		return nil
@@ -193,7 +195,7 @@ func (c *coldStore) load() map[string]zoneSerial {
 
 	serials, err := decodeCold(b)
 	if err != nil {
-		slog.Warn("reading the cold store, starting cold", "path", c.path, "err", err)
+		c.logger.Warn("reading the cold store, starting cold", "path", c.path, "err", err)
 
 		return nil
 	}

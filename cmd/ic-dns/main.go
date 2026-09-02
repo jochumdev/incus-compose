@@ -247,7 +247,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	// chain's log positions print rather than turning them on and showing nothing.
 	level := shared.StringToSlogLevel(cfg.Log)
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(cmd.ErrWriter, &slog.HandlerOptions{Level: level})))
+	logger := slog.New(slog.NewTextHandler(cmd.ErrWriter, &slog.HandlerOptions{Level: level}))
 
 	// CoreDNS's own logger, and ecs_view's, arriving as slog records.
 	ievlog.Hook(level)
@@ -255,15 +255,15 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	// Container CPU limits are a quota, not a core count, so GOMAXPROCS has to
 	// be told.
 	undo, err2 := maxprocs.Set(maxprocs.Logger(func(format string, args ...any) {
-		slog.Info(fmt.Sprintf(format, args...))
+		logger.Info(fmt.Sprintf(format, args...))
 	}))
 	if err2 != nil {
-		slog.Warn("setting GOMAXPROCS", "err", err2)
+		logger.Warn("setting GOMAXPROCS", "err", err2)
 	}
 
 	defer undo()
 
-	slog.Info("Starting",
+	logger.Info("Starting",
 		"version", version,
 		"pid", os.Getpid(),
 		"incus", cfg.endpoint(),
@@ -273,7 +273,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 	// One attribute each rather than a struct printed with %+v, so a single
 	// field can be grepped out.
-	slog.Debug("configuration",
+	logger.Debug("configuration",
 		"projects", cfg.Projects,
 		"project_marker", cfg.ProjectMarker+"="+cfg.ProjectMarkerValue,
 		"forward", cfg.Forward,
@@ -291,16 +291,16 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		"pprof", cfg.Pprof,
 	)
 
-	return run(ctx, cfg)
+	return run(ctx, logger, cfg)
 }
 
 // run is everything with a lifetime, in the order it starts and the reverse of
 // the order it stops.
-func run(ctx context.Context, cfg config) error {
+func run(ctx context.Context, logger *slog.Logger, cfg config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	plugins, runners, err := assemble(chain(cfg), cfg.Exclude)
+	plugins, runners, err := assemble(chain(logger, cfg), cfg.Exclude)
 	if err != nil {
 		return err
 	}
@@ -310,7 +310,7 @@ func run(ctx context.Context, cfg config) error {
 		names = append(names, p.Name())
 	}
 
-	slog.Info("chain", "plugins", names)
+	logger.Info("chain", "plugins", names)
 
 	conn, err := incustrust.Connect(ctx, incustrust.Config{
 		Name:       certName,
@@ -332,7 +332,7 @@ func run(ctx context.Context, cfg config) error {
 
 	// Wiring only: nothing is dialed and no goroutine starts, so a configuration
 	// that cannot work is refused before anything is running.
-	src, err := source.New(ctx, conn, plugins)
+	src, err := source.New(logger, conn, plugins)
 	if err != nil {
 		return fmt.Errorf("building the source: %w", err)
 	}
@@ -347,7 +347,7 @@ func run(ctx context.Context, cfg config) error {
 	srcWg.Go(func() {
 		err := src.Run(sourceCtx)
 		if err != nil {
-			slog.Error("running the source", "err", err)
+			logger.Error("running the source", "err", err)
 			cancel()
 		}
 	})
@@ -356,7 +356,7 @@ func run(ctx context.Context, cfg config) error {
 		pluginWg.Go(func() {
 			err := r.Run(ctx)
 			if err != nil {
-				slog.Error("running a plugin", "plugin", r.Name(), "err", err)
+				logger.Error("running a plugin", "plugin", r.Name(), "err", err)
 				cancel()
 			}
 
@@ -372,7 +372,7 @@ func run(ctx context.Context, cfg config) error {
 
 	select {
 	case s := <-sig:
-		slog.Info("shutting down", "signal", s.String())
+		logger.Info("shutting down", "signal", s.String())
 	case <-ctx.Done():
 	}
 

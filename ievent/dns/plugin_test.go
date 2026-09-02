@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ type resolves struct {
 func fed(t *testing.T, feed ...*iutil.Event) *Plugin {
 	t.Helper()
 
-	p := New(Suffix("example"))
+	p := New(slog.Default(), Suffix("example"))
 	p.next = func(_ *iutil.Event) {}
 
 	for _, ev := range feed {
@@ -170,7 +171,7 @@ func start(t *testing.T, opts ...Option) *running {
 	t.Helper()
 
 	r := &running{
-		p:      New(opts...),
+		p:      New(slog.Default(), opts...),
 		seen:   make(chan *iutil.Event, 64),
 		in:     make(chan iutil.Command),
 		raised: make(chan iutil.Command, 16),
@@ -181,7 +182,6 @@ func start(t *testing.T, opts ...Option) *running {
 	t.Cleanup(cancel)
 
 	require.NoError(t, r.p.Setup(iutil.SetupArgs{
-		Context:    ctx,
 		Next:       func(ev *iutil.Event) { r.seen <- ev },
 		CommandIn:  r.in,
 		CommandOut: r.raised,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
+	"github.com/lxc/incus/v7/shared/logger"
 
 	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/ievent/iutil"
@@ -30,6 +31,8 @@ var errNoConnection = errors.New("no Incus connection")
 // Source reads the Incus event stream and walks each event through the
 // plugin chain, in order.
 type Source struct {
+	logger *slog.Logger
+
 	conn *iclient.Connection
 
 	// head is the first plugin; the rest hangs off it.
@@ -72,8 +75,9 @@ type listenFunc func(ctx context.Context) (<-chan incusapi.Event, error)
 
 // New builds a source over the plugin chain, wiring it backwards so main
 // writes it forwards. An error from any Setup stops the process.
-func New(ctx context.Context, conn *iclient.Connection, plugins []iutil.Plugin) (*Source, error) {
+func New(logger *slog.Logger, conn *iclient.Connection, plugins []iutil.Plugin) (*Source, error) {
 	s := &Source{
+		logger: logger,
 		conn:   conn,
 		wants:  map[string]iutil.Want{},
 		raised: make(chan iutil.Command, commandBuffer),
@@ -107,7 +111,6 @@ func New(ctx context.Context, conn *iclient.Connection, plugins []iutil.Plugin) 
 	}
 
 	args := iutil.SetupArgs{
-		Context:    ctx,
 		Conn:       conn,
 		CommandOut: s.raised,
 		Wanted:     s.wants,
@@ -209,7 +212,7 @@ func (s *Source) session(ctx context.Context) bool {
 
 	events, err := s.listen(sessionCtx)
 	if err != nil {
-		slog.Warn("opening the Incus event listener", "err", err)
+		s.logger.Warn("opening the Incus event listener", "err", err)
 
 		return false
 	}
@@ -235,7 +238,7 @@ func (s *Source) session(ctx context.Context) bool {
 
 		case raw, ok := <-events:
 			if !ok {
-				slog.Warn("the Incus event stream closed")
+				logger.Warn("the Incus event stream closed")
 
 				return true
 			}
@@ -270,7 +273,7 @@ func (s *Source) route(raw incusapi.Event) {
 	ev, err := decodeLifecycle(raw)
 	if err != nil {
 		if !errors.Is(err, errIgnored) {
-			slog.Debug("decoding lifecycle event", "err", err)
+			s.logger.Debug("decoding lifecycle event", "err", err)
 		}
 
 		return

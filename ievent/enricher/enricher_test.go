@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"maps"
 	"net/http"
 	"os"
@@ -216,7 +217,7 @@ func newFixture(t *testing.T, opts ...Option) *fixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &fixture{
 		t:         t,
-		p:         New(append([]Option{Workers(8), ReadTimeout(time.Second)}, opts...)...),
+		p:         New(slog.Default(), append([]Option{Workers(8), ReadTimeout(time.Second)}, opts...)...),
 		out:       make(chan *iutil.Event, 64),
 		in:        make(chan iutil.Command),
 		raised:    make(chan iutil.Command, 8),
@@ -233,7 +234,6 @@ func newFixture(t *testing.T, opts ...Option) *fixture {
 	h.p.reads.fleet = h
 
 	err := h.p.Setup(iutil.SetupArgs{
-		Context:    ctx,
 		Wanted:     wanted,
 		Next:       func(ev *iutil.Event) { h.out <- ev },
 		CommandIn:  h.in,
@@ -543,7 +543,7 @@ func TestFullInboxDropsRatherThanBlocks(t *testing.T) {
 
 	// No Run, so nothing drains the inbox: Handle has to cope on its own.
 	seen := []*iutil.Event{}
-	p := New()
+	p := New(slog.Default())
 	p.args.Next = func(ev *iutil.Event) { seen = append(seen, ev) }
 
 	for range defaultInboxSize {
@@ -719,7 +719,7 @@ func must(value string, _ bool) string { return value }
 func bare(t *testing.T) *Plugin {
 	t.Helper()
 
-	p := New()
+	p := New(slog.Default())
 	p.args.Next = func(*iutil.Event) {}
 
 	require.NoError(t, p.reads.start(1))
@@ -1493,7 +1493,7 @@ func TestRunsAreNotBackToBack(t *testing.T) {
 func TestWantsWhatItActsOnItself(t *testing.T) {
 	t.Parallel()
 
-	got := New().Wants()
+	got := New(slog.Default()).Wants()
 
 	require.Len(t, got, 2)
 

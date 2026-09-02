@@ -86,19 +86,19 @@ func storeSend(in chan *state, s *state) {
 //
 // The clone left in the slot when ctx ends is written before it stops, which is
 // what makes the one offered on the way down the one the next start finds.
-func runStore(ctx context.Context, a storeArgs) {
+func runStore(ctx context.Context, logger *slog.Logger, a storeArgs) {
 	go func() {
 		defer close(a.done)
 
 		for {
 			select {
 			case s := <-a.in:
-				storeWrite(a.write, s)
+				storeWrite(logger, a.write, s)
 
 			case <-ctx.Done():
 				select {
 				case s := <-a.in:
-					storeWrite(a.write, s)
+					storeWrite(logger, a.write, s)
 				default:
 				}
 
@@ -113,10 +113,10 @@ func runStore(ctx context.Context, a storeArgs) {
 // A failure is logged and left. The next clone says everything this one said,
 // and a fleet that could not be written is a slower start next time rather than
 // anything the chain should hear about.
-func storeWrite(write writeFunc, s *state) {
+func storeWrite(logger *slog.Logger, write writeFunc, s *state) {
 	b, err := json.Marshal(s)
 	if err != nil {
-		slog.Warn("the fleet could not be encoded, keeping what was last written",
+		logger.Warn("the fleet could not be encoded, keeping what was last written",
 			"plugin", name, "err", err)
 
 		return
@@ -124,7 +124,7 @@ func storeWrite(write writeFunc, s *state) {
 
 	err = write(b)
 	if err != nil {
-		slog.Warn("the fleet could not be written, keeping what was last written",
+		logger.Warn("the fleet could not be written, keeping what was last written",
 			"plugin", name, "err", err)
 	}
 }

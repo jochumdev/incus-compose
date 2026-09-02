@@ -96,12 +96,7 @@ func (n *InstanceInterface) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Instance is what one Instance read amounted to. Facts, not verdicts: running
-// with no addresses is reported as exactly that, and what it means is the
-// business of whoever asked.
-//
-// Read-only once built, which is what lets one read be shared by pointer with
-// every event derived from it, and with the state that holds it.
+// Instance is what one Instance read amounted to.
 type Instance struct {
 	running bool
 	config  map[string]string
