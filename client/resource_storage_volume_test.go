@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/shared"
 )
 
 // ----------------------------------------------------------------------------
@@ -457,7 +459,7 @@ func TestStorageVolumeEnsure_ConcurrentCreate(t *testing.T) {
 
 	// One project, one volume name, so every worker races to create it.
 	c := newRandomTestClient(t, "volume-race-")
-	name := "ic-vol-" + strings.ToLower(RandString(6))
+	name := "ic-vol-" + strings.ToLower(shared.RandString(6))
 
 	const workers = 6
 	vols := make([]Resource, workers)

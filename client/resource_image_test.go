@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // ----------------------------------------------------------------------------
@@ -459,7 +460,7 @@ func TestImagePullNever_StoreMiss(t *testing.T) {
 
 	// A name the shared test cache cannot already hold; never is expected to
 	// fail without contacting the registry at all.
-	name := "docker.io/library/ic-absent-" + strings.ToLower(RandString(8)) + ":latest"
+	name := "docker.io/library/ic-absent-" + strings.ToLower(shared.RandString(8)) + ":latest"
 	r, err := c.Resource(KindImage, name, &ImageConfig{})
 	require.NoError(t, err)
 
@@ -649,7 +650,7 @@ func TestImageLockStore_SameAliasSerializes(t *testing.T) {
 	skipLocal(t)
 	ctx := t.Context()
 
-	name := "docker.io/library/ic-lock-" + strings.ToLower(RandString(8)) + ":latest"
+	name := "docker.io/library/ic-lock-" + strings.ToLower(shared.RandString(8)) + ":latest"
 	a := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-same-a-"), name)
 	b := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-same-b-"), name)
 
@@ -689,7 +690,7 @@ func TestImageLockStore_DifferentAliasesDoNotBlock(t *testing.T) {
 	skipLocal(t)
 	ctx := t.Context()
 
-	suffix := strings.ToLower(RandString(8))
+	suffix := strings.ToLower(shared.RandString(8))
 	a := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-diff-a-"), "docker.io/library/ic-locka-"+suffix+":latest")
 	b := lockableImage(ctx, t, newRandomTestClient(t, "image-lock-diff-b-"), "docker.io/library/ic-lockb-"+suffix+":latest")
 
@@ -875,12 +876,12 @@ func TestImageLockStore_CustomVolumeIsSeparate(t *testing.T) {
 	skipLocal(t)
 	ctx := t.Context()
 
-	name := "docker.io/library/ic-lockvol-" + strings.ToLower(RandString(8)) + ":latest"
+	name := "docker.io/library/ic-lockvol-" + strings.ToLower(shared.RandString(8)) + ":latest"
 
 	def := lockableImage(ctx, t, newRandomTestClient(t, "image-lockvol-def-"), name)
 
 	other, err := newRandomTestClient(t, "image-lockvol-alt-").Resource(KindImage, name, &ImageConfig{
-		LockVolume: "ic-lock-" + strings.ToLower(RandString(6)),
+		LockVolume: "ic-lock-" + strings.ToLower(shared.RandString(6)),
 	})
 	require.NoError(t, err)
 
@@ -917,8 +918,8 @@ func TestImageLockStore_ConcurrentVolumeCreate(t *testing.T) {
 	// A volume name nothing has created yet, so every worker races to make it.
 	// Distinct aliases keep the per-alias lock from serializing them and
 	// hiding the race.
-	volume := "ic-lock-" + strings.ToLower(RandString(8))
-	suffix := strings.ToLower(RandString(8))
+	volume := "ic-lock-" + strings.ToLower(shared.RandString(8))
+	suffix := strings.ToLower(shared.RandString(8))
 
 	const workers = 6
 	images := make([]*Image, workers)
@@ -967,7 +968,7 @@ func TestImageBuild_NeverErrors(t *testing.T) {
 	ctx := t.Context()
 	c := newRandomTestClient(t, "image-build-never-")
 
-	r, err := c.Resource(KindImage, "localhost/ic-build-never-"+strings.ToLower(RandString(8))+":latest", &ImageConfig{
+	r, err := c.Resource(KindImage, "localhost/ic-build-never-"+strings.ToLower(shared.RandString(8))+":latest", &ImageConfig{
 		Build: &BuildConfig{Context: "/nonexistent-build-context"},
 	})
 	require.NoError(t, err)
@@ -983,7 +984,7 @@ func TestImageBuild_WithoutCreateDoesNotBuild(t *testing.T) {
 	c := newRandomTestClient(t, "image-build-nocreate-")
 
 	// The context does not exist, so a build attempt would fail differently.
-	r, err := c.Resource(KindImage, "localhost/ic-build-nocreate-"+strings.ToLower(RandString(8))+":latest", &ImageConfig{
+	r, err := c.Resource(KindImage, "localhost/ic-build-nocreate-"+strings.ToLower(shared.RandString(8))+":latest", &ImageConfig{
 		Build: &BuildConfig{Context: "/nonexistent-build-context"},
 	})
 	require.NoError(t, err)

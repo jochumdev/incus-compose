@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/sftp"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // TempInstanceKey marks an instance incus-compose created to read an image with.
@@ -82,7 +83,7 @@ func (r *Image) createReader(ctx context.Context) (string, *sftp.Client, error) 
 		return "", nil, err
 	}
 
-	name := "ic-seed-" + SanitizeIncusName(RandString(16), MaxIncusNameLen-8)
+	name := "ic-seed-" + SanitizeIncusName(shared.RandString(16), MaxIncusNameLen-8)
 
 	op, err := conn.CreateInstance(ctx, r.client.incusProject, incusApi.InstancesPost{
 		Name: name,

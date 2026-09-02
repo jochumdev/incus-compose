@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/shared"
 )
 
 // ----------------------------------------------------------------------------
@@ -809,7 +811,7 @@ func TestNetworkEnsure_ConcurrentCreate(t *testing.T) {
 
 	// OverrideName skips the per-project prefix, so every worker resolves to
 	// the same global network and actually races.
-	name := "icnet" + strings.ToLower(RandString(6))
+	name := "icnet" + strings.ToLower(shared.RandString(6))
 
 	const workers = 6
 	nets := make([]Resource, workers)

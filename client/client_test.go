@@ -64,7 +64,7 @@ func newRandomTestClient(t *testing.T, prefix string) *Client {
 
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
-	name := prefix + strings.ToLower(RandString(12))
+	name := prefix + strings.ToLower(shared.RandString(12))
 
 	c, err := createProjectClient(gc, name)
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func newRandomTestClient(t *testing.T, prefix string) *Client {
 // createProjectClient creates a project-scoped client with logging hooks.
 func createProjectClient(gc *GlobalClient, name string) (*Client, error) {
 	if name == "" {
-		name = "test-" + strings.ToLower(RandString(12))
+		name = "test-" + strings.ToLower(shared.RandString(12))
 	}
 
 	_ = gc.DeleteProject(name, true)
@@ -212,7 +212,7 @@ func TestClientProject_GlobalClientKeepsDefaultProfile(t *testing.T) {
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
 
-	name := "client-gcdef-" + strings.ToLower(RandString(8))
+	name := "client-gcdef-" + strings.ToLower(shared.RandString(8))
 	deleteProjectOnCleanup(t, gc, name)
 
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
@@ -247,7 +247,7 @@ func TestClientProject_EnsureWithCreate(t *testing.T) {
 	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
-	name := "client-ensure-" + strings.ToLower(RandString(8))
+	name := "client-ensure-" + strings.ToLower(shared.RandString(8))
 	deleteProjectOnCleanup(t, gc, name)
 
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
@@ -272,7 +272,7 @@ func TestClientProject_NameIsPreserved(t *testing.T) {
 	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
-	name := "client-name-" + strings.ToLower(RandString(8))
+	name := "client-name-" + strings.ToLower(shared.RandString(8))
 	deleteProjectOnCleanup(t, gc, name)
 
 	project, err := gc.EnsureProject(name, EnsureProjectWithCreate())
@@ -300,7 +300,7 @@ func TestClientProject_EnsureIdempotent(t *testing.T) {
 	skipLocal(t)
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
-	name := "client-idem-" + strings.ToLower(RandString(8))
+	name := "client-idem-" + strings.ToLower(shared.RandString(8))
 	deleteProjectOnCleanup(t, gc, name)
 
 	project1, err := gc.EnsureProject(name, EnsureProjectWithCreate())
@@ -316,7 +316,7 @@ func TestClientProject_DeleteSucceeds(t *testing.T) {
 	ctx := t.Context()
 	gc, err := NewTestClient(ctx)
 	require.NoError(t, err)
-	name := "client-del-" + strings.ToLower(RandString(8))
+	name := "client-del-" + strings.ToLower(shared.RandString(8))
 
 	_, err = gc.EnsureProject(name, EnsureProjectWithCreate())
 	require.NoError(t, err)

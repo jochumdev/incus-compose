@@ -13,6 +13,8 @@ import (
 
 	"github.com/avast/retry-go/v5"
 	"github.com/pkg/sftp"
+
+	"github.com/lxc/incus-compose/shared"
 )
 
 // SFTP returns a new SFTP connection to the volume. The caller closes it.
@@ -60,7 +62,7 @@ func (r *StorageVolume) Lock(ctx context.Context, sc *sftp.Client, name string, 
 	}
 
 	hostname, _ := os.Hostname()
-	owner := fmt.Sprintf("%s:%d:%s", hostname, os.Getpid(), RandString(8))
+	owner := fmt.Sprintf("%s:%d:%s", hostname, os.Getpid(), shared.RandString(8))
 
 	err := retry.New(
 		retry.Context(ctx),
