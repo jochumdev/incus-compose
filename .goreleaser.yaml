@@ -32,6 +32,7 @@ builds:
       - riscv64
     ldflags:
       - -s -w
+      - -X github.com/lxc/incus-compose/cmd/ic-healthd.version={{ .Version }}
     env:
       - CGO_ENABLED=0
 
@@ -48,6 +49,7 @@ builds:
       - riscv64
     ldflags:
       - -s -w
+      - -X github.com/lxc/incus-compose/cmd/ic-dns.version={{ .Version }}
     env:
       - CGO_ENABLED=0
 

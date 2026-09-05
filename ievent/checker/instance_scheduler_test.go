@@ -1,17 +1,22 @@
-package main
+package checker
 
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
+
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/ievent/iutil"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -27,7 +32,8 @@ type scheduler struct {
 	ctx       context.Context
 	conn      *iclient.Connection
 	project   string
-	pool      *pools
+	logger    *slog.Logger
+	pools     pools
 	instances map[string]*instance
 	results   chan instanceResult
 }
@@ -43,25 +49,32 @@ func newScheduler(t *testing.T) *scheduler {
 func newSchedulerWithPools(t *testing.T, workers, restartWorkers int) *scheduler {
 	t.Helper()
 
-	pool, err := newPools(workers, restartWorkers)
+	pools, err := newPools(workers, restartWorkers)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { releasePools(pool) })
+	t.Cleanup(func() { releasePools(pools) })
 
 	return &scheduler{
 		ctx:       t.Context(),
 		conn:      refusedConn(t),
 		project:   "healthd-scheduler",
-		pool:      pool,
+		logger:    slog.Default(),
+		pools:     pools,
 		instances: map[string]*instance{},
 		results:   make(chan instanceResult, 32),
 	}
+}
+
+// key is the instances-map key for a name, matching instanceResult.Key.
+func (s *scheduler) key(name string) string {
+	return s.project + "/" + name
 }
 
 // add registers an instance that is idle and due for a check right now.
 func (s *scheduler) add(name string, cfg *instanceConfig) *instance {
 	inst := &instance{
 		name:         name,
+		project:      s.project,
 		config:       cfg,
 		state:        instanceIdle,
 		action:       instanceActionCheck,
@@ -69,7 +82,7 @@ func (s *scheduler) add(name string, cfg *instanceConfig) *instance {
 		restartDelay: baseRestartDelay(cfg),
 	}
 
-	s.instances[name] = inst
+	s.instances[s.key(name)] = inst
 
 	return inst
 }
@@ -86,15 +99,59 @@ func (s *scheduler) running(t *testing.T, inst *instance, state instanceState, d
 }
 
 func (s *scheduler) run() time.Time {
-	return runInstanceActions(s.ctx, s.conn, s.project, s.pool, s.instances, s.results)
+	return runInstanceActions(s.ctx, s.logger, s.conn, s.pools, s.instances, s.results)
 }
 
 func (s *scheduler) result(res instanceResult) {
-	handleInstanceResult(s.ctx, s.conn, s.project, s.instances, s.results, res)
+	handleInstanceResult(s.ctx, s.logger, s.conn, s.instances, s.results, res)
 }
 
-func (s *scheduler) event(action instanceEventAction, name string) {
-	handleInstanceEvent(s.ctx, s.conn, s.project, s.instances, s.results, instanceEvent{Action: action, Instance: name})
+func (s *scheduler) event(action string, name string) {
+	cfg := map[string]string{"test": `["CMD","true"]`}
+	if tracked, ok := s.instances[s.key(name)]; ok {
+		cfg = eventConfig(tracked.config)
+	}
+
+	s.eventRead(action, name, true, healthKeys(cfg))
+}
+
+// eventRead feeds one enriched event the way the enricher delivers it. A
+// delete is never enriched in the chain - the enricher short-circuits it, and
+// the sweep's roster prunes arrive the same bare way - so it lands bare.
+func (s *scheduler) eventRead(action string, name string, running bool, keys map[string]string) {
+	if action == incusApi.EventLifecycleInstanceDeleted {
+		handleInstanceEvent(s.ctx, s.logger, s.conn, s.instances, s.results,
+			iutil.NewEvent(time.Now(), action, s.project, name, ""))
+
+		return
+	}
+
+	read := iutil.NewInstance(running, keys, []iutil.InstanceInterface{}, map[string]*iutil.Network{})
+	ev := iutil.NewEvent(time.Now(), action, s.project, name, "").WithInstance(read, false)
+	handleInstanceEvent(s.ctx, s.logger, s.conn, s.instances, s.results, ev)
+}
+
+// eventConfig is the healthcheck keys a parsed config came from, so an event
+// carrying them re-parses to the same config.
+func eventConfig(cfg *instanceConfig) map[string]string {
+	m := map[string]string{
+		"start_period":   cfg.startPeriod.String(),
+		"start_interval": cfg.startInterval.String(),
+		"interval":       cfg.interval.String(),
+		"timeout":        cfg.timeout.String(),
+		"retries":        strconv.Itoa(cfg.retries),
+	}
+
+	if len(cfg.test) > 0 {
+		test, _ := json.Marshal(cfg.test)
+		m["test"] = string(test)
+	}
+
+	if cfg.restart != "" {
+		m["restart"] = cfg.restart
+	}
+
+	return m
 }
 
 // next returns the result the loop would have received.
@@ -174,9 +231,7 @@ func TestLoggerTravelsInTheContext(t *testing.T) {
 	var out syncBuffer
 
 	s := newScheduler(t)
-	s.ctx = withLogger(s.ctx, slog.New(
-		slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}),
-	))
+	s.logger = slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	inst := s.add("web-1", testConfig())
 	s.running(t, inst, instanceChecking, time.Now().Add(-time.Second))
@@ -202,7 +257,7 @@ func TestRunInstanceActionsReturnsTheEarliestDeadline(t *testing.T) {
 	s.add("b-1", testConfig()).due = now.Add(5 * time.Second)
 	s.add("c-1", testConfig()).due = now.Add(90 * time.Second)
 
-	require.Equal(t, s.instances["b-1"].due, s.run())
+	require.Equal(t, s.instances[s.key("b-1")].due, s.run())
 	s.silent(t)
 }
 
@@ -423,10 +478,11 @@ func (s *scheduler) checked(t *testing.T, inst *instance, err error) instanceRes
 	s.running(t, inst, instanceChecking, time.Now().Add(time.Minute))
 
 	return instanceResult{
-		kind: instanceResultChecked,
-		name: inst.name,
-		ctx:  inst.actionContext,
-		err:  err,
+		kind:    instanceResultChecked,
+		name:    inst.name,
+		project: inst.project,
+		ctx:     inst.actionContext,
+		err:     err,
 	}
 }
 
@@ -675,10 +731,11 @@ func (s *scheduler) restarted(t *testing.T, inst *instance, err error) instanceR
 	s.running(t, inst, instanceRestarting, time.Now().Add(time.Minute))
 
 	return instanceResult{
-		kind: instanceResultRestarted,
-		name: inst.name,
-		ctx:  inst.actionContext,
-		err:  err,
+		kind:    instanceResultRestarted,
+		name:    inst.name,
+		project: inst.project,
+		ctx:     inst.actionContext,
+		err:     err,
 	}
 }
 
@@ -758,11 +815,11 @@ func TestStatusResultForgetsAFailedWrite(t *testing.T) {
 	s := newScheduler(t)
 	inst := s.add("web-1", testConfig())
 
-	reportStatus(s.ctx, s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
+	reportStatus(s.ctx, slog.Default(), s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
 	require.Equal(t, shared.HealthStatusUnhealthy, inst.status,
 		"the value is recorded before the write lands, so two writes cannot invert")
 
-	reportStatus(s.ctx, s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
+	reportStatus(s.ctx, slog.Default(), s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
 
 	res := s.next(t)
 	require.Equal(t, instanceResultStatus, res.kind)
@@ -774,11 +831,11 @@ func TestStatusResultForgetsAFailedWrite(t *testing.T) {
 
 	require.Empty(t, inst.status, "a failed write must be retried, so it may not stay recorded")
 
-	reportStatus(s.ctx, s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
+	reportStatus(s.ctx, slog.Default(), s.conn, s.project, s.results, inst, shared.HealthStatusUnhealthy)
 	require.Equal(t, instanceResultStatus, s.next(t).kind, "the same verdict must be written again")
 }
 
-func TestDiscoverResultCreatesThenUpdates(t *testing.T) {
+func TestUpdatedCreatesThenRefreshes(t *testing.T) {
 	t.Parallel()
 
 	s := newScheduler(t)
@@ -786,31 +843,31 @@ func TestDiscoverResultCreatesThenUpdates(t *testing.T) {
 	cfg := testConfig()
 	cfg.startPeriod = time.Minute
 
-	s.result(instanceResult{kind: instanceResultDiscovered, name: "web-1", config: cfg})
+	s.eventRead(incusApi.EventLifecycleInstanceUpdated, "web-1", true, healthKeys(eventConfig(cfg)))
 
-	inst, ok := s.instances["web-1"]
+	inst, ok := s.instances[s.key("web-1")]
 	require.True(t, ok)
 	require.Equal(t, instanceIdle, inst.state)
 	require.Equal(t, instanceActionCheck, inst.action)
 	require.Equal(t, 30*time.Second, inst.restartDelay)
 	require.True(t, inst.inRestart, "a start period on a fresh instance starts running immediately")
 
-	// A re-discovery of a tracked instance is a config refresh, not a reset.
+	// A re-read of a tracked instance is a config refresh, not a reset.
 	inst.failures = 2
 
 	updated := testConfig()
 	updated.interval = time.Minute
-	s.result(instanceResult{kind: instanceResultDiscovered, name: "web-1", config: updated})
+	s.eventRead(incusApi.EventLifecycleInstanceUpdated, "web-1", true, healthKeys(eventConfig(updated)))
 
-	require.Same(t, s.instances["web-1"], inst, "the entry must survive a re-discovery")
+	require.Same(t, s.instances[s.key("web-1")], inst, "the entry must survive a re-read")
 	require.Equal(t, time.Minute, inst.config.interval)
 	require.Equal(t, 2, inst.failures, "a config refresh must not forget the failure run")
 }
 
-// TestDiscoverResultAdoptsTheObservedStatus pins that the daemon's idea of the
+// TestRereadAdoptsTheObservedStatus pins that the daemon's idea of the
 // status follows the instance, not only its own writes: a cache that says
 // otherwise makes every later verdict look like a no-op.
-func TestDiscoverResultAdoptsTheObservedStatus(t *testing.T) {
+func TestRereadAdoptsTheObservedStatus(t *testing.T) {
 	t.Parallel()
 
 	s := newScheduler(t)
@@ -818,12 +875,10 @@ func TestDiscoverResultAdoptsTheObservedStatus(t *testing.T) {
 	inst := s.add("web-1", testConfig())
 	inst.status = shared.HealthStatusHealthy
 
-	s.result(instanceResult{
-		kind:   instanceResultDiscovered,
-		name:   "web-1",
-		config: testConfig(),
-		status: shared.HealthStatusStarting,
-	})
+	keys := healthKeys(eventConfig(inst.config))
+	keys[shared.HealthStatusKey] = shared.HealthStatusStarting
+
+	s.eventRead(incusApi.EventLifecycleInstanceUpdated, "web-1", true, keys)
 
 	require.Equal(t, shared.HealthStatusStarting, inst.status,
 		"another writer owns the key just as much: what Incus says is what is on the instance")
@@ -838,19 +893,17 @@ func TestDiscoverResultAdoptsTheObservedStatus(t *testing.T) {
 
 // TestDiscoverResultKeepsAStatusThatAlreadyMatches pins the other half: an
 // instance already reporting healthy is not rewritten.
-func TestDiscoverResultKeepsAStatusThatAlreadyMatches(t *testing.T) {
+func TestRereadKeepsAStatusThatAlreadyMatches(t *testing.T) {
 	t.Parallel()
 
 	s := newScheduler(t)
 
-	s.result(instanceResult{
-		kind:   instanceResultDiscovered,
-		name:   "web-1",
-		config: testConfig(),
-		status: shared.HealthStatusHealthy,
-	})
+	keys := healthKeys(eventConfig(testConfig()))
+	keys[shared.HealthStatusKey] = shared.HealthStatusHealthy
 
-	inst := s.instances["web-1"]
+	s.eventRead(incusApi.EventLifecycleInstanceUpdated, "web-1", true, keys)
+
+	inst := s.instances[s.key("web-1")]
 	require.Equal(t, shared.HealthStatusHealthy, inst.status)
 
 	s.result(s.checked(t, inst, nil))
@@ -858,34 +911,24 @@ func TestDiscoverResultKeepsAStatusThatAlreadyMatches(t *testing.T) {
 	s.silent(t)
 }
 
-// TestDiscoverResultReportsAStoppedInstance covers the daemon coming up to an
+// TestUpdatedReportsAStoppedInstance covers the daemon coming up to an
 // instance that is down, which has no verdict to carry.
-func TestDiscoverResultReportsAStoppedInstance(t *testing.T) {
+func TestUpdatedReportsAStoppedInstance(t *testing.T) {
 	t.Parallel()
 
 	s := newScheduler(t)
 
-	cfg := testConfig()
-	cfg.running = false
+	keys := healthKeys(eventConfig(testConfig()))
+	keys[shared.HealthStatusKey] = shared.HealthStatusHealthy
 
-	s.result(instanceResult{
-		kind:   instanceResultDiscovered,
-		name:   "web-1",
-		config: cfg,
-		status: shared.HealthStatusHealthy,
-	})
+	s.eventRead(incusApi.EventLifecycleInstanceUpdated, "web-1", false, keys)
 
 	res := s.next(t)
 	require.Equal(t, instanceResultStatus, res.kind)
 	require.Equal(t, shared.HealthStatusStopped, res.status)
 
 	// A running one is left to its check, which is what decides.
-	s.result(instanceResult{
-		kind:   instanceResultDiscovered,
-		name:   "web-2",
-		config: testConfig(),
-		status: shared.HealthStatusHealthy,
-	})
+	s.eventRead(incusApi.EventLifecycleInstanceUpdated, "web-2", true, keys)
 
 	s.silent(t)
 }
@@ -916,7 +959,7 @@ func TestStoppedSchedulesARestartWithBackoff(t *testing.T) {
 	inst := s.add("web-1", testConfig())
 
 	now := time.Now()
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
 	require.Equal(t, instanceActionRestart, inst.action)
 	requireDue(t, inst, now, 30*time.Second)
@@ -934,7 +977,7 @@ func TestStoppedReportsStopped(t *testing.T) {
 	inst := s.add("web-1", testConfig())
 	inst.status = shared.HealthStatusHealthy
 
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
 	res := s.next(t)
 	require.Equal(t, instanceResultStatus, res.kind)
@@ -954,7 +997,7 @@ func TestStoppedWithoutAPolicyReportsBeforeDropping(t *testing.T) {
 	inst := s.add("web-1", cfg)
 	inst.status = shared.HealthStatusHealthy
 
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
 	require.Empty(t, s.instances)
 
@@ -969,11 +1012,11 @@ func TestStoppedTwiceKeepsTheFirstSchedule(t *testing.T) {
 	s := newScheduler(t)
 	inst := s.add("web-1", testConfig())
 
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
 	due, delay := inst.due, inst.restartDelay
 
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
 	require.Equal(t, due, inst.due, "a repeat stop must not push the restart further out")
 	require.Equal(t, delay, inst.restartDelay, "nor double the backoff twice for one crash")
@@ -988,7 +1031,7 @@ func TestStoppedWithoutAPolicyDropsTheInstance(t *testing.T) {
 	cfg.restart = "no"
 	s.add("web-1", cfg)
 
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
 	require.Empty(t, s.instances, "nothing will restart it, so there is nothing left to watch")
 }
@@ -999,7 +1042,20 @@ func TestDeletedDropsTheInstance(t *testing.T) {
 	s := newScheduler(t)
 	s.add("web-1", testConfig())
 
-	s.event(instanceDeleted, "web-1")
+	s.event(incusApi.EventLifecycleInstanceDeleted, "web-1")
+
+	require.Empty(t, s.instances)
+}
+
+// TestDeletedNeverTrackedIsANoop pins that a roster prune arriving for an
+// instance the checker never saw - dropped by a stop event first, say - is
+// harmless.
+func TestDeletedNeverTrackedIsANoop(t *testing.T) {
+	t.Parallel()
+
+	s := newScheduler(t)
+
+	s.event(incusApi.EventLifecycleInstanceDeleted, "web-1")
 
 	require.Empty(t, s.instances)
 }
@@ -1013,7 +1069,7 @@ func TestStartedUnparksAStoppedInstance(t *testing.T) {
 	inst.state = instanceParked
 
 	now := time.Now()
-	s.event(instanceRestarted, "web-1")
+	s.event(incusApi.EventLifecycleInstanceRestarted, "web-1")
 
 	require.Equal(t, instanceIdle, inst.state, "parked has no other way out")
 	require.Equal(t, instanceActionCheck, inst.action)
@@ -1029,11 +1085,11 @@ func TestStartedCancelsAPendingRestart(t *testing.T) {
 	s := newScheduler(t)
 	inst := s.add("web-1", testConfig())
 
-	s.event(instanceStopped, "web-1")
+	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 	require.Equal(t, instanceActionRestart, inst.action, "the stop must have queued one to begin with")
 
 	now := time.Now()
-	s.event(instanceRestarted, "web-1")
+	s.event(incusApi.EventLifecycleInstanceRestarted, "web-1")
 
 	require.Equal(t, instanceIdle, inst.state)
 	require.Equal(t, instanceActionCheck, inst.action,
@@ -1058,7 +1114,7 @@ func TestStartedReentersTheStartPeriod(t *testing.T) {
 	inst := s.add("web-1", cfg)
 	inst.failures = 2
 
-	s.event(instanceRestarted, "web-1")
+	s.event(incusApi.EventLifecycleInstanceRestarted, "web-1")
 
 	require.Zero(t, inst.failures, "the run that led to the stop is over")
 	require.True(t, inst.inRestart, "a restarted instance gets its start period back, as in docker")
@@ -1083,7 +1139,7 @@ func TestStartedLeavesAnActionInFlightAlone(t *testing.T) {
 			live := inst.actionContext
 			due := inst.due
 
-			s.event(instanceRestarted, "web-1")
+			s.event(incusApi.EventLifecycleInstanceRestarted, "web-1")
 
 			require.Equal(t, state, inst.state)
 			require.Same(t, live, inst.actionContext)
@@ -1097,18 +1153,19 @@ func TestStartedDiscoversAnUnknownInstance(t *testing.T) {
 	t.Parallel()
 
 	s := newScheduler(t)
-	s.event(instanceRestarted, "web-1")
+	s.event(incusApi.EventLifecycleInstanceRestarted, "web-1")
 
-	res := s.next(t)
-	require.Equal(t, instanceResultDiscovered, res.kind)
-	require.Equal(t, "web-1", res.name)
+	inst, ok := s.instances[s.key("web-1")]
+	require.True(t, ok, "an enriched start carries everything a discovery used to read")
+	require.Equal(t, instanceIdle, inst.state)
+	require.Equal(t, instanceActionCheck, inst.action)
 }
 
 func TestEventsForUnknownInstancesAreHarmless(t *testing.T) {
 	t.Parallel()
 
-	for _, action := range []instanceEventAction{instanceStopped, instanceDeleted} {
-		t.Run(string(action), func(t *testing.T) {
+	for _, action := range []string{incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceDeleted} {
+		t.Run(action, func(t *testing.T) {
 			t.Parallel()
 
 			s := newScheduler(t)

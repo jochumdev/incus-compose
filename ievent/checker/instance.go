@@ -1,4 +1,4 @@
-package main
+package checker
 
 import (
 	"bytes"
@@ -6,70 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"slices"
 	"strconv"
 	"time"
 
 	"github.com/avast/retry-go/v5"
-	incusApi "github.com/lxc/incus/v7/shared/api"
+
 	"github.com/lxc/incus/v7/shared/util"
-	"github.com/panjf2000/ants/v2"
 
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/ievent/iutil"
 	"github.com/lxc/incus-compose/shared"
+
+	incusApi "github.com/lxc/incus/v7/shared/api"
 )
-
-func patchInstanceConfig(ctx context.Context, conn *iclient.Connection, project string, instance string, config map[string]string) error {
-	log := logger(ctx)
-
-	// Bounded because this runs on the Run loop.
-	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
-	defer cancel()
-
-	log.Log(ctx, levelTrace, "Updating an instances config", "instance", instance, "patch", config)
-
-	return retryBusy(ctx, conn, project, instance, func() error {
-		return conn.PatchInstanceConfig(ctx, project, instance, config)
-	})
-}
-
-// pools cap the Incus actions in flight, over every watched project.
-type pools struct {
-	check   *ants.Pool
-	restart *ants.Pool
-}
-
-// newPools builds the two action pools. They refuse rather than queue: waiting
-// for a worker burns the deadline the watchdog reaps the action by.
-func newPools(workers, restartWorkers int) (*pools, error) {
-	check, err := ants.NewPool(max(workers, 1), ants.WithNonblocking(true))
-	if err != nil {
-		return nil, fmt.Errorf("creating the check pool: %w", err)
-	}
-
-	restart, err := ants.NewPool(max(restartWorkers, 1), ants.WithNonblocking(true))
-	if err != nil {
-		check.Release()
-
-		return nil, fmt.Errorf("creating the restart pool: %w", err)
-	}
-
-	return &pools{check: check, restart: restart}, nil
-}
-
-func releasePools(p *pools) {
-	p.check.Release()
-	p.restart.Release()
-}
 
 // retryBusy runs write again while Incus rejects it for the instance's
 // operation lock. The lock is taken by the driver, so a caller that creates an
 // operation must do its wait inside write.
-//
-// The wait happens after a rejection rather than before every write: the
-// daemon writes a status on each transition, and a lock check in front of all
-// of them would be an extra round trip per instance per transition.
 func retryBusy(ctx context.Context, conn *iclient.Connection, project string, name string, write func() error) error {
 	return retry.New(
 		retry.Context(ctx),
@@ -96,9 +53,21 @@ func retryBusy(ctx context.Context, conn *iclient.Connection, project string, na
 	})
 }
 
-// writeInstanceStatus persists status into the daemon's own instance, when it knows its identity.
-func writeInstanceStatus(ctx context.Context, conn *iclient.Connection, project string, instance string, status string) error {
-	return patchInstanceConfig(ctx, conn, project, instance, map[string]string{shared.HealthStatusKey: status})
+func patchInstanceConfig(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, instance string, config map[string]string) error {
+	// Bounded because this runs on the Run loop.
+	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+
+	logger.Log(ctx, shared.LevelTrace, "Updating an instances config", "instance", instance, "patch", config)
+
+	return retryBusy(ctx, conn, project, instance, func() error {
+		return conn.PatchInstanceConfig(ctx, project, instance, config)
+	})
+}
+
+// WriteStatus writes one health status value onto one instance.
+func WriteStatus(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, instance string, status string) error {
+	return patchInstanceConfig(ctx, logger, conn, project, instance, map[string]string{shared.HealthStatusKey: status})
 }
 
 type instanceConfig struct {
@@ -143,8 +112,9 @@ func (ic *instanceConfig) equals(other *instanceConfig) bool {
 }
 
 type instanceResult struct {
-	kind instanceResultKind
-	name string
+	kind    instanceResultKind
+	name    string
+	project string
 
 	// ctx identifies the action that ran: an abandoned one can still deliver,
 	// and the loop compares this against the context it holds. Unset by
@@ -157,15 +127,21 @@ type instanceResult struct {
 	// found on the instance (instanceResultDiscovered).
 	status string
 
-	// names is every instance the pass saw, set by instanceResultRoster only.
-	names []string
-
 	err error
 }
 
+func newDiscoveredResult(name string, project string, err error) instanceResult {
+	return instanceResult{kind: instanceResultDiscovered, name: name, project: project, err: err}
+}
+
+func (r instanceResult) Key() string {
+	return r.project + "/" + r.name
+}
+
 type instance struct {
-	name   string
-	config *instanceConfig
+	name    string
+	project string
+	config  *instanceConfig
 
 	state instanceState
 
@@ -229,17 +205,17 @@ func getInstance(ctx context.Context, conn *iclient.Connection, project string, 
 	return &inst.Instance, nil
 }
 
-func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
-	if util.IsTrue(inst.Config[shared.HealthIgnoreKey]) {
+func parseInstanceConfig(config map[string]string, running bool) (*instanceConfig, error) {
+	if util.IsTrue(config[shared.HealthIgnoreKey]) {
 		return nil, ErrInstanceIgnored
 	}
 
-	wantsChecking := inst.Config[shared.HealthKeyPrefix+"test"] != "" ||
-		slices.Contains(shared.RestartPolicies, inst.Config[shared.HealthKeyPrefix+"restart"])
+	wantsChecking := config[shared.HealthKeyPrefix+"test"] != "" ||
+		slices.Contains(shared.RestartPolicies, config[shared.HealthKeyPrefix+"restart"])
 
 	// Watching is opt-in. One that looks like it wants checking but never
 	// opted in is reported rather than assumed.
-	if !util.IsTrue(inst.Config[shared.HealthEnabledKey]) {
+	if !util.IsTrue(config[shared.HealthEnabledKey]) {
 		if wantsChecking {
 			return nil, ErrInstanceNotEnabled
 		}
@@ -257,23 +233,23 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		interval:      defaultInterval,
 		timeout:       defaultTimeout,
 		retries:       defaultRetries,
-		cwd:           inst.Config["oci.cwd"],
-		restart:       inst.Config[shared.HealthKeyPrefix+"restart"],
-		running:       inst.StatusCode == incusApi.Running,
+		cwd:           config["oci.cwd"],
+		restart:       config[shared.HealthKeyPrefix+"restart"],
+		running:       running,
 	}
 
 	// Absent parses to 0, which is root, which is where an exec landed anyway.
-	uid, err := strconv.ParseUint(inst.Config["oci.uid"], 10, 32)
+	uid, err := strconv.ParseUint(config["oci.uid"], 10, 32)
 	if err == nil {
 		cfg.uid = uint32(uid)
 	}
 
-	gid, err := strconv.ParseUint(inst.Config["oci.gid"], 10, 32)
+	gid, err := strconv.ParseUint(config["oci.gid"], 10, 32)
 	if err == nil {
 		cfg.gid = uint32(gid)
 	}
 
-	testRaw := inst.Config[shared.HealthKeyPrefix+"test"]
+	testRaw := config[shared.HealthKeyPrefix+"test"]
 	if testRaw == "" && slices.Contains(shared.RestartPolicies, cfg.restart) {
 		// Restart policy without a test: probe with a no-op so run state is watched.
 		testRaw = `["NONE"]`
@@ -289,7 +265,8 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		return nil, errors.New("CMD-SHELL requires a command")
 	}
 
-	if v := inst.Config[shared.HealthKeyPrefix+"start_period"]; v != "" {
+	v := config[shared.HealthKeyPrefix+"start_period"]
+	if v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("parsing start_period: %w", err)
@@ -297,7 +274,8 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		cfg.startPeriod = d
 	}
 
-	if v := inst.Config[shared.HealthKeyPrefix+"start_interval"]; v != "" {
+	v = config[shared.HealthKeyPrefix+"start_interval"]
+	if v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("parsing start_interval: %w", err)
@@ -308,7 +286,8 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		cfg.startInterval = d
 	}
 
-	if v := inst.Config[shared.HealthKeyPrefix+"interval"]; v != "" {
+	v = config[shared.HealthKeyPrefix+"interval"]
+	if v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("parsing interval: %w", err)
@@ -319,7 +298,8 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		cfg.interval = d
 	}
 
-	if v := inst.Config[shared.HealthKeyPrefix+"timeout"]; v != "" {
+	v = config[shared.HealthKeyPrefix+"timeout"]
+	if v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("parsing timeout: %w", err)
@@ -330,7 +310,8 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 		cfg.timeout = d
 	}
 
-	if v := inst.Config[shared.HealthKeyPrefix+"retries"]; v != "" {
+	v = config[shared.HealthKeyPrefix+"retries"]
+	if v != "" {
 		n, err := strconv.ParseUint(v, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("parsing retries: %w", err)
@@ -344,38 +325,79 @@ func parseInstanceConfig(inst *incusApi.Instance) (*instanceConfig, error) {
 	return &cfg, nil
 }
 
-// discoverOne re-reads one instance and reports it on its own goroutine, so the
-// loop never blocks on the API call.
-func discoverOne(ctx context.Context, conn *iclient.Connection, project string, results chan instanceResult, name string) {
-	go func() {
-		res := instanceResult{kind: instanceResultDiscovered, name: name}
+// instKey is how an instance is held: by project and name, never by name
+// alone. A delete is never enriched, so the key cannot ask for a read.
+func instKey(ev *iutil.Event) string {
+	return ev.ProjectName() + "/" + ev.Name()
+}
 
-		inst, err := getInstance(ctx, conn, project, name)
-		if err != nil {
-			res.err = err
-		} else {
-			res.status = inst.Config[shared.HealthStatusKey]
-			res.config, res.err = parseInstanceConfig(inst)
+// saveInstance folds one enriched event into what is held, leaving a new
+// instance the way a discovery does: idle, due for a check at once.
+func saveInstance(instances map[string]*instance, ev *iutil.Event) (*instance, error) {
+	if !ev.Enriched(iutil.EnrichedInstance) {
+		return nil, errors.New("event without an instance read")
+	}
+
+	k := instKey(ev)
+	evInst := ev.Instance()
+
+	instConfig, err := parseInstanceConfig(maps.Collect(evInst.Config()), evInst.Running())
+	if err != nil {
+		delete(instances, k)
+		return nil, err
+	}
+
+	inst, ok := instances[k]
+	if !ok {
+		now := time.Now()
+
+		inst = &instance{
+			name:         ev.Name(),
+			project:      ev.ProjectName(),
+			state:        instanceIdle,
+			action:       instanceActionCheck,
+			due:          now,
+			restartDelay: baseRestartDelay(instConfig),
 		}
 
-		select {
-		case results <- res:
-		case <-ctx.Done():
+		if instConfig.startPeriod > 0 {
+			inst.inRestart = true
+			inst.restartDone = now.Add(instConfig.startPeriod)
 		}
-	}()
+
+		instances[k] = inst
+	}
+
+	s, ok := evInst.ConfigValue(shared.HealthStatusKey)
+	if ok {
+		inst.status = s
+	} else {
+		inst.status = shared.HealthStatusUnknown
+	}
+
+	inst.config = instConfig
+
+	return inst, nil
 }
 
 // handleInstanceEvent does what the name says, all operations MUST be non-blocking.
 // goroutines are not allowed to modify instances or its values.
-func handleInstanceEvent(ctx context.Context, conn *iclient.Connection, project string, instances map[string]*instance, results chan instanceResult, ev instanceEvent) {
-	log := logger(ctx)
+func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, instances map[string]*instance, results chan instanceResult, ev *iutil.Event) {
+	// Everything below keys on the name; an action carrying none would fold
+	// into an entry called "".
+	if ev.Name() == "" {
+		return
+	}
 
-	switch ev.Action {
-	case instanceRestarted:
-		inst, ok := instances[ev.Instance]
-		if !ok {
-			discoverOne(ctx, conn, project, results, ev.Instance)
-
+	switch ev.Action() {
+	case incusApi.EventLifecycleInstanceStarted, incusApi.EventLifecycleInstanceRestarted, incusApi.EventLifecycleInstanceResumed:
+		inst, err := saveInstance(instances, ev)
+		if err != nil {
+			res := newDiscoveredResult(ev.Name(), ev.ProjectName(), err)
+			select {
+			case <-ctx.Done():
+			case results <- res:
+			}
 			return
 		}
 
@@ -386,14 +408,17 @@ func handleInstanceEvent(ctx context.Context, conn *iclient.Connection, project 
 
 		// It is running again, whoever did it, so a queued restart is moot.
 		instanceStarted(inst, time.Now())
-	case instanceStopped:
-		inst, ok := instances[ev.Instance]
+
+	case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceShutdown:
+		k := instKey(ev)
+
+		inst, ok := instances[k]
 		if !ok {
 			return
 		}
 
 		// Before the branches below, one of which stops watching it entirely.
-		reportStatus(ctx, conn, project, results, inst, shared.HealthStatusStopped)
+		reportStatus(ctx, logger, conn, ev.ProjectName(), results, inst, shared.HealthStatusStopped)
 
 		// Before anything else, so a policy dropped since discovery still drops
 		// the instance rather than scheduling a restart for it.
@@ -402,7 +427,7 @@ func handleInstanceEvent(ctx context.Context, conn *iclient.Connection, project 
 				inst.actionCancel()
 			}
 
-			delete(instances, ev.Instance)
+			delete(instances, k)
 
 			return
 		}
@@ -417,23 +442,40 @@ func handleInstanceEvent(ctx context.Context, conn *iclient.Connection, project 
 		inst.due = time.Now().Add(inst.restartDelay)
 		inst.restartDelay = min(inst.restartDelay*2, maxRestartDelay)
 
-	case instanceUpdated:
-		discoverOne(ctx, conn, project, results, ev.Instance)
-	case instanceDeleted:
-		inst, ok := instances[ev.Instance]
-		if ok && inst.actionCancel != nil {
+	case incusApi.EventLifecycleInstanceUpdated:
+		inst, err := saveInstance(instances, ev)
+		if err != nil {
+			res := newDiscoveredResult(ev.Name(), ev.ProjectName(), err)
+			select {
+			case <-ctx.Done():
+			case results <- res:
+			}
+
+			return
+		}
+
+		// A stopped instance has no verdict to earn until it runs again, and a
+		// sweep's trickle is the first one to say so.
+		if !inst.config.running {
+			reportStatus(ctx, logger, conn, ev.ProjectName(), results, inst, shared.HealthStatusStopped)
+		}
+	case incusApi.EventLifecycleInstanceDeleted:
+		k := instKey(ev)
+
+		if inst, ok := instances[k]; ok && inst.actionCancel != nil {
 			inst.actionCancel()
 		}
 
-		delete(instances, ev.Instance)
+		delete(instances, k)
 	default:
-		log.Error("Unknown instance event action", "action", ev.Action)
+		// The chain walks more than this plugin asked for; everything else
+		// passes without a fold.
 	}
 }
 
 // instanceRestartAction starts an instance unless it was stopped on purpose, and reports the outcome.
 func instanceRestartAction(ctx context.Context, conn *iclient.Connection, project string, name string) instanceResult {
-	res := instanceResult{kind: instanceResultRestarted, name: name}
+	res := instanceResult{kind: instanceResultRestarted, name: name, project: project}
 
 	inst, err := getInstance(ctx, conn, project, name)
 	switch {
@@ -489,7 +531,7 @@ func setInstanceState(ctx context.Context, conn *iclient.Connection, project str
 	})
 }
 
-func instanceExec(ctx context.Context, conn *iclient.Connection, project string, name string, run command) (int, string, string, error) {
+func instanceExec(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, name string, run command) (int, string, string, error) {
 	var stdout, stderr bytes.Buffer
 
 	post := incusApi.InstanceExecPost{Command: run.cmd, Cwd: run.cwd, User: run.uid, Group: run.gid}
@@ -506,7 +548,7 @@ func instanceExec(ctx context.Context, conn *iclient.Connection, project string,
 	// buffers hold everything the command wrote.
 	op, err := iclient.WaitOperation(ctx, updates)
 	if err != nil {
-		cancelExec(ctx, conn, project, name, op)
+		cancelExec(ctx, logger, conn, project, name, op)
 
 		return -1, stdout.String(), stderr.String(), err
 	}
@@ -521,7 +563,7 @@ func instanceExec(ctx context.Context, conn *iclient.Connection, project string,
 
 // cancelExec asks the server to reap an exec the checker gave up on, so the
 // command does not keep running in the instance after its probe timed out.
-func cancelExec(ctx context.Context, conn *iclient.Connection, project string, name string, op incusApi.Operation) {
+func cancelExec(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, name string, op incusApi.Operation) {
 	if op.ID == "" || ctx.Err() == nil {
 		return
 	}
@@ -532,25 +574,23 @@ func cancelExec(ctx context.Context, conn *iclient.Connection, project string, n
 
 	err := conn.CancelOperation(cancelCtx, project, op)
 	if err != nil {
-		logger(ctx).Debug("Canceling exec operation", "instance", name, "error", err)
+		logger.Debug("Canceling exec operation", "instance", name, "error", err)
 	}
 }
 
-func instanceCheckAction(ctx context.Context, conn *iclient.Connection, project string, name string, cfg *instanceConfig) instanceResult {
-	log := logger(ctx)
-
-	res := instanceResult{kind: instanceResultChecked, name: name}
+func instanceCheckAction(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, name string, cfg *instanceConfig) instanceResult {
+	res := instanceResult{kind: instanceResultChecked, name: name, project: project}
 
 	inst, _, err := conn.GetInstanceState(ctx, project, name)
 	if err != nil {
-		log.Debug("Fetching instance status error", "instance", name, "error", err)
+		logger.Debug("Fetching instance status error", "instance", name, "error", err)
 
 		res.err = err
 		return res
 	}
 
 	if inst.StatusCode != incusApi.Running {
-		log.Log(ctx, levelTrace, "Instance is not running", "instance", name, "status", inst.Status)
+		logger.Log(ctx, shared.LevelTrace, "Instance is not running", "instance", name, "status", inst.Status)
 
 		res.err = ErrNotRunning
 		return res
@@ -574,9 +614,9 @@ func instanceCheckAction(ctx context.Context, conn *iclient.Connection, project 
 		run.cmd = cfg.test
 	}
 
-	exitCode, stdout, stderr, err := instanceExec(ctx, conn, project, name, run)
+	exitCode, stdout, stderr, err := instanceExec(ctx, logger, conn, project, name, run)
 	if err != nil {
-		log.Debug("exec error", "error", err, "stdout", stdout, "stderr", stderr)
+		logger.Debug("exec error", "error", err, "stdout", stdout, "stderr", stderr)
 		res.err = err
 		return res
 	}
@@ -590,16 +630,16 @@ func instanceCheckAction(ctx context.Context, conn *iclient.Connection, project 
 
 // instanceStatusAction writes user.healthcheck.status, the only key the daemon
 // owns on a watched instance.
-func instanceStatusAction(ctx context.Context, conn *iclient.Connection, project string, name, status string) instanceResult {
-	res := instanceResult{kind: instanceResultStatus, name: name, status: status}
-	res.err = patchInstanceConfig(ctx, conn, project, name, map[string]string{shared.HealthStatusKey: status})
+func instanceStatusAction(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, name, status string) instanceResult {
+	res := instanceResult{kind: instanceResultStatus, name: name, project: project, status: status}
+	res.err = patchInstanceConfig(ctx, logger, conn, project, name, map[string]string{shared.HealthStatusKey: status})
 
 	return res
 }
 
 // reportStatus writes status when it differs from what the instance last had,
 // so a write only happens on a transition.
-func reportStatus(ctx context.Context, conn *iclient.Connection, project string, results chan<- instanceResult, inst *instance, status string) {
+func reportStatus(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, project string, results chan<- instanceResult, inst *instance, status string) {
 	if status == inst.status {
 		return
 	}
@@ -608,7 +648,7 @@ func reportStatus(ctx context.Context, conn *iclient.Connection, project string,
 	inst.status = status
 
 	go func(name string) {
-		res := instanceStatusAction(ctx, conn, project, name, status)
+		res := instanceStatusAction(ctx, logger, conn, project, name, status)
 
 		select {
 		case <-ctx.Done():
@@ -642,9 +682,7 @@ func checkFailed(inst *instance, now time.Time) string {
 	return shared.HealthStatusUnhealthy
 }
 
-func runInstanceActions(ctx context.Context, conn *iclient.Connection, project string, pool *pools, instances map[string]*instance, results chan<- instanceResult) time.Time {
-	log := logger(ctx)
-
+func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, pool pools, instances map[string]*instance, resultChan chan<- instanceResult) time.Time {
 	var earliest time.Time
 	now := time.Now()
 
@@ -656,7 +694,7 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 
 	// defer reschedules an action no worker was free for.
 	deferAction := func(inst *instance) {
-		log.Debug("Deferring an action, every worker is busy", "instance", inst.name, "action", inst.action)
+		logger.Debug("Deferring an action, every worker is busy", "project", inst.project, "instance", inst.name, "action", inst.action)
 
 		inst.due = now.Add(poolRetryDelay + rand.N(poolRetryDelay)) // nolint:gosec
 		keep(inst.due)
@@ -665,7 +703,7 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 	for _, inst := range instances {
 		if inst.state != instanceIdle {
 			if !inst.actionDeadline.IsZero() && now.After(inst.actionDeadline) {
-				log.Warn("Action deadline exceeded", "instance", inst.name, "state", inst.state)
+				logger.Warn("Action deadline exceeded", "project", inst.project, "instance", inst.name, "state", inst.state)
 				// Clearing the context marks what the abandoned action reports as stale.
 				inst.actionCancel()
 
@@ -679,7 +717,7 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 				if checking {
 					// As in docker, a probe that exceeds its timeout is a
 					// failed probe.
-					reportStatus(ctx, conn, project, results, inst, checkFailed(inst, now))
+					reportStatus(ctx, logger, conn, inst.project, resultChan, inst, checkFailed(inst, now))
 
 					// checkFailed sets its own deadline when it escalates.
 					if inst.action != instanceActionRestart {
@@ -691,13 +729,11 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 					inst.restartDelay = min(inst.restartDelay*2, maxRestartDelay)
 				}
 			}
-
 			continue
 		}
 
 		if now.Before(inst.due) {
 			keep(inst.due)
-
 			continue
 		}
 
@@ -706,20 +742,19 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 			actionCtx, cancel := context.WithCancel(ctx)
 			name := inst.name
 
-			log.Info("Restarting", "instance", name)
+			logger.Info("Restarting", "instance", name)
 			err := pool.restart.Submit(func() {
-				res := instanceRestartAction(actionCtx, conn, project, name)
+				res := instanceRestartAction(actionCtx, conn, inst.project, name)
 				res.ctx = actionCtx
 
 				select {
 				case <-actionCtx.Done():
-				case results <- res:
+				case resultChan <- res:
 				}
 			})
 			if err != nil {
 				cancel()
 				deferAction(inst)
-
 				continue
 			}
 
@@ -736,12 +771,12 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 			name, cfg := inst.name, inst.config
 
 			err := pool.check.Submit(func() {
-				res := instanceCheckAction(actionCtx, conn, project, name, cfg)
+				res := instanceCheckAction(actionCtx, logger, conn, inst.project, name, cfg)
 				res.ctx = actionCtx
 
 				select {
 				case <-actionCtx.Done():
-				case results <- res:
+				case resultChan <- res:
 				}
 			})
 			if err != nil {
@@ -764,71 +799,36 @@ func runInstanceActions(ctx context.Context, conn *iclient.Connection, project s
 
 // handleInstanceResult applies one action's outcome. Like handleInstanceEvent it
 // must not block: the status write it may start runs on its own goroutine.
-func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project string, instances map[string]*instance, results chan<- instanceResult, res instanceResult) {
-	log := logger(ctx)
-
+func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, instances map[string]*instance, results chan<- instanceResult, res instanceResult) {
 	switch res.kind {
 	case instanceResultDiscovered:
-		if res.err != nil {
-			switch {
-			case errors.Is(res.err, ErrInstanceNotEnabled):
-				// The one case worth saying out loud: it asked to be
-				// checked and will not be.
-				log.Warn("Not watching an instance that has a healthcheck but is not enabled",
-					"instance", res.name, "key", shared.HealthEnabledKey)
-			case errors.Is(res.err, ErrInstanceIgnored),
-				errors.Is(res.err, ErrInstanceNoHealthcheck):
-				// Nothing to say: these are the normal reasons to skip.
-			default:
-				log.Error("Discover failed", "instance", res.name, "error", res.err)
-			}
-
+		// saveInstance reports its failures here; a success folds into the map
+		// itself and sends nothing.
+		if res.err == nil {
 			return
 		}
 
-		if res.config == nil {
-			log.Error("No error but config nil", "instance", res.name)
-			return
-		}
-
-		inst, ok := instances[res.name]
-		if ok {
-			inst.config = res.config
-
-			// What Incus reports is what is on the instance.
-			inst.status = res.status
-		} else {
-			inst = &instance{
-				name:         res.name,
-				config:       res.config,
-				state:        instanceIdle,
-				action:       instanceActionCheck,
-				due:          time.Now(),
-				status:       res.status,
-				restartDelay: baseRestartDelay(res.config),
-			}
-
-			if inst.config.startPeriod > 0 {
-				inst.inRestart = true
-				inst.restartDone = time.Now().Add(inst.config.startPeriod)
-			}
-
-			instances[res.name] = inst
-		}
-
-		// A stopped instance has no verdict to earn until it runs again.
-		if !inst.config.running {
-			reportStatus(ctx, conn, project, results, inst, shared.HealthStatusStopped)
+		switch {
+		case errors.Is(res.err, ErrInstanceNotEnabled):
+			// The one case worth saying out loud: it asked to be
+			// checked and will not be.
+			logger.Warn("Not watching an instance that has a healthcheck but is not enabled",
+				"instance", res.name, "key", shared.HealthEnabledKey)
+		case errors.Is(res.err, ErrInstanceIgnored),
+			errors.Is(res.err, ErrInstanceNoHealthcheck):
+			// Nothing to say: these are the normal reasons to skip.
+		default:
+			logger.Error("Discover failed", "instance", res.name, "error", res.err)
 		}
 	case instanceResultChecked:
-		inst, ok := instances[res.name]
+		inst, ok := instances[res.Key()]
 		if !ok {
-			log.Error("Got check result for an unknown instance", "instance", res.name, "result", res.err)
+			logger.Error("Got check result for an unknown instance", "instance", res.name, "result", res.err)
 			return
 		}
 
 		if res.ctx != inst.actionContext {
-			log.Debug("Dropping a stale check result", "instance", res.name)
+			logger.Debug("Dropping a stale check result", "instance", res.name)
 			return
 		}
 
@@ -854,7 +854,7 @@ func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project
 		// one already stopped at discovery never had one - so the restart is
 		// scheduled here too, and the event path leaves a queued one alone.
 		if errors.Is(res.err, ErrNotRunning) {
-			reportStatus(ctx, conn, project, results, inst, shared.HealthStatusStopped)
+			reportStatus(ctx, logger, conn, res.project, results, inst, shared.HealthStatusStopped)
 
 			if slices.Contains(shared.RestartPolicies, inst.config.restart) {
 				inst.action = instanceActionRestart
@@ -877,13 +877,13 @@ func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project
 			// As in docker, the first success ends the start period early.
 			inst.inRestart = false
 		} else {
-			log.Debug("Check failed", "instance", inst.name, "inStart", inst.inRestart,
+			logger.Debug("Check failed", "instance", inst.name, "inStart", inst.inRestart,
 				"failures", inst.failures, "retries", inst.config.retries, "error", res.err)
 
 			want = checkFailed(inst, now)
 		}
 
-		reportStatus(ctx, conn, project, results, inst, want)
+		reportStatus(ctx, logger, conn, res.project, results, inst, want)
 
 		// A stop in flight or an escalation already set the deadline it wants.
 		if inst.action == instanceActionRestart {
@@ -897,14 +897,14 @@ func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project
 
 		inst.due = now.Add(interval + rand.N(interval/4)) // nolint:gosec
 	case instanceResultRestarted:
-		inst, ok := instances[res.name]
+		inst, ok := instances[res.Key()]
 		if !ok {
-			log.Error("Got start result for an unknown instance", "instance", res.name, "result", res.err)
+			logger.Error("Got start result for an unknown instance", "instance", res.name, "result", res.err)
 			return
 		}
 
 		if res.ctx != inst.actionContext {
-			log.Debug("Dropping a stale restart result", "instance", res.name)
+			logger.Debug("Dropping a stale restart result", "instance", res.name)
 			return
 		}
 
@@ -920,7 +920,7 @@ func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project
 				return
 			}
 
-			log.Error("Restart failed", "instance", res.name, "error", res.err)
+			logger.Error("Restart failed", "instance", res.name, "error", res.err)
 
 			inst.state = instanceIdle
 			inst.action = instanceActionRestart
@@ -930,36 +930,16 @@ func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project
 			return
 		}
 
-		log.Info("Restarted", "instance", inst.name)
+		logger.Info("Restarted", "instance", inst.name)
 		instanceStarted(inst, time.Now())
-	case instanceResultRoster:
-		if res.err != nil {
-			log.Error("Discovering the project failed", "error", res.err)
-			return
-		}
-
-		// Anything the pass did not see is gone from the project.
-		for name, inst := range instances {
-			if slices.Contains(res.names, name) {
-				continue
-			}
-
-			log.Debug("Dropping an instance the project no longer has", "instance", name)
-
-			if inst.actionCancel != nil {
-				inst.actionCancel()
-			}
-
-			delete(instances, name)
-		}
 	case instanceResultStatus:
-		inst, ok := instances[res.name]
+		inst, ok := instances[res.Key()]
 		if !ok {
 			return
 		}
 
 		if res.err != nil {
-			log.Warn("Writing the health status failed",
+			logger.Warn("Writing the health status failed",
 				"instance", res.name, "status", res.status, "error", res.err)
 
 			// Nothing landed, so forget what reportStatus recorded.
@@ -971,6 +951,6 @@ func handleInstanceResult(ctx context.Context, conn *iclient.Connection, project
 		}
 
 		// Only transitions get here, so this stays quiet on a healthy fleet.
-		log.Info("Health status", "instance", res.name, "status", res.status)
+		logger.Info("Health status", "instance", res.name, "status", res.status)
 	}
 }

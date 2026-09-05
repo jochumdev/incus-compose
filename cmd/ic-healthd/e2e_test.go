@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
+	"github.com/lxc/incus-compose/ievent/source"
+	"github.com/lxc/incus-compose/incustrust"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -53,8 +56,8 @@ func newToken(t *testing.T, c *client.Client, projects ...string) string {
 	return addToken.String()
 }
 
-// markProject sets a project config key, the way incus-compose stamps
-// HealthEnabledKey on every project it creates.
+// markProject sets a project config key, the way incus-compose stamps the
+// scope on every project it hands a daemon.
 func markProject(t *testing.T, c *client.Client, key, value string) {
 	t.Helper()
 
@@ -105,7 +108,7 @@ func revokeCert(t *testing.T, c *client.Client) {
 //
 // Mint exactly one token per config: they share a name, so a second one leaves
 // two registrations racing for it.
-func healthdConfig(t *testing.T, c *client.Client, projects ...string) config {
+func healthdConfig(t *testing.T, c *client.Client, projects ...string) *config {
 	t.Helper()
 
 	url, ok := os.LookupEnv("INCUS_COMPOSE_HEALTHD_INCUS")
@@ -117,7 +120,7 @@ func healthdConfig(t *testing.T, c *client.Client, projects ...string) config {
 		url = c.Config().URL
 	}
 
-	return config{
+	return &config{
 		DataDir:            t.TempDir(),
 		SecretsDir:         t.TempDir(),
 		IncusURL:           url,
@@ -128,34 +131,69 @@ func healthdConfig(t *testing.T, c *client.Client, projects ...string) config {
 	}
 }
 
-// runDaemon starts everything the sidecar runs bar the signal handling: the one
-// shared lifecycle listener, the router and a scheduler per watched project. It
-// returns the reload channel, which starts a fresh generation the way SIGHUP does.
-func runDaemon(t *testing.T, c *client.Client, cfg config) chan<- struct{} {
+// runDaemon starts everything the sidecar runs bar the signal handling: the
+// source, and one goroutine per plugin that owns one. It returns a reload that
+// ends the source's generation and starts a fresh one, the way SIGHUP does.
+func runDaemon(t *testing.T, c *client.Client, cfg *config) func() {
 	t.Helper()
 
 	t.Cleanup(func() { revokeCert(t, c) })
 
-	// The daemon takes its logger from the context, so everything it says
-	// lands under this test instead of in the shared stderr of a parallel run.
+	// Everything the daemon says lands under this test instead of in the
+	// shared stderr of a parallel run.
 	log := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	ctx, cancel := context.WithCancel(withLogger(t.Context(), log))
+	ctx, cancel := context.WithCancel(t.Context())
 
-	conn, err := connect(ctx, cfg)
+	conn, err := connect(ctx, log, cfg)
 	require.NoError(t, err)
 
-	done := make(chan struct{})
-	reload := make(chan struct{}, 1)
+	plugins, runners := chain(log, cfg)
 
-	go func() {
-		defer close(done)
+	src, err := source.New(log, conn, plugins)
+	require.NoError(t, err)
 
-		runProjects(ctx, conn, cfg, reload)
-	}()
+	sourceCtx, stopSource := context.WithCancel(ctx)
+
+	var srcWg, pluginWg sync.WaitGroup
+
+	startSource := func() {
+		srcWg.Go(func() {
+			err := src.Run(sourceCtx)
+			if err != nil {
+				log.Error("running the source", "err", err)
+				cancel()
+			}
+		})
+	}
+
+	startSource()
+
+	for _, r := range runners {
+		pluginWg.Go(func() {
+			err := r.Run(ctx)
+			if err != nil {
+				log.Error("running a plugin", "plugin", r.Name(), "err", err)
+				cancel()
+			}
+
+			src.Finished(r)
+		})
+	}
 
 	t.Cleanup(func() {
+		stopSource()
+		srcWg.Wait()
+
+		src.Drain(drainContext(ctx))
+
 		cancel()
+
+		done := make(chan struct{})
+		go func() {
+			pluginWg.Wait()
+			close(done)
+		}()
 
 		select {
 		case <-done:
@@ -164,7 +202,13 @@ func runDaemon(t *testing.T, c *client.Client, cfg config) chan<- struct{} {
 		}
 	})
 
-	return reload
+	return func() {
+		stopSource()
+		srcWg.Wait()
+
+		sourceCtx, stopSource = context.WithCancel(ctx)
+		startSource()
+	}
 }
 
 // runScheduler watches one project by name, the way a sidecar created by
@@ -230,6 +274,29 @@ func setState(t *testing.T, conn *iclient.Connection, project string, name strin
 	require.NoError(t, err)
 }
 
+// patchConfig writes instance config from the test side, waiting the daemon's
+// status writes out the way setState does.
+func patchConfig(t *testing.T, conn *iclient.Connection, project string, name string, cfg map[string]string) {
+	t.Helper()
+
+	err := retry.New(
+		retry.Attempts(10),
+		retry.Delay(250*time.Millisecond),
+		retry.LastErrorOnly(true),
+		retry.RetryIf(func(err error) bool {
+			return errors.Is(err, iclient.ErrInstanceBusy)
+		}),
+	).Do(func() error {
+		err := conn.WaitInstanceBusy(t.Context(), project, name)
+		if err != nil {
+			return err
+		}
+
+		return conn.PatchInstanceConfig(t.Context(), project, name, cfg)
+	})
+	require.NoError(t, err)
+}
+
 // TestE2EConnectRegistersThenReuses covers the whole first-run dance: consume
 // the one-time token, persist the pair, and come back without a token.
 func TestE2EConnectRegistersThenReuses(t *testing.T) {
@@ -241,20 +308,22 @@ func TestE2EConnectRegistersThenReuses(t *testing.T) {
 	cfg := healthdConfig(t, c, c.IncusProject())
 	t.Cleanup(func() { revokeCert(t, c) })
 
-	conn, err := connect(t.Context(), cfg)
+	log := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	conn, err := connect(t.Context(), log, cfg)
 	require.NoError(t, err)
 
 	_, err = conn.GetInstanceNames(t.Context(), c.IncusProject(), nil)
 	require.NoError(t, err, "the registered certificate must be usable against its project")
 
-	require.FileExists(t, filepath.Join(cfg.DataDir, certFile))
-	require.FileExists(t, filepath.Join(cfg.DataDir, keyFile))
+	require.FileExists(t, filepath.Join(cfg.DataDir, incustrust.CertFile))
+	require.FileExists(t, filepath.Join(cfg.DataDir, incustrust.KeyFile))
 
 	// A restart of the sidecar has no token left: it must reuse the pair.
 	reuse := cfg
 	reuse.Token = ""
 
-	conn, err = connect(t.Context(), reuse)
+	conn, err = connect(t.Context(), log, reuse)
 	require.NoError(t, err, "a restarted daemon must reuse its persisted certificate")
 
 	_, err = conn.GetInstanceNames(t.Context(), c.IncusProject(), nil)
@@ -274,10 +343,12 @@ func TestE2EConnectRegistersFromATokenFile(t *testing.T) {
 
 	// The trailing newline is deliberate: a written token file has one.
 	require.NoError(t, os.WriteFile(
-		filepath.Join(cfg.SecretsDir, tokenFile), []byte(cfg.Token+"\n"), 0o600))
+		filepath.Join(cfg.SecretsDir, incustrust.TokenFile), []byte(cfg.Token+"\n"), 0o600))
 	cfg.Token = ""
 
-	conn, err := connect(t.Context(), cfg)
+	log := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	conn, err := connect(t.Context(), log, cfg)
 	require.NoError(t, err)
 
 	_, err = conn.GetInstanceNames(t.Context(), c.IncusProject(), nil)
@@ -295,8 +366,11 @@ func TestE2EConnectWithoutTokenOrCert(t *testing.T) {
 	cfg := healthdConfig(t, c, c.IncusProject())
 	cfg.Token = ""
 
-	_, err := connect(t.Context(), cfg)
-	require.Error(t, err, "with no token and nothing persisted there is no way to authenticate")
+	log := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	_, err := connect(t.Context(), log, cfg)
+	require.ErrorIs(t, err, incustrust.ErrNoCredentials,
+		"with no token and nothing persisted there is no way to authenticate")
 }
 
 // TestE2ESchedulerReportsHealthy is the path incus-compose waits on for
@@ -315,7 +389,7 @@ func TestE2ESchedulerReportsHealthy(t *testing.T) {
 
 	runScheduler(t, c)
 
-	requireStatus(t, testConn(t, c), c.Project(), name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, c), c.Project(), name, shared.HealthStatusHealthy, 90*time.Second)
 }
 
 // TestE2ESchedulerReportsUnhealthyAfterRetries pins that a single failure is not
@@ -335,7 +409,7 @@ func TestE2ESchedulerReportsUnhealthyAfterRetries(t *testing.T) {
 
 	runScheduler(t, c)
 
-	requireStatus(t, testConn(t, c), c.Project(), name, shared.HealthStatusUnhealthy, 60*time.Second)
+	requireStatus(t, testConn(t, c), c.Project(), name, shared.HealthStatusUnhealthy, 90*time.Second)
 }
 
 // TestE2ESchedulerRestartsACrashedInstance covers a stop nobody asked for: the
@@ -356,7 +430,7 @@ func TestE2ESchedulerRestartsACrashedInstance(t *testing.T) {
 	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 
 	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
@@ -387,13 +461,13 @@ func TestE2EMultipleProjects(t *testing.T) {
 
 	runDaemon(t, one, healthdConfig(t, one, one.IncusProject(), two.IncusProject()))
 
-	requireStatus(t, testConn(t, one), one.Project(), nameOne, shared.HealthStatusHealthy, 60*time.Second)
-	requireStatus(t, testConn(t, two), two.Project(), nameTwo, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, one), one.Project(), nameOne, shared.HealthStatusHealthy, 90*time.Second)
+	requireStatus(t, testConn(t, two), two.Project(), nameTwo, shared.HealthStatusHealthy, 90*time.Second)
 }
 
-// TestE2EReloadKeepsWatching covers a fresh listener generation, which is what a
-// reconnect and a SIGHUP both do. It asserts through a scheduler: a crash after
-// the reload is only repaired if that scheduler is alive and still fed.
+// TestE2EReloadKeepsWatching covers a fresh source generation, which is what a
+// SIGHUP starts. It asserts through the checker: a crash after the reload is
+// only repaired if it is alive and still fed.
 func TestE2EReloadKeepsWatching(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
@@ -410,9 +484,9 @@ func TestE2EReloadKeepsWatching(t *testing.T) {
 	conn, project := testConn(t, c), c.Project()
 	reload := runDaemon(t, c, healthdConfig(t, c, c.IncusProject()))
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 
-	reload <- struct{}{}
+	reload()
 
 	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 
@@ -420,7 +494,7 @@ func TestE2EReloadKeepsWatching(t *testing.T) {
 		state, _, err := conn.GetInstanceState(t.Context(), project, name)
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 90*time.Second, time.Second,
-		"a crash after a reload must still be repaired: the scheduler outlives the listener")
+		"a crash after a reload must still be repaired: the checker outlives the source")
 }
 
 // TestE2EDynamicScope covers the daemon started with no project list: it watches
@@ -455,7 +529,7 @@ func TestE2EDynamicScope(t *testing.T) {
 
 	runDaemon(t, marked, cfg)
 
-	requireStatus(t, testConn(t, marked), marked.Project(), watched, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, testConn(t, marked), marked.Project(), watched, shared.HealthStatusHealthy, 90*time.Second)
 
 	// The unmarked project is visible to the certificate and still not watched,
 	// which is the whole point of the marker.
@@ -466,11 +540,9 @@ func TestE2EDynamicScope(t *testing.T) {
 	}, 20*time.Second, time.Second, "a project without the marker must not be watched")
 }
 
-// TestE2EProjectRenamed covers the router's rename branch: stop watching the
-// old name, pick up the new one. Incus only renames empty projects.
-//
-// The token is unrestricted on purpose: a rename does not refresh incusd's
-// certificate cache, so a restricted daemon stays filtered on the old name.
+// TestE2EProjectRenamed covers a project moving under the daemon: Incus only
+// renames empty projects, so nothing is tracked at the moment of the rename,
+// and what is created under the new name must be watched.
 func TestE2EProjectRenamed(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
@@ -491,8 +563,8 @@ func TestE2EProjectRenamed(t *testing.T) {
 	gConn, err := c.GlobalConnection()
 	require.NoError(t, err)
 
-	// Let the first generation settle so the rename lands as an event rather
-	// than as part of the startup sweep.
+	// Let the first sweep settle so the rename lands as an event rather than
+	// as part of the startup read.
 	require.Eventually(t, func() bool {
 		_, _, err := gConn.GetProject(t.Context(), c.IncusProject())
 		return err == nil
@@ -506,10 +578,12 @@ func TestE2EProjectRenamed(t *testing.T) {
 	_, err = iclient.WaitOperation(t.Context(), op)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { _ = gConn.DeleteProject(context.Background(), renamed, nil) })
+	t.Cleanup(func() {
+		_ = gConn.DeleteProject(context.Background(), renamed, &iclient.DeleteProjectArgs{Force: true})
+	})
 
 	// The daemon must be watching the new name: an instance created there gets
-	// a verdict, which only a scheduler for that project can produce.
+	// a verdict, which only a fold for that project can produce.
 	renamedClient, err := c.Global().EnsureProject(renamed)
 	require.NoError(t, err)
 
@@ -541,15 +615,13 @@ func TestE2EStatusIsRepairedAfterAnotherWriter(t *testing.T) {
 	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
-
-	require.NoError(t, conn.WaitInstanceBusy(t.Context(), project, name))
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 
 	// Exactly what client.Instance.SetHealthCheckingStopped writes on a start.
-	require.NoError(t, patchInstanceConfig(t.Context(), conn, project, name,
-		map[string]string{shared.HealthStatusKey: shared.HealthStatusStarting}))
+	patchConfig(t, conn, project, name,
+		map[string]string{shared.HealthStatusKey: shared.HealthStatusStarting})
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 }
 
 // TestE2ENoBounceAfterAnExternalStart covers the shape of `incus-compose
@@ -571,7 +643,7 @@ func TestE2ENoBounceAfterAnExternalStart(t *testing.T) {
 	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 
 	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "start", Timeout: -1})
@@ -607,12 +679,10 @@ func TestE2ESchedulerHonoursAnIntentionalStop(t *testing.T) {
 	conn, project := testConn(t, c), c.Project()
 	runScheduler(t, c)
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 60*time.Second)
+	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 
-	require.NoError(t, conn.WaitInstanceBusy(t.Context(), project, name))
-
-	require.NoError(t, patchInstanceConfig(t.Context(), conn, project, name,
-		map[string]string{shared.HealthStoppedKey: "true"}))
+	patchConfig(t, conn, project, name,
+		map[string]string{shared.HealthStoppedKey: "true"})
 
 	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
 

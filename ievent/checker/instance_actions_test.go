@@ -1,7 +1,8 @@
-package main
+package checker
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestInstanceExecReportsTheExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			code, _, _, err := instanceExec(t.Context(), conn, project, name, command{cmd: tt.cmd})
+			code, _, _, err := instanceExec(t.Context(), slog.Default(), conn, project, name, command{cmd: tt.cmd})
 
 			require.NoError(t, err, "a command that ran is not an error, whatever it returned")
 			require.Equal(t, tt.want, code)
@@ -51,7 +52,7 @@ func TestInstanceExecCapturesOutput(t *testing.T) {
 	c := testProject(t, "healthd-exec-out-")
 	name := testContainer(t, c, "web", nil, true)
 
-	code, stdout, stderr, err := instanceExec(t.Context(), testConn(t, c), c.Project(), name,
+	code, stdout, stderr, err := instanceExec(t.Context(), slog.Default(), testConn(t, c), c.Project(), name,
 		command{cmd: []string{"/bin/sh", "-c", "echo to-stdout; echo to-stderr >&2; exit 3"}})
 
 	require.NoError(t, err)
@@ -73,7 +74,7 @@ func TestInstanceExecHonoursOCIProcess(t *testing.T) {
 
 	report := []string{"/bin/sh", "-c", "pwd; id -u; id -g"}
 
-	code, stdout, _, err := instanceExec(t.Context(), conn, project, name,
+	code, stdout, _, err := instanceExec(t.Context(), slog.Default(), conn, project, name,
 		command{cmd: report, cwd: "/tmp", uid: 1000, gid: 1001})
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
@@ -81,7 +82,7 @@ func TestInstanceExecHonoursOCIProcess(t *testing.T) {
 
 	// Leaving them unset is what every caller passed before this, and has to
 	// keep meaning "wherever exec lands, as root".
-	_, stdout, _, err = instanceExec(t.Context(), conn, project, name, command{cmd: report})
+	_, stdout, _, err = instanceExec(t.Context(), slog.Default(), conn, project, name, command{cmd: report})
 	require.NoError(t, err)
 	require.Equal(t, []string{"/root", "0", "0"}, strings.Fields(stdout))
 }
@@ -100,7 +101,7 @@ func TestInstanceExecHonoursTheContext(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, _, err := instanceExec(ctx, testConn(t, c), c.Project(), name, command{cmd: []string{"/bin/sh", "-c", "sleep 300"}})
+		_, _, _, err := instanceExec(ctx, slog.Default(), testConn(t, c), c.Project(), name, command{cmd: []string{"/bin/sh", "-c", "sleep 300"}})
 		done <- err
 	}()
 
@@ -137,7 +138,7 @@ func TestInstanceCheckActionVerdicts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := instanceCheckAction(t.Context(), conn, project, name, &instanceConfig{
+			res := instanceCheckAction(t.Context(), slog.Default(), conn, project, name, &instanceConfig{
 				test:    tt.test,
 				timeout: 30 * time.Second,
 			})
@@ -164,7 +165,7 @@ func TestInstanceCheckActionNotRunning(t *testing.T) {
 	c := testProject(t, "healthd-check-down-")
 	name := testContainer(t, c, "web", nil, false)
 
-	res := instanceCheckAction(t.Context(), testConn(t, c), c.Project(), name, &instanceConfig{
+	res := instanceCheckAction(t.Context(), slog.Default(), testConn(t, c), c.Project(), name, &instanceConfig{
 		test:    []string{"CMD", "/bin/true"},
 		timeout: 30 * time.Second,
 	})
@@ -248,7 +249,7 @@ func TestPatchInstanceConfigWritesOnlyItsKeys(t *testing.T) {
 	}, false)
 	conn, project := testConn(t, c), c.Project()
 
-	require.NoError(t, writeInstanceStatus(t.Context(), conn, project, name, shared.HealthStatusUnhealthy))
+	require.NoError(t, WriteStatus(t.Context(), slog.Default(), conn, project, name, shared.HealthStatusUnhealthy))
 
 	inst, _, err := conn.GetInstance(t.Context(), project, name, nil)
 	require.NoError(t, err)
@@ -257,37 +258,4 @@ func TestPatchInstanceConfigWritesOnlyItsKeys(t *testing.T) {
 	require.Equal(t, "untouched", inst.Config["user.keep.me"])
 	require.Equal(t, `["CMD","/bin/true"]`, inst.Config[shared.HealthKeyPrefix+"test"],
 		"the daemon owns the status key and nothing else")
-}
-
-// TestDiscoverInstanceReadsTheLiveKeys pins the round trip from what
-// incus-compose wrote to what the scheduler runs on.
-func TestDiscoverInstanceReadsTheLiveKeys(t *testing.T) {
-	t.Parallel()
-	testlib.SkipLocal(t)
-
-	c := testProject(t, "healthd-discover-one-")
-	name := testContainer(t, c, "web", healthKeys(map[string]string{
-		"test":     `["CMD","/bin/true"]`,
-		"interval": "9s",
-		"retries":  "4",
-		"restart":  "unless-stopped",
-		// The status incus-compose writes at creation, which the daemon has to
-		// read back rather than assume.
-		"status": shared.HealthStatusStarting,
-	}), true)
-
-	results := make(chan instanceResult, 1)
-	discoverOne(t.Context(), testConn(t, c), c.Project(), results, name)
-
-	res := <-results
-	require.NoError(t, res.err)
-
-	require.Equal(t, []string{"CMD", "/bin/true"}, res.config.test)
-	require.Equal(t, 9*time.Second, res.config.interval)
-	require.Equal(t, 4, res.config.retries)
-	require.Equal(t, "unless-stopped", res.config.restart)
-	require.True(t, res.config.running)
-
-	// The status rides along, because the daemon is not the only writer of it.
-	require.Equal(t, shared.HealthStatusStarting, res.status)
 }

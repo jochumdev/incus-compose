@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -35,7 +34,7 @@ func testProject(t *testing.T, prefix string) *client.Client {
 	require.NoError(t, err)
 	require.NoError(t, gc.Connect())
 
-	name := prefix + strings.ToLower(RandString(12))
+	name := prefix + strings.ToLower(shared.RandString(12))
 
 	c, err := gc.EnsureProject(name,
 		client.EnsureProjectWithCreate(),
@@ -101,16 +100,8 @@ func testContainer(t *testing.T, c *client.Client, name string, keys map[string]
 	return inst.IncusName()
 }
 
-// testConn returns the Incus connection the actions take. The project each
-// call names comes from the client beside it.
+// testConn returns the Incus connection the assertions read through.
 func testConn(t *testing.T, _ *client.Client) *iclient.Connection {
-	t.Helper()
-
-	return dialTestRemote(t)
-}
-
-// dialTestRemote dials the remote the test environment points at.
-func dialTestRemote(t *testing.T) *iclient.Connection {
 	t.Helper()
 
 	config, err := iclient.ReadConfig("")
@@ -123,53 +114,6 @@ func dialTestRemote(t *testing.T) *iclient.Connection {
 	require.NoError(t, err)
 
 	return conn
-}
-
-// refusedConn returns a real client whose every call fails immediately, for the
-// state machine tests: they never want an answer, only somewhere to send.
-func refusedConn(t *testing.T) *iclient.Connection {
-	t.Helper()
-
-	var lc net.ListenConfig
-
-	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	addr := ln.Addr().String()
-	require.NoError(t, ln.Close())
-
-	conn, err := iclient.NewConnection(&iclient.ConfigRemoteInfo{
-		Name:               "refused",
-		Addrs:              []string{"https://" + addr},
-		Protocol:           "incus",
-		InsecureSkipVerify: true,
-	})
-	require.NoError(t, err)
-
-	return conn
-}
-
-// testInstance builds the Incus instance parseInstanceConfig reads, with the
-// healthcheck keys merged over a minimal valid base.
-func testInstance(name string, running bool, config map[string]string) *incusApi.Instance {
-	status := incusApi.Stopped
-	if running {
-		status = incusApi.Running
-	}
-
-	cfg := incusApi.ConfigMap{}
-	for k, v := range config {
-		cfg[k] = v
-	}
-
-	return &incusApi.Instance{
-		Name:       name,
-		StatusCode: status,
-		Status:     status.String(),
-		InstancePut: incusApi.InstancePut{
-			Config: cfg,
-		},
-	}
 }
 
 // healthKeys is shorthand for the user.healthcheck.* map a test wants, carrying

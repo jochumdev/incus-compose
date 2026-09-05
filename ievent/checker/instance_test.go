@@ -1,4 +1,4 @@
-package main
+package checker
 
 import (
 	"testing"
@@ -79,7 +79,7 @@ func TestParseInstanceConfigSelects(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := parseInstanceConfig(testInstance("web-1", true, tt.config))
+			cfg, err := parseInstanceConfig(tt.config, true)
 
 			if tt.wantErr != nil {
 				require.ErrorIs(t, err, tt.wantErr)
@@ -98,8 +98,7 @@ func TestParseInstanceConfigSelects(t *testing.T) {
 func TestParseInstanceConfigDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := parseInstanceConfig(testInstance("web-1", true,
-		healthKeys(map[string]string{"test": `["CMD","true"]`})))
+	cfg, err := parseInstanceConfig(healthKeys(map[string]string{"test": `["CMD","true"]`}), true)
 	require.NoError(t, err)
 
 	require.Equal(t, time.Duration(0), cfg.startPeriod, "start_period defaults to disabled")
@@ -116,7 +115,7 @@ func TestParseInstanceConfigDefaults(t *testing.T) {
 func TestParseInstanceConfigReadsEveryKey(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := parseInstanceConfig(testInstance("web-1", false, healthKeys(map[string]string{
+	cfg, err := parseInstanceConfig(healthKeys(map[string]string{
 		"test":           `["CMD-SHELL","exit 0"]`,
 		"start_period":   "45s",
 		"start_interval": "2s",
@@ -124,7 +123,7 @@ func TestParseInstanceConfigReadsEveryKey(t *testing.T) {
 		"timeout":        "3s",
 		"retries":        "5",
 		"restart":        "unless-stopped",
-	})))
+	}), false)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"CMD-SHELL", "exit 0"}, cfg.test)
@@ -165,7 +164,7 @@ func TestParseInstanceConfigRejects(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := parseInstanceConfig(testInstance("web-1", true, tt.config))
+			cfg, err := parseInstanceConfig(tt.config, true)
 
 			require.Error(t, err)
 			require.Nil(t, cfg, "a rejected config must not be handed on half-built")
@@ -182,8 +181,7 @@ func TestParseInstanceConfigRestartWithoutTest(t *testing.T) {
 		t.Run(policy, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := parseInstanceConfig(testInstance("web-1", true,
-				healthKeys(map[string]string{"restart": policy})))
+			cfg, err := parseInstanceConfig(healthKeys(map[string]string{"restart": policy}), true)
 			require.NoError(t, err)
 
 			require.Equal(t, []string{"NONE"}, cfg.test,
@@ -271,14 +269,13 @@ func TestInstanceConfigEquals(t *testing.T) {
 func TestParseInstanceConfigStatusIsNotRead(t *testing.T) {
 	t.Parallel()
 
-	with, err := parseInstanceConfig(testInstance("web-1", true, healthKeys(map[string]string{
+	with, err := parseInstanceConfig(healthKeys(map[string]string{
 		"test":   `["CMD","true"]`,
 		"status": shared.HealthStatusUnhealthy,
-	})))
+	}), true)
 	require.NoError(t, err)
 
-	without, err := parseInstanceConfig(testInstance("web-1", true,
-		healthKeys(map[string]string{"test": `["CMD","true"]`})))
+	without, err := parseInstanceConfig(healthKeys(map[string]string{"test": `["CMD","true"]`}), true)
 	require.NoError(t, err)
 
 	require.True(t, with.equals(without), "the status key must not change the parsed config")

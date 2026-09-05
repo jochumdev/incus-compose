@@ -7,11 +7,33 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 COPY . ./
+# Verified in the builder rather than trusted: the version subcommand is the
+# cheapest thing that proves the binary links and its command tree parses -
+# which is what a chain composed at compile time can silently get wrong.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -tags=netgo -ldflags="-w -s -X github.com/lxc/incus-compose/cmd/ic-healthd/version.Version=${VERSION}" -trimpath -o /ic-healthd ./cmd/ic-healthd
+    CGO_ENABLED=0 go build -tags=netgo -ldflags="-w -s -X main.version=${VERSION}" -trimpath -o /ic-healthd ./cmd/ic-healthd && \
+    /ic-healthd version && \
+    /ic-healthd run --help > /dev/null
 
 FROM docker.io/library/busybox:glibc
 COPY --from=build /ic-healthd /usr/local/bin/ic-healthd
+
+# Sets GOMEMLIMIT from the cgroup limit before handing over. Nothing else bounds
+# the Go heap, so a limits.memory that fits today's fleet OOM-kills on a larger
+# one without it.
+COPY --chmod=0755 container/ic-healthd/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+WORKDIR /
+
 USER 65534:65534
-ENTRYPOINT ["/usr/local/bin/ic-healthd", "run"]
+
+# 8080 is /metrics, /health and /ready.
+EXPOSE 8080
+
+ENTRYPOINT ["entrypoint.sh"]
+
+# Everything else comes from the environment: DNS_INCUS, DNS_TOKEN,
+# DNS_FORWARD and the rest, which is what a compose file sets. There is no
+# configuration file to mount.
+CMD ["run"]

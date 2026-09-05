@@ -11,6 +11,26 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
+## [Unreleased]
+
+### Added
+
+- ic-healthd serves `/metrics`, `/health` and `/ready` on `:8080`; an empty
+  `--http` / `INCUS_COMPOSE_HEALTHD_HTTP` disables it. (by @jochumdev)
+- Running ic-healthd by hand can now present an already-trusted certificate
+  (`--client-cert` with `--client-key`) or connect as a remote from the Incus
+  CLI configuration (`--remote` with `--use-remote`). (by @jochumdev)
+
+### Changed
+
+- ic-healthd is rebuilt on the same event framework as ic-dns: one chain of
+  plugins replaces its listener, router and per-project schedulers. The sidecar
+  contract is unchanged - the same flags, environment variables and status
+  writes, and `healthd reload` still forces a full resync. One timing
+  difference: a project that opts into a running daemon via its marker is picked
+  up at the daemon's next sweep of the fleet rather than within seconds, while
+  instance events in it are judged from the moment they arrive. (by @jochumdev)
+
 ## [v1.3.2] - 2026-08-30
 
 ### Changed

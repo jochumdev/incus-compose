@@ -29,7 +29,7 @@ COPY --from=build /out/ic-dns /usr/local/sbin/ic-dns
 # Sets GOMEMLIMIT from the cgroup limit before handing over. Nothing else bounds
 # the Go heap, so a limits.memory that fits today's fleet OOM-kills on a larger
 # one without it.
-COPY --chmod=0755 container/ic-dns/entrypoint.sh /usr/local/sbin/entrypoint.sh
+COPY --chmod=0755 container/ic-dns/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 WORKDIR /
 
