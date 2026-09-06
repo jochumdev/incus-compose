@@ -27,6 +27,13 @@ type downArgs struct {
 	Writer     io.Writer
 	Reverse    bool
 	NoHealthd  bool
+
+	// ReportErrors makes down return a teardown failure instead of only logging
+	// it. `up --recreate` sets it, because it calls down() before the ensure
+	// phase and a delete that silently failed leaves that ensure accepting the
+	// surviving instance — a recreate that exits 0 and changes nothing. A plain
+	// `down` stays best-effort.
+	ReportErrors bool
 }
 
 // down stops and removes the project's resources.
@@ -144,6 +151,13 @@ func down(ctx context.Context, p *project.Project, c *client.Client, args downAr
 			c.LogError("Deleting the project", "error", err)
 			return errLogged.Wrap(err)
 		}
+	}
+
+	// Reported only now, so the one-offs and the project above are still cleaned
+	// up. The kinds meaning "already gone" were filtered per resource by the
+	// IgnoreError hooks at the top, so anything left here is a real failure.
+	if errDel != nil && args.ReportErrors {
+		return errLogged.Wrap(errDel)
 	}
 
 	return nil
