@@ -1137,6 +1137,38 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
 	})
 
+	t.Run("internal network gets gateway none without a static address", func(t *testing.T) {
+		t.Parallel()
+		testlib.SkipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
+
+		p := &types.Project{Networks: types.Networks{"isolated": {}}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"isolated": {Extensions: types.Extensions{"x-incus-compose": map[string]any{"internal": true}}},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv6.gateway"])
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv4.address")
+	})
+
+	t.Run("an ordinary address-less network still gets no gateway key", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{"frontend": {}}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv4.gateway")
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv6.gateway")
+	})
+
 	t.Run("an external network is named by its compose name", func(t *testing.T) {
 		t.Parallel()
 
