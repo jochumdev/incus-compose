@@ -1333,13 +1333,31 @@ func serviceExtraDevices(service types.ServiceConfig) ([]client.InstanceDevice, 
 			return nil, fmt.Errorf("x-incus-compose.devices: device %q is missing 'type'", name)
 		}
 
-		devices = append(devices, client.InstanceDevice{
-			Name: name,
-			Config: client.InstanceDeviceConfig{
-				DeviceType: ext["type"],
-				Extensions: ext,
-			},
-		})
+		cfg := client.InstanceDeviceConfig{
+			DeviceType: ext["type"],
+			Extensions: ext,
+		}
+
+		// Mirror the mount point into the typed config as well as Extensions.
+		// devicePath() -- which decides whether a path an image declares as a
+		// VOLUME is already covered by a device -- reads Config.Disk.Path and
+		// Config.Tmpfs.Path, never Extensions. Leaving them empty made every
+		// x-incus-compose disk invisible to that check, so prefetchVolumes()
+		// created an auto-volume for an already-covered path and Incus then
+		// rejected the instance with "More than one disk device uses the same
+		// path" -- after `up --recreate` had already deleted the old instance.
+		//
+		// Rendering is unaffected: toDiskDevice()/toTmpfsDevice() apply
+		// maps.Copy(device, Extensions) last, so Extensions still win with the
+		// identical value.
+		switch ext["type"] {
+		case client.InstanceDeviceTypeDisk:
+			cfg.Disk.Path = ext["path"]
+		case client.InstanceDeviceTypeTmpfs:
+			cfg.Tmpfs.Path = ext["path"]
+		}
+
+		devices = append(devices, client.InstanceDevice{Name: name, Config: cfg})
 	}
 
 	return devices, nil
