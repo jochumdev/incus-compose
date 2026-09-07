@@ -3,6 +3,7 @@ module github.com/lxc/incus-compose
 go 1.26.7
 
 require (
+	github.com/KimMachineGun/automemlimit v1.0.0
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/avast/retry-go/v5 v5.0.0
 	github.com/bradleyjkemp/cupaloy/v2 v2.8.0
@@ -102,4 +103,7 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require (
+	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)

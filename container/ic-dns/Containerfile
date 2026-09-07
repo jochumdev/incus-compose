@@ -26,19 +26,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM ${BASE}
 COPY --from=build /out/ic-dns /usr/local/sbin/ic-dns
 
-# Sets GOMEMLIMIT from the cgroup limit before handing over. Nothing else bounds
-# the Go heap, so a limits.memory that fits today's fleet OOM-kills on a larger
-# one without it.
-COPY --chmod=0755 container/ic-dns/entrypoint.sh /usr/local/bin/entrypoint.sh
-
 WORKDIR /
 
 # 53 is the answer, 8080 is /metrics, /health and /ready.
 EXPOSE 53 53/udp 8080
 
-ENTRYPOINT ["entrypoint.sh"]
-
 # Everything else comes from the environment: DNS_INCUS, DNS_TOKEN,
 # DNS_FORWARD and the rest, which is what a compose file sets. There is no
 # configuration file to mount.
-CMD ["run"]
+CMD ["ic-dns", "run"]

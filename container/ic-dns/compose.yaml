@@ -31,10 +31,6 @@ services:
       context: ../..
       dockerfile: container/ic-dns/Containerfile
 
-    # entrypoint rather than command: incus-compose has no command, and
-    # entrypoint.sh is what sets GOMEMLIMIT from the cgroup limit before handing
-    # over. run is the subcommand; everything else is environment.
-    entrypoint: ["entrypoint.sh", "run"]
 
     environment:
       DNS_INCUS: "${INCUS_ENDPOINT:?give the Incus HTTPS API, e.g. https://10.0.0.1:8443}"

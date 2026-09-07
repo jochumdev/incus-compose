@@ -19,21 +19,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM docker.io/library/busybox:glibc
 COPY --from=build /ic-healthd /usr/local/bin/ic-healthd
 
-# Sets GOMEMLIMIT from the cgroup limit before handing over. Nothing else bounds
-# the Go heap, so a limits.memory that fits today's fleet OOM-kills on a larger
-# one without it.
-COPY --chmod=0755 container/ic-healthd/entrypoint.sh /usr/local/bin/entrypoint.sh
-
 WORKDIR /
 
 USER 65534:65534
 
-# 8080 is /metrics, /health and /ready.
-EXPOSE 8080
+# 9153 is /metrics, /health and /ready.
+EXPOSE 9153
 
-ENTRYPOINT ["entrypoint.sh"]
-
-# Everything else comes from the environment: DNS_INCUS, DNS_TOKEN,
-# DNS_FORWARD and the rest, which is what a compose file sets. There is no
-# configuration file to mount.
-CMD ["run"]
+CMD ["ic-healthd", "run"]

@@ -1,8 +1,0 @@
-services:
-  healthd:
-    image: ghcr.io/lxc/incus-compose/ic-healthd:${VERSION}
-    build:
-      args:
-        VERSION: ${VERSION}
-      context: ../../
-      dockerfile: container/ic-healthd/Containerfile
