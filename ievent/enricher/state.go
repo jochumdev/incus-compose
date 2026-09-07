@@ -277,10 +277,18 @@ func (s *state) interfaces(
 
 	networks = map[string]*iutil.Network{}
 
-	for device, iface := range instanceState.Network {
+	// The state keys an interface by its name in the guest, which is the
+	// device key only by default. A profile may call the device anything -
+	// "eth-1", or the network's own name - while the guest still sees eth0, so
+	// the device is found by what Incus records about it rather than by name.
+	byHwaddr, byName := nicIndex(inst, devices)
+
+	for ifname, iface := range instanceState.Network {
 		if iface.Type == "loopback" {
 			continue
 		}
+
+		device := nicDevice(ifname, iface, byHwaddr, byName)
 
 		// A NIC on an unmanaged host bridge carries parent instead of network,
 		// with no network key at all - both are valid device shapes.
@@ -317,6 +325,69 @@ func (s *state) interfaces(
 	})
 
 	return found, networks, "", true
+}
+
+// nicIndex maps what the state reports about an interface - its hardware
+// address, and its name in the guest - back to the key its device has in the
+// configuration. Incus records both on the instance as volatile.<device>.hwaddr
+// and volatile.<device>.name once the NIC is up; a device may also pin either
+// itself. The key is the last resort, and the only one when nothing is
+// recorded, which is what a device that has never been started looks like.
+func nicIndex(
+	inst *incusapi.Instance,
+	devices map[string]map[string]string,
+) (byHwaddr, byName map[string]string) {
+	config := inst.ExpandedConfig
+	if len(config) == 0 {
+		config = inst.Config
+	}
+
+	byHwaddr = map[string]string{}
+	byName = map[string]string{}
+
+	for key, device := range devices {
+		if t := device["type"]; t != "" && t != "nic" {
+			continue
+		}
+
+		for _, hwaddr := range []string{config["volatile."+key+".hwaddr"], device["hwaddr"]} {
+			if hwaddr != "" {
+				byHwaddr[strings.ToLower(hwaddr)] = key
+			}
+		}
+
+		name := device["name"]
+		if name == "" {
+			name = config["volatile."+key+".name"]
+		}
+
+		if name == "" {
+			name = key
+		}
+
+		byName[name] = key
+	}
+
+	return byHwaddr, byName
+}
+
+// nicDevice is the device key behind one interface of the state. The hardware
+// address is the surest link, since the guest may rename an interface; the
+// name Incus gave it comes next; the interface name itself is what is left.
+func nicDevice(
+	ifname string,
+	iface incusapi.InstanceStateNetwork,
+	byHwaddr, byName map[string]string,
+) string {
+	if device, ok := byHwaddr[strings.ToLower(iface.Hwaddr)]; ok && iface.Hwaddr != "" {
+		return device
+	}
+
+	if device, ok := byName[ifname]; ok {
+		return device
+	}
+
+	return ifname
 }
 
 // addresses is every global address of one family the interface holds. Anything
