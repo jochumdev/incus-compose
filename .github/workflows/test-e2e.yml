@@ -68,19 +68,12 @@ jobs:
           sha="${{ github.sha }}"
           short="${sha:0:7}"
           echo "VERSION=${short}" >> "$GITHUB_ENV"
-          echo "INCUS_COMPOSE_HEALTHD_IMAGE=ghcr.io/lxc/incus-compose/ic-healthd:${short}" >> "$GITHUB_ENV"
-          echo "INCUS_COMPOSE_INIT_IMAGE=ghcr.io/lxc/incus-compose/ic-sleep:${short}" >> "$GITHUB_ENV"
 
-      - name: Build healthd
+      - name: Build containers
         run: |
-          echo "Using healthd image: ${INCUS_COMPOSE_HEALTHD_IMAGE}"
-          just run -P cmd/ic-healthd build --os-env
+          echo "Using VERSION: ${VERSION}"
+          just run -f container/build.yaml build --os-env
           just run healthd down --force || true
-
-      - name: Build ic-sleep
-        run: |
-          echo "Using tools image: ${INCUS_COMPOSE_INIT_IMAGE}"
-          just run -P cmd/ic-sleep build --os-env
 
       - name: Test
         run: |
