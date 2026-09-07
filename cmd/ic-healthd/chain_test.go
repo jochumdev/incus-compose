@@ -25,6 +25,11 @@ func TestParseMarker(t *testing.T) {
 	key, value = parseMarker("user.mine")
 	require.Equal(t, "user.mine", key)
 	require.Equal(t, "true", value)
+
+	// An empty marker keys on nothing.
+	key, value = parseMarker("")
+	require.Equal(t, "", key)
+	require.Equal(t, "true", value)
 }
 
 // parse drives the real flag set with an argv, so this tests the command line
@@ -57,7 +62,8 @@ func TestConfigFromCommand(t *testing.T) {
 		"--own-name", "ic-healthd",
 		"--workers", "7",
 		"--restart-workers", "3",
-		"--http", ":9000",
+		"--http-address", ":9000",
+		"--metrics=false",
 		"--debug",
 	)
 
@@ -71,8 +77,55 @@ func TestConfigFromCommand(t *testing.T) {
 	require.Equal(t, 7, cfg.Workers)
 	require.Equal(t, 3, cfg.RestartWorkers)
 	require.Equal(t, ":9000", cfg.HTTPAddr)
+	require.False(t, cfg.Metrics)
 	require.True(t, cfg.Debug)
 	require.False(t, cfg.Trace)
+
+	cfg = parse(t, "--project-marker", "user.mine")
+	require.Equal(t, "user.mine", cfg.ProjectMarker)
+	require.Equal(t, "true", cfg.ProjectMarkerValue)
+
+	cfg = parse(t, "--project-marker", "")
+	require.Equal(t, "", cfg.ProjectMarker)
+	require.Equal(t, "true", cfg.ProjectMarkerValue)
+}
+
+func TestConfigFromEnvironment(t *testing.T) {
+	t.Setenv("INCUS_COMPOSE_HEALTHD_INCUS", "https://env:8443")
+	t.Setenv("INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS", ":9153")
+	t.Setenv("INCUS_COMPOSE_HEALTHD_WORKERS", "16")
+	t.Setenv("INCUS_COMPOSE_HEALTHD_DEBUG", "true")
+
+	cfg := parse(t)
+
+	require.Equal(t, "https://env:8443", cfg.IncusURL)
+	require.Equal(t, ":9153", cfg.HTTPAddr)
+	require.Equal(t, 16, cfg.Workers)
+	require.True(t, cfg.Debug)
+
+	// The flag still wins over the environment.
+	cfg = parse(t, "--http-address", ":9000")
+	require.Equal(t, ":9000", cfg.HTTPAddr)
+
+	t.Setenv("INCUS_COMPOSE_HEALTHD_PROJECT_MARKER", "user.custom=val")
+	cfg = parse(t)
+	require.Equal(t, "user.custom", cfg.ProjectMarker)
+	require.Equal(t, "val", cfg.ProjectMarkerValue)
+
+	t.Setenv("INCUS_COMPOSE_HEALTHD_PROJECT_MARKER", "user.mine")
+	cfg = parse(t)
+	require.Equal(t, "user.mine", cfg.ProjectMarker)
+	require.Equal(t, "true", cfg.ProjectMarkerValue)
+
+	t.Setenv("INCUS_COMPOSE_HEALTHD_PROJECT_MARKER", "")
+	cfg = parse(t)
+	require.Equal(t, "", cfg.ProjectMarker)
+	require.Equal(t, "true", cfg.ProjectMarkerValue)
+
+	t.Setenv("INCUS_COMPOSE_HEALTHD_PROJECT_MARKER", "user.env=fromenv")
+	cfg = parse(t, "--project-marker", "user.cli=fromcli")
+	require.Equal(t, "user.cli", cfg.ProjectMarker)
+	require.Equal(t, "fromcli", cfg.ProjectMarkerValue)
 }
 
 func TestConfigDefaults(t *testing.T) {
@@ -83,6 +136,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.Equal(t, defaultDataDir, cfg.DataDir)
 	require.Equal(t, defaultSecretsDir, cfg.SecretsDir)
 	require.Equal(t, defaultHTTPAddr, cfg.HTTPAddr)
+	require.True(t, cfg.Metrics)
 	require.Equal(t, defaultWorkers, cfg.Workers)
 	require.Equal(t, defaultRestartWorkers, cfg.RestartWorkers)
 	require.Equal(t, "user.healthcheck.scope", cfg.ProjectMarker)
@@ -114,6 +168,25 @@ func TestServes(t *testing.T) {
 	other := &incusApi.Project{Name: "shop"}
 	other.Config = incusApi.ConfigMap{"user.healthcheck.scope": "project"}
 	require.False(t, serves(logger, cfg)(other))
+
+	// Default config serves marked projects.
+	require.True(t, serves(logger, newConfig())(project))
+	require.False(t, serves(logger, newConfig())(other))
+	require.False(t, serves(logger, newConfig())(&incusApi.Project{Name: "unmarked"}))
+
+	// Bare marker key.
+	bare := &incusApi.Project{Name: "bare"}
+	bare.Config = incusApi.ConfigMap{"user.mine": "true"}
+	cfg = newConfig()
+	cfg.ProjectMarker = "user.mine"
+	cfg.ProjectMarkerValue = "true"
+	require.True(t, serves(logger, cfg)(bare))
+	require.False(t, serves(logger, cfg)(project))
+
+	// Empty marker watches every project the certificate can see.
+	cfg = newConfig()
+	cfg.ProjectMarker = ""
+	require.Nil(t, serves(logger, cfg))
 }
 
 // TestServeable pins the checker's half of the scope decision: the same policy,
@@ -148,4 +221,17 @@ func TestServeable(t *testing.T) {
 	// A project the enricher holds nothing for is not watched: believing a
 	// missing read would watch what was never opted in.
 	require.False(t, fn(ev("blog", nil)))
+
+	// Bare marker key.
+	cfg = newConfig()
+	cfg.ProjectMarker = "user.mine"
+	cfg.ProjectMarkerValue = "true"
+	fn = serveable(cfg)
+	require.True(t, fn(ev("blog", map[string]string{"user.mine": "true"})))
+	require.False(t, fn(ev("blog", map[string]string{"user.mine": "false"})))
+
+	// Empty marker watches every project.
+	cfg = newConfig()
+	cfg.ProjectMarker = ""
+	require.Nil(t, serveable(cfg))
 }
