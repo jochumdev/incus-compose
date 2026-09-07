@@ -31,6 +31,36 @@ form.
   up at the daemon's next sweep of the fleet rather than within seconds, while
   instance events in it are judged from the moment they arrive. (by @jochumdev)
 
+## [v1.3.3] - 2026-09-07
+
+### Fixed
+
+- `up --recreate` no longer reports success when deleting an existing instance
+  fails. `down()` previously logged deletion errors as warnings and returned
+  `nil`, causing the subsequent ensure step to accept the still-running instance
+  and exit 0 without recreating anything. A failed deletion during recreate now
+  aborts the run with an error, while standalone `down` remains best-effort. (by
+  @alien43)
+
+- A network attachment with `internal: true` now correctly sets `ipv4.gateway`
+  and `ipv6.gateway` to `none` even without a static address. Previously,
+  gateway overrides were only written when a static IP was defined, allowing
+  services without static addresses on internal networks to keep default routes
+  and unintended outbound network access. (by @alien43)
+
+- Auto-volume generation now recognizes mount paths covered by custom disk and
+  tmpfs devices declared in `x-incus-compose.devices`. Previously, mount paths
+  on extra devices were not populated on the typed structs, making them
+  invisible to path deduplication. This caused duplicate storage volumes to be
+  created for image-declared `VOLUME` paths, failing instance creation with
+  `More than one disk device uses the same path`. (by @alien43)
+
+- Service-name DNS registration (`raw.dnsmasq`) is now skipped on non-bridge
+  networks such as OVN. Because `raw.dnsmasq` is a bridge-only configuration
+  option, attempting to write it on OVN networks caused `up`, `start`, and
+  `stop` commands to fail, preventing projects attached to external OVN networks
+  from converging. (by @sandroden)
+
 ## [v1.3.2] - 2026-08-30
 
 ### Changed

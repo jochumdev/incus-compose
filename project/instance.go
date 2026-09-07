@@ -496,6 +496,7 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		extensions := map[string]string{}
 		userExtensions := map[string]string{}
 		noGateway := false
+		internal := false
 		if sNet != nil && sNet.Extensions != nil {
 			userExtensions = xIncusExtensions(sNet.Extensions)
 
@@ -507,6 +508,7 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 			if err == nil && ext.Internal {
 				gateway4 = "none"
 				gateway6 = "none"
+				internal = true
 			}
 
 			noGateway = ext.Gateway != nil && !*ext.Gateway
@@ -533,7 +535,13 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 			continue
 		}
 
-		if ((ipv4Address != "" && gateway4 == "none") || (ipv6Address != "" && gateway6 == "none")) &&
+		// `internal: true` is a request for no gateway, so it must be written with
+		// or without a static address — otherwise the "none" computed above is
+		// discarded and the instance silently keeps a default route.
+		writeGateway4 := ipv4Address != "" || internal
+		writeGateway6 := ipv6Address != "" || internal
+
+		if ((writeGateway4 && gateway4 == "none") || (writeGateway6 && gateway6 == "none")) &&
 			!c.Global().HasExtension(shared.Incus73Extension) {
 			c.LogWarn(
 				"For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS",
@@ -545,11 +553,17 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 
 		if ipv4Address != "" {
 			extensions["ipv4.address"] = ipv4Address
+		}
+
+		if writeGateway4 {
 			extensions["ipv4.gateway"] = gateway4
 		}
 
 		if ipv6Address != "" {
 			extensions["ipv6.address"] = ipv6Address
+		}
+
+		if writeGateway6 {
 			extensions["ipv6.gateway"] = gateway6
 		}
 
@@ -1333,13 +1347,31 @@ func serviceExtraDevices(service types.ServiceConfig) ([]client.InstanceDevice, 
 			return nil, fmt.Errorf("x-incus-compose.devices: device %q is missing 'type'", name)
 		}
 
-		devices = append(devices, client.InstanceDevice{
-			Name: name,
-			Config: client.InstanceDeviceConfig{
-				DeviceType: ext["type"],
-				Extensions: ext,
-			},
-		})
+		cfg := client.InstanceDeviceConfig{
+			DeviceType: ext["type"],
+			Extensions: ext,
+		}
+
+		// Mirror the mount point into the typed config as well as Extensions.
+		// devicePath() -- which decides whether a path an image declares as a
+		// VOLUME is already covered by a device -- reads Config.Disk.Path and
+		// Config.Tmpfs.Path, never Extensions. Leaving them empty made every
+		// x-incus-compose disk invisible to that check, so prefetchVolumes()
+		// created an auto-volume for an already-covered path and Incus then
+		// rejected the instance with "More than one disk device uses the same
+		// path" -- after `up --recreate` had already deleted the old instance.
+		//
+		// Rendering is unaffected: toDiskDevice()/toTmpfsDevice() apply
+		// maps.Copy(device, Extensions) last, so Extensions still win with the
+		// identical value.
+		switch ext["type"] {
+		case client.InstanceDeviceTypeDisk:
+			cfg.Disk.Path = ext["path"]
+		case client.InstanceDeviceTypeTmpfs:
+			cfg.Tmpfs.Path = ext["path"]
+		}
+
+		devices = append(devices, client.InstanceDevice{Name: name, Config: cfg})
 	}
 
 	return devices, nil

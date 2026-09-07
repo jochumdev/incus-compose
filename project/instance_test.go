@@ -834,6 +834,55 @@ func TestServiceExtraDevices(t *testing.T) {
 		assert.Equal(t, map[string]string{"type": "gpu", "gputype": "physical"}, cfg)
 	})
 
+	// prefetchVolumes() skips a path only when devicePath() reports a device
+	// covering it, and devicePath() reads Config.Disk.Path / Config.Tmpfs.Path --
+	// never Extensions. Leaving them unset makes the device invisible to that
+	// check, so an auto-volume is created for an already-covered path.
+	t.Run("typed mount point is populated so the auto-volume check can see it", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{
+				"devices": map[string]any{
+					"app-config": map[string]any{
+						"type": "disk", "pool": "default",
+						"source": "web-config", "path": "/config",
+					},
+				},
+			},
+		}}
+
+		devices, err := serviceExtraDevices(service)
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "/config", devices[0].Config.Disk.Path,
+			"Disk.Path must be set or devicePath() cannot see this mount")
+
+		// And rendering is unchanged: Extensions are copied last, so they still
+		// win with the identical value.
+		_, cfg, derr := devices[0].ToIncusDevice()
+		require.Nil(t, derr)
+		assert.Equal(t, map[string]string{
+			"type": "disk", "pool": "default",
+			"source": "web-config", "path": "/config",
+		}, cfg)
+	})
+
+	t.Run("tmpfs mount point is populated too", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "influxdb", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{
+				"devices": map[string]any{
+					"scratch": map[string]any{"type": "tmpfs", "path": "/var/lib/influxdb2"},
+				},
+			},
+		}}
+
+		devices, err := serviceExtraDevices(service)
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "/var/lib/influxdb2", devices[0].Config.Tmpfs.Path)
+	})
+
 	t.Run("missing type errors", func(t *testing.T) {
 		t.Parallel()
 		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
@@ -1135,6 +1184,38 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
 		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
+	})
+
+	t.Run("internal network gets gateway none without a static address", func(t *testing.T) {
+		t.Parallel()
+		testlib.SkipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
+
+		p := &types.Project{Networks: types.Networks{"isolated": {}}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"isolated": {Extensions: types.Extensions{"x-incus-compose": map[string]any{"internal": true}}},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv6.gateway"])
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv4.address")
+	})
+
+	t.Run("an ordinary address-less network still gets no gateway key", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{"frontend": {}}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv4.gateway")
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv6.gateway")
 	})
 
 	t.Run("an external network is named by its compose name", func(t *testing.T) {
