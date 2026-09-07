@@ -15,6 +15,18 @@ form.
 
 ### Added
 
+- `ic-dns`: A new split-horizon authoritative DNS daemon for Incus instances,
+  built on the new `ievent` event framework and CoreDNS. Resolves instance names
+  dynamically within per-project or shared zones (`.incus`), serving records
+  based on querier network visibility and client subnet (RFC 7871 ECS). Supports
+  UDP and TCP on port 53, zone transfers (`--allow-transfer`), upstream
+  forwarding (`--forward`), configurable TTL, and Prometheus metrics and health
+  endpoints on `:8080` (or `--http`). Projects opt in via `--project-marker`
+  (defaulting to `user.label.dns.scope=global`), an explicit `--project` list,
+  or serve all visible projects with `--project-marker ""`. (by @jochumdev)
+- `ievent`: A pluggable event pipeline framework for Incus lifecycle events,
+  processing daemon event streams through ordered, composable plugins (`source`,
+  `debounce`, `enricher`, `checker`, `dns`, `http`, `log`). (by @jochumdev)
 - ic-healthd serves `/metrics`, `/health` and `/ready` on `:9153`; an empty
   `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by @jochumdev)
 - `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus metrics
@@ -25,16 +37,10 @@ form.
 
 ### Changed
 
-- ic-healthd is rebuilt on the same event framework as ic-dns: one chain of
-  plugins replaces its listener, router and per-project schedulers. The sidecar
-  contract is unchanged - the same flags, environment variables and status
-  writes, and `healthd reload` still forces a full resync. (by @jochumdev)
-
-### Fixed
-
-- ic-dns correctly defaults its project marker to `user.label.dns.scope=global`
-  and honours `--project-marker ""` to serve all visible projects. (by
-  @jochumdev)
+- ic-healthd is migrated to the `ievent` framework: one chain of plugins
+  replaces its listener, router and per-project schedulers. The sidecar contract
+  is unchanged - the same flags, environment variables and status writes, and
+  `healthd reload` still forces a full resync. (by @jochumdev)
 
 ## [v1.3.3] - 2026-09-07
 
