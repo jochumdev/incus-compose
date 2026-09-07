@@ -30,6 +30,12 @@ form.
   contract is unchanged - the same flags, environment variables and status
   writes, and `healthd reload` still forces a full resync. (by @jochumdev)
 
+### Fixed
+
+- ic-dns correctly defaults its project marker to `user.label.dns.scope=global`
+  and honours `--project-marker ""` to serve all visible projects. (by
+  @jochumdev)
+
 ## [v1.3.3] - 2026-09-07
 
 ### Fixed

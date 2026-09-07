@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	incusapi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -79,6 +80,92 @@ func TestChainLogPositionsNeedALevel(t *testing.T) {
 			assert.Equal(t, tc.wants, logs)
 		})
 	}
+}
+
+func TestServes(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.Default()
+
+	pGlobal := &incusapi.Project{
+		Name: "p-global",
+		ProjectPut: incusapi.ProjectPut{
+			Config: map[string]string{
+				"user.label.dns.scope": "global",
+			},
+		},
+	}
+	pCustom := &incusapi.Project{
+		Name: "p-custom",
+		ProjectPut: incusapi.ProjectPut{
+			Config: map[string]string{
+				"user.label.dns.scope": "project",
+			},
+		},
+	}
+	pBare := &incusapi.Project{
+		Name: "p-bare",
+		ProjectPut: incusapi.ProjectPut{
+			Config: map[string]string{
+				"user.dns": "true",
+			},
+		},
+	}
+	pUnmarked := &incusapi.Project{
+		Name: "p-unmarked",
+	}
+
+	t.Run("defaults serve marked projects", func(t *testing.T) {
+		cfg := *newConfig()
+		filter := serves(logger, cfg)
+		require.NotNil(t, filter)
+
+		assert.True(t, filter(pGlobal))
+		assert.False(t, filter(pCustom))
+		assert.False(t, filter(pUnmarked))
+	})
+
+	t.Run("explicit projects list wins over marker", func(t *testing.T) {
+		cfg := *newConfig()
+		cfg.Projects = []string{"p-unmarked", "p-custom"}
+		filter := serves(logger, cfg)
+		require.NotNil(t, filter)
+
+		assert.True(t, filter(pUnmarked))
+		assert.True(t, filter(pCustom))
+		assert.False(t, filter(pGlobal))
+	})
+
+	t.Run("custom marker", func(t *testing.T) {
+		cfg := *newConfig()
+		cfg.ProjectMarker = "user.label.dns.scope"
+		cfg.ProjectMarkerValue = "project"
+		filter := serves(logger, cfg)
+		require.NotNil(t, filter)
+
+		assert.True(t, filter(pCustom))
+		assert.False(t, filter(pGlobal))
+		assert.False(t, filter(pUnmarked))
+	})
+
+	t.Run("bare marker key", func(t *testing.T) {
+		cfg := *newConfig()
+		cfg.ProjectMarker = "user.dns"
+		cfg.ProjectMarkerValue = "true"
+		filter := serves(logger, cfg)
+		require.NotNil(t, filter)
+
+		assert.True(t, filter(pBare))
+		assert.False(t, filter(pGlobal))
+		assert.False(t, filter(pUnmarked))
+	})
+
+	t.Run("empty marker serves all projects", func(t *testing.T) {
+		cfg := *newConfig()
+		cfg.ProjectMarker = ""
+		filter := serves(logger, cfg)
+		assert.Nil(t, filter)
+	})
 }
 
 func TestAssemble(t *testing.T) {

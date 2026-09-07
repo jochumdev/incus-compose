@@ -12,19 +12,15 @@ import (
 
 // parse drives the real flag set with an argv, so this tests the command line
 // rather than a struct literal.
-func parse(t *testing.T, argv ...string) config {
+func parse(t *testing.T, argv ...string) *config {
 	t.Helper()
 
-	var got config
+	got := newConfig()
 
 	// The real command, with only its action replaced.
-	cmd := runCommand()
+	cmd := runCommand(got)
 	cmd.Action = func(_ context.Context, c *cli.Command) error {
-		var err error
-
-		got, err = configFromCommand(c)
-
-		return err
+		return nil
 	}
 
 	err := cmd.Run(t.Context(), append([]string{"run"}, argv...))
@@ -45,6 +41,8 @@ func TestConfigDefaults(t *testing.T) {
 	assert.Equal(t, 16, cfg.Workers)
 	assert.Equal(t, 30*time.Second, cfg.ProjectDelay)
 	assert.Equal(t, 5*time.Second, cfg.ReadDelay)
+	assert.Equal(t, defaultProjectMarker, cfg.ProjectMarker)
+	assert.Equal(t, defaultProjectMarkerValue, cfg.ProjectMarkerValue)
 
 	// Off by default: neither a confined certificate nor somebody's CLI identity
 	// is a thing to opt into by accident.
@@ -74,6 +72,18 @@ func TestConfigFromCommand(t *testing.T) {
 	assert.Equal(t, []string{"log/arrival"}, cfg.Exclude)
 	assert.True(t, cfg.Restricted)
 	assert.Equal(t, "TRACE", cfg.Log)
+
+	cfg = parse(t, "--project-marker", "user.custom=val")
+	assert.Equal(t, "user.custom", cfg.ProjectMarker)
+	assert.Equal(t, "val", cfg.ProjectMarkerValue)
+
+	cfg = parse(t, "--project-marker", "user.dns")
+	assert.Equal(t, "user.dns", cfg.ProjectMarker)
+	assert.Equal(t, "true", cfg.ProjectMarkerValue)
+
+	cfg = parse(t, "--project-marker", "")
+	assert.Equal(t, "", cfg.ProjectMarker)
+	assert.Equal(t, "true", cfg.ProjectMarkerValue)
 }
 
 // TestConfigFromEnvironment pins the half a container actually uses. A flag
@@ -98,6 +108,26 @@ func TestConfigFromEnvironment(t *testing.T) {
 	// The flag still wins over the environment.
 	cfg = parse(t, "--listen", "127.0.0.1:15353")
 	assert.Equal(t, "127.0.0.1:15353", cfg.DNSAddr)
+
+	t.Setenv("DNS_PROJECT_MARKER", "user.custom=val")
+	cfg = parse(t)
+	assert.Equal(t, "user.custom", cfg.ProjectMarker)
+	assert.Equal(t, "val", cfg.ProjectMarkerValue)
+
+	t.Setenv("DNS_PROJECT_MARKER", "user.dns")
+	cfg = parse(t)
+	assert.Equal(t, "user.dns", cfg.ProjectMarker)
+	assert.Equal(t, "true", cfg.ProjectMarkerValue)
+
+	t.Setenv("DNS_PROJECT_MARKER", "")
+	cfg = parse(t)
+	assert.Equal(t, "", cfg.ProjectMarker)
+	assert.Equal(t, "true", cfg.ProjectMarkerValue)
+
+	t.Setenv("DNS_PROJECT_MARKER", "user.env=fromenv")
+	cfg = parse(t, "--project-marker", "user.cli=fromcli")
+	assert.Equal(t, "user.cli", cfg.ProjectMarker)
+	assert.Equal(t, "fromcli", cfg.ProjectMarkerValue)
 }
 
 func TestParseMarker(t *testing.T) {
@@ -120,7 +150,7 @@ func TestParseMarker(t *testing.T) {
 		},
 		{
 			name:  "the default splits",
-			in:    defaultProjectMarker,
+			in:    defaultProjectMarker + "=" + defaultProjectMarkerValue,
 			key:   "user.label.dns.scope",
 			value: "global",
 		},

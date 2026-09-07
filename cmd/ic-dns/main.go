@@ -17,6 +17,11 @@ import (
 	"github.com/urfave/cli/v3"
 	"go.uber.org/automaxprocs/maxprocs"
 
+	// Importing this package sets GOMEMLIMIT automatically from the cgroup memory limit.
+	// By default, it sets GOMEMLIMIT to 90% of the cgroup memory limit.
+	// Set the AUTOMEMLIMIT environment variable to a ratio in (0.0, 1.0], or "off".
+	_ "github.com/KimMachineGun/automemlimit"
+
 	ievlog "github.com/lxc/incus-compose/ievent/log"
 	"github.com/lxc/incus-compose/ievent/source"
 	"github.com/lxc/incus-compose/incustrust"
@@ -46,7 +51,7 @@ func command() *cli.Command {
 		Name:  "ic-dns",
 		Usage: "DNS for Incus instances, per querier",
 		Commands: []*cli.Command{
-			runCommand(),
+			runCommand(newConfig()),
 			versionCommand(),
 		},
 	}
@@ -54,167 +59,210 @@ func command() *cli.Command {
 
 // runCommand is the flags and the environment together: every flag reads
 // DNS_<NAME> when it is not given. Apart from command() so a test can drive it.
-func runCommand() *cli.Command {
+func runCommand(cfg *config) *cli.Command {
 	return &cli.Command{
 		Name:  "run",
 		Usage: "Serve DNS until told to stop",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "incus",
-				Usage:   "URL of the Incus API",
-				Sources: cli.EnvVars("DNS_INCUS"),
+				Name:        "incus",
+				Usage:       "URL of the Incus API",
+				Destination: &cfg.IncusURL,
+				Sources:     cli.EnvVars("DNS_INCUS"),
 			},
 			&cli.StringFlag{
-				Name:    "token",
-				Usage:   "One-time trust token; a token file under --secrets-dir is read when this is empty",
-				Sources: cli.EnvVars("DNS_TOKEN"),
+				Name:        "token",
+				Usage:       "One-time trust token; a token file under --secrets-dir is read when this is empty",
+				Destination: &cfg.Token,
+				Sources:     cli.EnvVars("DNS_TOKEN"),
 			},
 			&cli.StringFlag{
 				Name: "data-dir",
 				Usage: "Persistent directory holding the enrolled certificate and " +
 					"what was last served; empty keeps neither",
-				Value:   defaultDataDir,
-				Sources: cli.EnvVars("DNS_DATA_DIR"),
+				Value:       defaultDataDir,
+				Destination: &cfg.DataDir,
+				Sources:     cli.EnvVars("DNS_DATA_DIR"),
 			},
 			&cli.StringFlag{
-				Name:    "secrets-dir",
-				Usage:   "Tmpfs directory holding the one-time trust token",
-				Value:   defaultSecretsDir,
-				Sources: cli.EnvVars("DNS_SECRETS_DIR"),
+				Name:        "secrets-dir",
+				Usage:       "Tmpfs directory holding the one-time trust token",
+				Value:       defaultSecretsDir,
+				Destination: &cfg.SecretsDir,
+				Sources:     cli.EnvVars("DNS_SECRETS_DIR"),
 			},
 			&cli.StringFlag{
-				Name:    "client-cert",
-				Usage:   "Certificate to present instead of enrolling; needs --client-key",
-				Sources: cli.EnvVars("DNS_CLIENT_CERT"),
+				Name:        "client-cert",
+				Usage:       "Certificate to present instead of enrolling; needs --client-key",
+				Destination: &cfg.ClientCert,
+				Sources:     cli.EnvVars("DNS_CLIENT_CERT"),
 			},
 			&cli.StringFlag{
-				Name:    "client-key",
-				Usage:   "Key for --client-cert",
-				Sources: cli.EnvVars("DNS_CLIENT_KEY"),
+				Name:        "client-key",
+				Usage:       "Key for --client-cert",
+				Destination: &cfg.ClientKey,
+				Sources:     cli.EnvVars("DNS_CLIENT_KEY"),
 			},
 			&cli.BoolFlag{
-				Name:    "restricted",
-				Usage:   "Enroll a certificate confined to --project; off means one server answers for every visible project",
-				Sources: cli.EnvVars("DNS_RESTRICTED"),
+				Name:        "restricted",
+				Usage:       "Enroll a certificate confined to --project; off means one server answers for every visible project",
+				Destination: &cfg.Restricted,
+				Sources:     cli.EnvVars("DNS_RESTRICTED"),
 			},
 			&cli.StringFlag{
-				Name:    "remote",
-				Usage:   "Connect as a remote from the Incus CLI configuration; needs --use-remote, empty means the default remote",
-				Sources: cli.EnvVars("INCUS_REMOTE"),
+				Name:        "remote",
+				Usage:       "Connect as a remote from the Incus CLI configuration; needs --use-remote, empty means the default remote",
+				Destination: &cfg.Remote,
+				Sources:     cli.EnvVars("INCUS_REMOTE"),
 			},
 			&cli.BoolFlag{
-				Name:    "use-remote",
-				Usage:   "Allow the Incus CLI configuration to be used when there is no certificate and no token",
-				Sources: cli.EnvVars("DNS_USE_REMOTE"),
+				Name:        "use-remote",
+				Usage:       "Allow the Incus CLI configuration to be used when there is no certificate and no token",
+				Destination: &cfg.UseRemote,
+				Sources:     cli.EnvVars("DNS_USE_REMOTE"),
 			},
 
 			&cli.StringFlag{
-				Name:    "suffix",
-				Usage:   "TLD every project's zone is built under",
-				Value:   defaultSuffix,
-				Sources: cli.EnvVars("DNS_SUFFIX"),
+				Name:        "suffix",
+				Usage:       "TLD every project's zone is built under",
+				Value:       defaultSuffix,
+				Destination: &cfg.Suffix,
+				Sources:     cli.EnvVars("DNS_SUFFIX"),
 			},
 			&cli.StringSliceFlag{
-				Name:    "project",
-				Usage:   "Project(s) to serve; empty means every visible project carrying --project-marker",
-				Sources: cli.EnvVars("DNS_PROJECTS"),
+				Name:        "project",
+				Usage:       "Project(s) to serve; empty means every visible project carrying --project-marker",
+				Destination: &cfg.Projects,
+				Sources:     cli.EnvVars("DNS_PROJECTS"),
 			},
 			&cli.StringFlag{
 				Name:    "project-marker",
 				Usage:   "Project config `KEY=VALUE` that opts a project in when --project is empty; a bare KEY means KEY=true",
-				Value:   defaultProjectMarker,
 				Sources: cli.EnvVars("DNS_PROJECT_MARKER"),
+				Action: func(ctx context.Context, c *cli.Command, s string) error {
+					marker, value := parseMarker(s)
+					cfg.ProjectMarker = marker
+					cfg.ProjectMarkerValue = value
+
+					return nil
+				},
 			},
 
 			&cli.StringFlag{
-				Name:    "listen",
-				Usage:   "Address to answer DNS on, UDP and TCP",
-				Value:   defaultDNSAddr,
-				Sources: cli.EnvVars("DNS_LISTEN"),
+				Name:        "listen",
+				Usage:       "Address to answer DNS on, UDP and TCP",
+				Value:       defaultDNSAddr,
+				Destination: &cfg.DNSAddr,
+				Sources:     cli.EnvVars("DNS_LISTEN"),
 			},
 			&cli.StringFlag{
-				Name:    "http",
-				Usage:   "Address to serve /metrics, /health and /ready on; empty disables it",
-				Value:   defaultHTTPAddr,
-				Sources: cli.EnvVars("DNS_HTTP"),
+				Name:        "http",
+				Usage:       "Address to serve /metrics, /health and /ready on; empty disables it",
+				Value:       defaultHTTPAddr,
+				Destination: &cfg.HTTPAddr,
+				Sources:     cli.EnvVars("DNS_HTTP"),
 			},
 			&cli.StringSliceFlag{
-				Name:    "forward",
-				Usage:   "Upstream(s) for names we do not serve; empty refuses them instead",
-				Sources: cli.EnvVars("DNS_FORWARD"),
+				Name:        "forward",
+				Usage:       "Upstream(s) for names we do not serve; empty refuses them instead",
+				Destination: &cfg.Forward,
+				Sources:     cli.EnvVars("DNS_FORWARD"),
 			},
 
 			&cli.UintFlag{
-				Name:    "ttl",
-				Usage:   "Seconds a record is served for; 0-" + strconv.Itoa(maxTTL),
-				Value:   defaultTTL,
-				Sources: cli.EnvVars("DNS_TTL"),
+				Name:        "ttl",
+				Usage:       "Seconds a record is served for; 0-" + strconv.Itoa(maxTTL),
+				Value:       defaultTTL,
+				Destination: &cfg.TTL,
+				Sources:     cli.EnvVars("DNS_TTL"),
 			},
 			&cli.DurationFlag{
-				Name:    "debounce-window",
-				Usage:   "How long a key must be quiet before the last of its burst is handed on",
-				Value:   defaultDebounceWindow,
-				Sources: cli.EnvVars("DNS_DEBOUNCE_WINDOW"),
+				Name:        "debounce-window",
+				Usage:       "How long a key must be quiet before the last of its burst is handed on",
+				Value:       defaultDebounceWindow,
+				Destination: &cfg.DebounceWindow,
+				Sources:     cli.EnvVars("DNS_DEBOUNCE_WINDOW"),
 			},
 			&cli.IntFlag{
-				Name:    "workers",
-				Usage:   "Incus reads in flight at once",
-				Value:   defaultWorkers,
-				Sources: cli.EnvVars("DNS_WORKERS"),
+				Name:        "workers",
+				Usage:       "Incus reads in flight at once",
+				Value:       defaultWorkers,
+				Destination: &cfg.Workers,
+				Sources:     cli.EnvVars("DNS_WORKERS"),
 			},
 			&cli.DurationFlag{
-				Name:    "read-timeout",
-				Usage:   "Budget for one read of the daemon",
-				Value:   defaultReadTimeout,
-				Sources: cli.EnvVars("DNS_READ_TIMEOUT"),
+				Name:        "read-timeout",
+				Usage:       "Budget for one read of the daemon",
+				Value:       defaultReadTimeout,
+				Destination: &cfg.ReadTimeout,
+				Sources:     cli.EnvVars("DNS_READ_TIMEOUT"),
 			},
 			&cli.DurationFlag{
-				Name:    "sweep-project-delay",
-				Usage:   "Gap between one project of a round and the next",
-				Value:   defaultProjectDelay,
-				Sources: cli.EnvVars("DNS_SWEEP_PROJECT_DELAY"),
+				Name:        "sweep-project-delay",
+				Usage:       "Gap between one project of a round and the next",
+				Value:       defaultProjectDelay,
+				Destination: &cfg.ProjectDelay,
+				Sources:     cli.EnvVars("DNS_SWEEP_PROJECT_DELAY"),
 			},
 			&cli.DurationFlag{
-				Name:    "sweep-read-delay",
-				Usage:   "Gap between the reads inside one project",
-				Value:   defaultReadDelay,
-				Sources: cli.EnvVars("DNS_SWEEP_READ_DELAY"),
+				Name:        "sweep-read-delay",
+				Usage:       "Gap between the reads inside one project",
+				Value:       defaultReadDelay,
+				Destination: &cfg.ReadDelay,
+				Sources:     cli.EnvVars("DNS_SWEEP_READ_DELAY"),
 			},
 			&cli.BoolFlag{
-				Name:    "echo-subnet",
-				Usage:   "Echo the RFC 7871 client subnet back on replies",
-				Sources: cli.EnvVars("DNS_ECHO_SUBNET"),
+				Name:        "echo-subnet",
+				Usage:       "Echo the RFC 7871 client subnet back on replies",
+				Destination: &cfg.EchoSubnet,
+				Sources:     cli.EnvVars("DNS_ECHO_SUBNET"),
 			},
 			&cli.BoolFlag{
-				Name:    "metrics",
-				Usage:   "Record the engine's counters and gauges; off leaves them registered at zero",
-				Sources: cli.EnvVars("DNS_METRICS"),
+				Name:        "metrics",
+				Usage:       "Record the engine's counters and gauges; off leaves them registered at zero",
+				Destination: &cfg.Metrics,
+				Sources:     cli.EnvVars("DNS_METRICS"),
 			},
 			&cli.StringSliceFlag{
 				Name:    "allow-transfer",
 				Usage:   "CIDR(s) that may ask for a zone transfer; empty allows nobody",
 				Sources: cli.EnvVars("DNS_ALLOW_TRANSFER"),
+				Action: func(ctx context.Context, c *cli.Command, s []string) error {
+					allow, err := prefixes(s)
+					if err != nil {
+						return err
+					}
+
+					cfg.AllowTransfer = allow
+
+					return nil
+				},
 			},
 			&cli.StringSliceFlag{
-				Name:    "exclude",
-				Usage:   "Chain position(s) to leave out; only the optional ones, and an unknown name is an error",
-				Sources: cli.EnvVars("DNS_EXCLUDE"),
+				Name:        "exclude",
+				Usage:       "Chain position(s) to leave out; only the optional ones, and an unknown name is an error",
+				Destination: &cfg.Exclude,
+				Sources:     cli.EnvVars("DNS_EXCLUDE"),
 			},
 
 			&cli.StringFlag{
 				Name: "log",
 				Usage: "Level the chain's log positions print at, and the process's own level: " +
 					"TRACE, DEBUG, INFO, WARN, ERROR. Empty leaves every position out and the process at INFO",
-				Sources: cli.EnvVars("DNS_LOG"),
+				Destination: &cfg.Log,
+				Sources:     cli.EnvVars("DNS_LOG"),
 			},
 
 			&cli.BoolFlag{
-				Name:    "pprof",
-				Usage:   "Serve /debug/pprof on the --http address; for profiling, never for a deployment",
-				Sources: cli.EnvVars("DNS_PPROF"),
+				Name:        "pprof",
+				Usage:       "Serve /debug/pprof on the --http address; for profiling, never for a deployment",
+				Destination: &cfg.Pprof,
+				Sources:     cli.EnvVars("DNS_PPROF"),
 			},
 		},
-		Action: action,
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return action(ctx, cmd, cfg)
+		},
 	}
 }
 
@@ -232,13 +280,8 @@ func versionCommand() *cli.Command {
 }
 
 // action turns the command line into a running process.
-func action(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := configFromCommand(cmd)
-	if err != nil {
-		return err
-	}
-
-	err = cfg.validate()
+func action(ctx context.Context, cmd *cli.Command, cfg *config) error {
+	err := cfg.validate()
 	if err != nil {
 		return err
 	}
@@ -291,7 +334,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		"pprof", cfg.Pprof,
 	)
 
-	return run(ctx, logger, cfg)
+	return run(ctx, logger, *cfg)
 }
 
 // run is everything with a lifetime, in the order it starts and the reverse of
@@ -398,51 +441,6 @@ func drainContext(ctx context.Context) context.Context {
 	context.AfterFunc(out, cancel)
 
 	return out
-}
-
-// configFromCommand is apart from the action so it can be tested.
-func configFromCommand(cmd *cli.Command) (config, error) {
-	marker, value := parseMarker(cmd.String("project-marker"))
-
-	allow, err := prefixes(cmd.StringSlice("allow-transfer"))
-	if err != nil {
-		return config{}, err
-	}
-
-	return config{
-		IncusURL:   cmd.String("incus"),
-		Token:      cmd.String("token"),
-		DataDir:    cmd.String("data-dir"),
-		SecretsDir: cmd.String("secrets-dir"),
-		ClientCert: cmd.String("client-cert"),
-		ClientKey:  cmd.String("client-key"),
-		Restricted: cmd.Bool("restricted"),
-		Remote:     cmd.String("remote"),
-		UseRemote:  cmd.Bool("use-remote"),
-
-		Suffix:             cmd.String("suffix"),
-		Projects:           cmd.StringSlice("project"),
-		ProjectMarker:      marker,
-		ProjectMarkerValue: value,
-
-		DNSAddr:  cmd.String("listen"),
-		HTTPAddr: cmd.String("http"),
-		Forward:  cmd.StringSlice("forward"),
-
-		TTL:            uint32(cmd.Uint("ttl")),
-		DebounceWindow: cmd.Duration("debounce-window"),
-		Workers:        cmd.Int("workers"),
-		ReadTimeout:    cmd.Duration("read-timeout"),
-		ProjectDelay:   cmd.Duration("sweep-project-delay"),
-		ReadDelay:      cmd.Duration("sweep-read-delay"),
-		EchoSubnet:     cmd.Bool("echo-subnet"),
-		Metrics:        cmd.Bool("metrics"),
-		Exclude:        cmd.StringSlice("exclude"),
-		AllowTransfer:  allow,
-		Log:            cmd.String("log"),
-
-		Pprof: cmd.Bool("pprof"),
-	}, nil
 }
 
 // prefixes parses the CIDRs a flag carries. A bad one is refused here rather

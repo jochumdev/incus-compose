@@ -65,43 +65,13 @@ func chain(logger *slog.Logger, cfg config) []position {
 		out = append(out, logAt(logger, cfg, "received")...)
 	}
 
-	serves := func(cfg config) func(*incusapi.Project) bool {
-		if len(cfg.Projects) > 0 {
-			return func(p *incusapi.Project) bool {
-				serve := slices.Contains(cfg.Projects, p.Name)
-				if !serve {
-					logger.Debug("Not serving project", "project", p.Name)
-				} else {
-					logger.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
-				}
-				return serve
-			}
-		}
-
-		if cfg.ProjectMarker == "" {
-			// Every project the certificate can see, which is the only answer that
-			// works on a plain Incus.
-			return nil
-		}
-
-		return func(p *incusapi.Project) bool {
-			serve := p.Config[cfg.ProjectMarker] == cfg.ProjectMarkerValue
-			if !serve {
-				logger.Debug("Not serving project", "project", p.Name)
-			} else {
-				logger.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
-			}
-			return serve
-		}
-	}
-
 	out = append(out,
 		position{plugin: enricher.New(
 			logger,
 			enricher.Workers(cfg.Workers),
 			enricher.ReadTimeout(cfg.ReadTimeout),
 			enricher.ReadDelay(cfg.ReadDelay),
-			enricher.Project(serves(cfg)),
+			enricher.Project(serves(logger, cfg)),
 			enricher.StoreFile(filepath.Join(cfg.DataDir, "enricher-cold-store.json")),
 		)},
 	)
@@ -117,9 +87,9 @@ func chain(logger *slog.Logger, cfg config) []position {
 			dns.EchoSubnet(cfg.EchoSubnet),
 			dns.Metrics(cfg.Metrics),
 			dns.ColdDir(cfg.DataDir),
-			dns.TTL(cfg.TTL),
+			dns.TTL(uint32(cfg.TTL)),
 			dns.Suffix(cfg.Suffix),
-			dns.Project(serves(cfg)),
+			dns.Project(serves(logger, cfg)),
 			dns.AllowTransfer(cfg.AllowTransfer),
 		)},
 		// After dns, so a readiness it raises is folded before this position
@@ -216,4 +186,38 @@ func assemble(positions []position, exclude []string) ([]iutil.Plugin, []runner,
 	}
 
 	return plugins, runners, nil
+}
+
+// serves decides which projects this daemon serves: an explicit list wins, else
+// the marker opts a project in.
+func serves(logger *slog.Logger, cfg config) func(*incusapi.Project) bool {
+	if len(cfg.Projects) > 0 {
+		return func(p *incusapi.Project) bool {
+			serve := slices.Contains(cfg.Projects, p.Name)
+			if !serve {
+				logger.Debug("Not serving project", "project", p.Name)
+			} else {
+				logger.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
+			}
+
+			return serve
+		}
+	}
+
+	if cfg.ProjectMarker == "" {
+		// Every project the certificate can see, which is the only answer that
+		// works on a plain Incus.
+		return nil
+	}
+
+	return func(p *incusapi.Project) bool {
+		serve := p.Config[cfg.ProjectMarker] == cfg.ProjectMarkerValue
+		if !serve {
+			logger.Debug("Not serving project", "project", p.Name)
+		} else {
+			logger.Log(context.Background(), shared.LevelTrace, "Serving project", "project", p.Name)
+		}
+
+		return serve
+	}
 }
