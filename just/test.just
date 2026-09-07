@@ -4,6 +4,8 @@
 # a stage override v_test_timeout - the child parses this file with the stage's
 # environment already set.
 
+v_test_procs := env("TEST_PROCS", "2")
+
 # How long one run may take. The stage that stands up containers wants more and
 # sets it in its own environment before calling us.
 v_test_timeout := env("TEST_TIMEOUT", "20m")
@@ -26,7 +28,8 @@ test folder="./..." *args:
       status=0; \
       gotestsum --hide-summary=skipped --format testname --jsonfile=work/logs/${DATE}.json --packages={{ folder }} \
         --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num 10 --jsonfile work/logs/${DATE}.json'" \
-        -- -race -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -cover -covermode atomic -coverpkg ./... -v "${@:2}" \
+        -- -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v} -X github.com/lxc/incus-compose/internal/testlib.version=v${VERSION#v}" \
+        -race -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -cover -covermode atomic -coverpkg ./... -v "${@:2}" \
         -args -test.gocoverdir="${INCUS_COMPOSE_TEST_COVERDIR}" || status=$?; \
       go tool covdata textfmt -i="${INCUS_COMPOSE_TEST_COVERDIR}" -o work/logs/${DATE}-cover.out; \
       just cover work/logs/${DATE}-cover.out; \
@@ -108,13 +111,13 @@ cover profile="":
 # Run local unit-tests, incus-facing tests are skipped.
 [env("INCUS_COMPOSE_TEST_LOCAL", "1")]
 test-local folder="./..." *args:
-    @just test "$@"
+    @just test {{ folder }} "${@:2}"
 
 # Run e2e tests.
 [env("INCUS_COMPOSE_TEST_E2E", "1")]
 [env("TEST_TIMEOUT", "60m")]
 test-e2e folder="./..." *args:
-    @just test "$@"
+    @just test {{ folder }} "${@:2}"
 
 # Run example tests.
 [env("INCUS_COMPOSE_TEST_EXAMPLES", "1")]
@@ -133,28 +136,23 @@ test-all *args:
         go -C "$dir" test ./... -race -cover "$@"
     done
 
-# Run the tests with a race detector.
-test-race folder="./..." *args:
-    mkdir -p work/logs
-    gotestsum --hide-summary=skipped --jsonfile=work/logs/`date +%Y%m%d-%H%M%S`.json --packages={{ folder }} -- -parallel {{ v_test_procs }} -timeout {{ v_test_timeout }} -race -v "${@:2}"
-
 # Update snapshots for long running tests.
 [env("INCUS_COMPOSE_TEST_E2E", "1")]
 [env("TEST_TIMEOUT", "60m")]
 [env("UPDATE_SNAPSHOTS", "1")]
 update-e2e-snapshots folder="./..." *args:
-    @just test "$@"
+    @just test {{ folder }} "${@:2}"
 
 # Update snapshots for examples.
 [env("INCUS_COMPOSE_TEST_EXAMPLES", "1")]
 [env("UPDATE_SNAPSHOTS", "1")]
 update-examples-snapshots folder="./..." *args:
-    @just test "$@"
+    @just test {{ folder }} "${@:2}"
 
 # Update snapshot test files that require a remote
 [env("UPDATE_SNAPSHOTS", "1")]
 update-snapshots folder="./..." *args:
-    @just test "$@"
+    @just test {{ folder }} "${@:2}"
 
 #   just test-log                          # everything the run printed
 #   just test-log -p 'FAIL|Error:'         # only matching lines (extended regex)

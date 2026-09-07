@@ -15,8 +15,6 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # (e.g. a -run 'TestA|TestB' pattern is not split on the pipe).
 set positional-arguments
 
-v_test_procs := env("TEST_PROCS", "2")
-
 import 'just/mod.just'
 import 'just/test.just'
 import 'just/build.just'

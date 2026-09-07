@@ -20,6 +20,7 @@ var (
 	binDir  string
 	binPath string
 	binErr  error
+	version = "latest"
 )
 
 // ComposeBin builds the CLI once per test process, with the run's own -race and
@@ -35,7 +36,7 @@ func ComposeBin(t *testing.T) string {
 
 		binPath = filepath.Join(binDir, "incus-compose")
 
-		args := []string{"build", "-o", binPath, "-race"}
+		args := []string{"build", "-o", binPath, "-race", "-ldflags=-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=" + version}
 
 		// Without -coverpkg the binary counts package main and nothing else.
 		if os.Getenv(EnvCoverDir) != "" {
