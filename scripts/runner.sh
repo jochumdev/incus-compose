@@ -206,7 +206,7 @@ down() {
 
     stop_runner
     publish_runner ||
-        warn "publish failed, the 'runner' image is the one from the last run"
+        die "publish failed, the 'runner' image is the one from the last run"
 
     # --- Drop everything that lives on the ramdisk --------------------------
 
@@ -214,6 +214,10 @@ down() {
     for ict in $(incus list --format csv -c n ict-); do
         incus delete --force "${ict}" || warn "could not delete instance ${ict}"
     done
+
+    if [[ ${POOL} != "tmpfs" ]]; then
+      return 0
+    fi
 
     if incus storage show "${POOL}" >/dev/null 2>&1; then
         step "Removing what is left on pool ${POOL}"

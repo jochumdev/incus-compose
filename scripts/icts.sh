@@ -115,7 +115,12 @@ down() {
         delete_ict "$name"
     done
 
+
     # --- The storage pool ---------------------------------------------------
+
+    if [[ ${POOL} != "tmpfs" ]]; then
+      return 0
+    fi
 
     if [[ -n "${ONLY:-}" ]]; then
         step "Keeping storage pool ${POOL}, the other ICTs still use it"
