@@ -90,6 +90,9 @@ func (p *Plugin) acceptSweep(ctx context.Context, msg sweepMsg) {
 		p.sweepEnd(ctx)
 
 	case sweepActionFailed:
+		if p.opts.Metrics {
+			sweepsTotal.WithLabelValues("failed").Inc()
+		}
 		p.logger.Warn("the run could not read part of the fleet, serving what is held",
 			"plugin", name, "err", msg.err)
 	}
@@ -102,6 +105,10 @@ func (p *Plugin) acceptSweep(ctx context.Context, msg sweepMsg) {
 // and a run reaching its end is when that becomes true.
 func (p *Plugin) sweepEnd(ctx context.Context) {
 	p.sweepEnding = false
+	if p.opts.Metrics {
+		sweepsTotal.WithLabelValues("success").Inc()
+	}
+	p.updateMetrics()
 
 	select {
 	case p.args.CommandOut <- iutil.Command{Action: iutil.ActionSweepEnd, ChainState: iutil.ChainWarm}:

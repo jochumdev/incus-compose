@@ -36,6 +36,7 @@ type scheduler struct {
 	pools     pools
 	instances map[string]*instance
 	results   chan instanceResult
+	metrics   bool
 }
 
 func newScheduler(t *testing.T) *scheduler {
@@ -99,11 +100,11 @@ func (s *scheduler) running(t *testing.T, inst *instance, state instanceState, d
 }
 
 func (s *scheduler) run() time.Time {
-	return runInstanceActions(s.ctx, s.logger, s.conn, s.pools, s.instances, s.results)
+	return runInstanceActions(s.ctx, s.logger, s.conn, s.pools, s.instances, s.results, s.metrics)
 }
 
 func (s *scheduler) result(res instanceResult) {
-	handleInstanceResult(s.ctx, s.logger, s.conn, s.instances, s.results, res)
+	handleInstanceResult(s.ctx, s.logger, s.conn, s.instances, s.results, res, s.metrics)
 }
 
 func (s *scheduler) event(action string, name string) {

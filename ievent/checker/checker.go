@@ -15,6 +15,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/lxc/incus-compose/ievent/iutil"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // name is what this plugin is called, in the chain and in a drop's reason.
@@ -72,6 +73,7 @@ type Config struct {
 
 	Workers        int
 	RestartWorkers int
+	Metrics        bool
 }
 
 // Option sets one of them. The zero value means unset, and New fills this
@@ -89,6 +91,9 @@ func Workers(v int) Option { return func(cfg *Config) { cfg.Workers = v } }
 
 // RestartWorkers sets the number of restart workers.
 func RestartWorkers(v int) Option { return func(cfg *Config) { cfg.RestartWorkers = v } }
+
+// Metrics turns counters and gauges on.
+func Metrics(v bool) Option { return func(cfg *Config) { cfg.Metrics = v } }
 
 // Plugin runs health checks and restart policies on the fleet.
 type Plugin struct {
@@ -200,6 +205,9 @@ func (p *Plugin) Run(ctx context.Context) error {
 
 	instances := map[string]*instance{}
 	results := make(chan instanceResult, 32)
+	if p.cfg.Metrics {
+		updateInstanceMetrics(instances)
+	}
 
 	// fold applies one event to what is held, and hands it on. Everything it
 	// touches belongs to Run's goroutine.
@@ -223,6 +231,9 @@ func (p *Plugin) Run(ctx context.Context) error {
 					delete(instances, k)
 				}
 			}
+			if p.cfg.Metrics {
+				updateInstanceMetrics(instances)
+			}
 		}
 
 		p.next(ev)
@@ -232,7 +243,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 	defer nextCheck.Stop()
 
 	for {
-		earliest := runInstanceActions(ctx, p.logger, p.args.Conn, pools, instances, results)
+		earliest := runInstanceActions(ctx, p.logger, p.args.Conn, pools, instances, results, p.cfg.Metrics)
 		nextCheck.Stop()
 		if earliest.IsZero() {
 			nextCheck.Reset(time.Hour)
@@ -271,9 +282,37 @@ func (p *Plugin) Run(ctx context.Context) error {
 			fold(ev)
 
 		case res := <-results:
-			handleInstanceResult(loopCtx, p.logger, p.args.Conn, instances, results, res)
+			handleInstanceResult(loopCtx, p.logger, p.args.Conn, instances, results, res, p.cfg.Metrics)
+			if p.cfg.Metrics {
+				updateInstanceMetrics(instances)
+			}
 		case <-nextCheck.C:
-			_ = runInstanceActions(ctx, p.logger, p.args.Conn, pools, instances, results)
+			_ = runInstanceActions(ctx, p.logger, p.args.Conn, pools, instances, results, p.cfg.Metrics)
 		}
+	}
+}
+
+func updateInstanceMetrics(instances map[string]*instance) {
+	counts := map[string]int{
+		shared.HealthStatusHealthy:   0,
+		shared.HealthStatusUnhealthy: 0,
+		shared.HealthStatusStarting:  0,
+		shared.HealthStatusStopped:   0,
+		shared.HealthStatusUnknown:   0,
+	}
+
+	for _, inst := range instances {
+		status := inst.status
+		if status == "" {
+			status = shared.HealthStatusUnknown
+		}
+
+		if _, ok := counts[status]; ok {
+			counts[status]++
+		}
+	}
+
+	for status, count := range counts {
+		instancesGauge.WithLabelValues(status).Set(float64(count))
 	}
 }

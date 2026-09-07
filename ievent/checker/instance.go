@@ -682,7 +682,7 @@ func checkFailed(inst *instance, now time.Time) string {
 	return shared.HealthStatusUnhealthy
 }
 
-func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, pool pools, instances map[string]*instance, resultChan chan<- instanceResult) time.Time {
+func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, pool pools, instances map[string]*instance, resultChan chan<- instanceResult, metrics bool) time.Time {
 	var earliest time.Time
 	now := time.Now()
 
@@ -718,6 +718,9 @@ func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.
 					// As in docker, a probe that exceeds its timeout is a
 					// failed probe.
 					reportStatus(ctx, logger, conn, inst.project, resultChan, inst, checkFailed(inst, now))
+					if metrics {
+						checksTotal.WithLabelValues("failed").Inc()
+					}
 
 					// checkFailed sets its own deadline when it escalates.
 					if inst.action != instanceActionRestart {
@@ -727,6 +730,9 @@ func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.
 					// A restart that timed out is a restart that failed.
 					inst.due = now.Add(inst.restartDelay)
 					inst.restartDelay = min(inst.restartDelay*2, maxRestartDelay)
+					if metrics {
+						restartsTotal.WithLabelValues("failed").Inc()
+					}
 				}
 			}
 			continue
@@ -755,6 +761,9 @@ func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.
 			if err != nil {
 				cancel()
 				deferAction(inst)
+				if metrics {
+					poolRefusals.WithLabelValues("restart").Inc()
+				}
 				continue
 			}
 
@@ -782,6 +791,9 @@ func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.
 			if err != nil {
 				cancel()
 				deferAction(inst)
+				if metrics {
+					poolRefusals.WithLabelValues("check").Inc()
+				}
 
 				continue
 			}
@@ -799,7 +811,7 @@ func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.
 
 // handleInstanceResult applies one action's outcome. Like handleInstanceEvent it
 // must not block: the status write it may start runs on its own goroutine.
-func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, instances map[string]*instance, results chan<- instanceResult, res instanceResult) {
+func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclient.Connection, instances map[string]*instance, results chan<- instanceResult, res instanceResult, metrics bool) {
 	switch res.kind {
 	case instanceResultDiscovered:
 		// saveInstance reports its failures here; a success folds into the map
@@ -876,11 +888,17 @@ func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclien
 
 			// As in docker, the first success ends the start period early.
 			inst.inRestart = false
+			if metrics {
+				checksTotal.WithLabelValues("passed").Inc()
+			}
 		} else {
 			logger.Debug("Check failed", "instance", inst.name, "inStart", inst.inRestart,
 				"failures", inst.failures, "retries", inst.config.retries, "error", res.err)
 
 			want = checkFailed(inst, now)
+			if metrics {
+				checksTotal.WithLabelValues("failed").Inc()
+			}
 		}
 
 		reportStatus(ctx, logger, conn, res.project, results, inst, want)
@@ -921,6 +939,9 @@ func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclien
 			}
 
 			logger.Error("Restart failed", "instance", res.name, "error", res.err)
+			if metrics {
+				restartsTotal.WithLabelValues("failed").Inc()
+			}
 
 			inst.state = instanceIdle
 			inst.action = instanceActionRestart
@@ -931,6 +952,9 @@ func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclien
 		}
 
 		logger.Info("Restarted", "instance", inst.name)
+		if metrics {
+			restartsTotal.WithLabelValues("success").Inc()
+		}
 		instanceStarted(inst, time.Now())
 	case instanceResultStatus:
 		inst, ok := instances[res.Key()]

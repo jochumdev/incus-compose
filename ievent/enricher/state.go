@@ -357,6 +357,19 @@ func (s *state) deleteInstance(project, name string) {
 	delete(p.instances, name)
 }
 
+func (s *state) projectCount() int {
+	return len(s.projects)
+}
+
+func (s *state) instanceCount() int {
+	total := 0
+	for _, p := range s.projects {
+		total += len(p.instances)
+	}
+
+	return total
+}
+
 // instance returns what is held for one instance, or nil.
 func (s *state) instance(project, name string) *iutil.Instance {
 	p, ok := s.projects[project]

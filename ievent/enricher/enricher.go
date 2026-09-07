@@ -137,6 +137,7 @@ type options struct {
 	TTL           time.Duration
 	Project       func(p *incusapi.Project) bool
 	StoreFile     string
+	Metrics       bool
 }
 
 // Option sets one of the options; New fills in defaults for whatever is left
@@ -184,6 +185,9 @@ func StoreFile(f string) Option { return func(o *options) { o.StoreFile = f } }
 // StoreInterval is how often what this plugin holds is written, where StoreFile
 // says to write it. A run that changed nothing writes nothing whatever this is.
 func StoreInterval(d time.Duration) Option { return func(o *options) { o.StoreInterval = d } }
+
+// Metrics turns counters and gauges on.
+func Metrics(v bool) Option { return func(o *options) { o.Metrics = v } }
 
 // New builds an enricher.
 //
@@ -246,6 +250,15 @@ func (p *Plugin) storeClone() {
 	p.state.dirty = false
 
 	storeSend(p.storeIn, p.state.clone())
+}
+
+func (p *Plugin) updateMetrics() {
+	if !p.opts.Metrics {
+		return
+	}
+
+	projectsGauge.Set(float64(p.state.projectCount()))
+	instancesGauge.Set(float64(p.state.instanceCount()))
 }
 
 // Name identifies the plugin, and names it in the reason of what it fails.
@@ -507,6 +520,7 @@ func (p *Plugin) settleRead(ctx context.Context, res result) {
 	case kindProject:
 		if res.err == nil {
 			p.state.setProject(c.project, res.project.Config)
+			p.updateMetrics()
 		}
 
 		// A project that would not answer still counts: the run is over either
@@ -519,6 +533,9 @@ func (p *Plugin) settleRead(ctx context.Context, res result) {
 	}
 
 	inst, landed := p.patchState(ctx, c.project, c.name, res.instance, res.state, res.err)
+	if landed {
+		p.updateMetrics()
+	}
 
 	// Before the event it made below, which is then compared against what they
 	// filed.
@@ -615,6 +632,7 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 	if ev.Action() == incusapi.EventLifecycleInstanceDeleted {
 		p.state.deleteInstance(ev.ProjectName(), ev.Name())
 		p.archive.forget(ev.ProjectName(), ev.Name())
+		p.updateMetrics()
 		p.q.push(ev, true)
 
 		return
@@ -625,6 +643,7 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 	if ev.Action() == incusapi.EventLifecycleInstanceRenamed && ev.OldName() != "" {
 		p.state.deleteInstance(ev.ProjectName(), ev.OldName())
 		p.archive.forget(ev.ProjectName(), ev.OldName())
+		p.updateMetrics()
 	}
 
 	// Both have to be true: wanted for instance enrichment, and the action
