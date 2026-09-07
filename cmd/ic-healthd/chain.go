@@ -40,7 +40,10 @@ func chain(logger *slog.Logger, cfg *config) ([]iutil.Plugin, []runner) {
 	}
 
 	add(debounce.New(logger))
-	add(enricher.New(logger, enricher.Project(serves(logger, cfg))))
+	add(enricher.New(logger,
+		enricher.Project(serves(logger, cfg)),
+		enricher.Metrics(cfg.Metrics),
+	))
 
 	if cfg.Trace {
 		add(log.New(logger, log.At("enriched"), log.Level("TRACE")))
@@ -50,8 +53,9 @@ func chain(logger *slog.Logger, cfg *config) ([]iutil.Plugin, []runner) {
 		checker.Workers(cfg.Workers),
 		checker.RestartWorkers(cfg.RestartWorkers),
 		checker.Serveable(serveable(cfg)),
+		checker.Metrics(cfg.Metrics),
 	))
-	add(http.New(logger, http.Listen(cfg.HTTPAddr)))
+	add(http.New(logger, http.Listen(cfg.HTTPAddr), http.Metrics(cfg.Metrics)))
 
 	runners := []runner{}
 

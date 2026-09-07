@@ -15,8 +15,10 @@ form.
 
 ### Added
 
-- ic-healthd serves `/metrics`, `/health` and `/ready` on `:8080`; an empty
-  `--http` / `INCUS_COMPOSE_HEALTHD_HTTP` disables it. (by @jochumdev)
+- ic-healthd serves `/metrics`, `/health` and `/ready` on `:9153`; an empty
+  `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by @jochumdev)
+- `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus metrics
+  in ic-healthd (defaults to true). (by @jochumdev)
 - Running ic-healthd by hand can now present an already-trusted certificate
   (`--client-cert` with `--client-key`) or connect as a remote from the Incus
   CLI configuration (`--remote` with `--use-remote`). (by @jochumdev)
@@ -26,10 +28,7 @@ form.
 - ic-healthd is rebuilt on the same event framework as ic-dns: one chain of
   plugins replaces its listener, router and per-project schedulers. The sidecar
   contract is unchanged - the same flags, environment variables and status
-  writes, and `healthd reload` still forces a full resync. One timing
-  difference: a project that opts into a running daemon via its marker is picked
-  up at the daemon's next sweep of the fleet rather than within seconds, while
-  instance events in it are judged from the moment they arrive. (by @jochumdev)
+  writes, and `healthd reload` still forces a full resync. (by @jochumdev)
 
 ## [v1.3.3] - 2026-09-07
 

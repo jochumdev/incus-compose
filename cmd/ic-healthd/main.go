@@ -17,6 +17,11 @@ import (
 	"github.com/urfave/cli/v3"
 	"go.uber.org/automaxprocs/maxprocs"
 
+	// Importing this package sets GOMEMLIMIT automatically from the cgroup memory limit.
+	// By default, it sets GOMEMLIMIT to 90% of the cgroup memory limit.
+	// Set the AUTOMEMLIMIT environment variable to a ratio in (0.0, 1.0], or "off".
+	_ "github.com/KimMachineGun/automemlimit"
+
 	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/ievent/checker"
 	"github.com/lxc/incus-compose/ievent/source"
@@ -162,11 +167,18 @@ func runCommand(cfg *config) *cli.Command {
 				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_RESTART_WORKERS"),
 			},
 			&cli.StringFlag{
-				Name:        "http",
+				Name:        "http-address",
 				Usage:       "Address to serve /metrics, /health and /ready on; empty disables it",
 				Destination: &cfg.HTTPAddr,
 				Value:       defaultHTTPAddr,
-				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_HTTP"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS"),
+			},
+			&cli.BoolFlag{
+				Name:        "metrics",
+				Usage:       "Serve Prometheus metrics on /metrics",
+				Value:       true,
+				Destination: &cfg.Metrics,
+				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_METRICS"),
 			},
 
 			&cli.BoolFlag{
@@ -223,6 +235,7 @@ func runCommand(cfg *config) *cli.Command {
 				"token", cfg.redacted().Token,
 				"workers", cfg.Workers,
 				"restart_workers", cfg.RestartWorkers,
+				"metrics", cfg.Metrics,
 			)
 
 			return run(ctx, logger, cfg)

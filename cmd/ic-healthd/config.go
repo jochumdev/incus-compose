@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lxc/incus-compose/shared"
 )
@@ -15,7 +14,7 @@ const (
 	defaultDataDir    = "/var/lib/ic-healthd"
 	defaultSecretsDir = "/run/secrets"
 
-	defaultHTTPAddr = ":8080"
+	defaultHTTPAddr = ":9153"
 
 	// defaultProjectMarker selects the projects handed to the shared daemon.
 	defaultProjectMarker      = shared.HealthScopeKey
@@ -24,10 +23,6 @@ const (
 	defaultWorkers        = 128
 	defaultRestartWorkers = 32
 )
-
-// routeWait bounds how long a start waits for the container's network to come
-// up before connecting anyway.
-const routeWait = 10 * time.Second
 
 // config is everything the process was told, in one value, so it can be built
 // and tested without a command line.
@@ -57,6 +52,7 @@ type config struct {
 
 	// HTTPAddr serves /metrics, /health and /ready; empty disables it.
 	HTTPAddr string
+	Metrics  bool
 
 	// Debug and Trace raise the process's log level; trace implies debug.
 	Debug bool
@@ -67,6 +63,7 @@ func newConfig() *config {
 	return &config{
 		ProjectMarker:      defaultProjectMarker,
 		ProjectMarkerValue: defaultProjectMarkerValue,
+		Metrics:            true,
 	}
 }
 
