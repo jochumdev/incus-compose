@@ -221,13 +221,6 @@ down() {
     fi
 
     if incus storage show "${POOL}" >/dev/null 2>&1; then
-        step "Removing what is left on pool ${POOL}"
-        volumes="$(incus storage volume list "${POOL}" --all-projects --format csv -c en)"
-        while IFS=, read -r project name; do
-            incus delete --force --project "${project}" "${name}" ||
-                warn "could not delete instance ${project}/${name}"
-        done <<<"${volumes}"
-
         step "Removing storage pool ${POOL}"
         if ! incus storage delete "${POOL}"; then
             warn "pool ${POOL} stayed behind, it is still used by:"
