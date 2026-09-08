@@ -1,6 +1,6 @@
 module github.com/lxc/incus-compose/benchmarks/ic-dns/kubernetes
 
-go 1.26.5
+go 1.27.1
 
 // Pinned to what CoreDNS itself requires, taken from the checkout in
 // work/vendor/coredns. The kubernetes plugin imports packages that later

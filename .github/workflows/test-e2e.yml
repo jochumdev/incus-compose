@@ -11,7 +11,7 @@ concurrency:
 
 env:
   # https://stackoverflow.com/a/79780883/3368468
-  GOTOOLCHAIN: "go1.26.0+auto"
+  GOTOOLCHAIN: "go1.27.0+auto"
   REPORTS_DIR: reports
 
 jobs:

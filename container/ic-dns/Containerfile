@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26.7-trixie
+ARG GO_VERSION=1.27.1-trixie
 # Root, not :nonroot - ic-dns binds port 53 here, and resolv.conf has no port
 # field, so a client can only ever name the privileged one.
 ARG BASE=docker.io/library/busybox:glibc
