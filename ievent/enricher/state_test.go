@@ -122,6 +122,50 @@ func TestPutInstance(t *testing.T) {
 			wantIPv4: nil,
 		},
 		{
+			// A profile may call the device anything; the guest still sees eth0.
+			// Incus records the guest name as volatile.<device>.name.
+			name: "a NIC whose device key differs from the guest interface name is found by its recorded name",
+			change: func(p *testlib.Project) {
+				inst := &p.Instances[0]
+				inst.ExpandedDevices["eth-1"] = inst.ExpandedDevices["eth0"]
+				delete(inst.ExpandedDevices, "eth0")
+				inst.ExpandedConfig["volatile.eth-1.name"] = "eth0"
+			},
+			running:  true,
+			wantNets: []string{"p/net0"},
+			wantIPv4: []string{"10.0.0.10"},
+		},
+		{
+			name: "a NIC whose device key differs from the guest interface name is found by its hardware address",
+			change: func(p *testlib.Project) {
+				inst := &p.Instances[0]
+				inst.ExpandedDevices["net0"] = inst.ExpandedDevices["eth0"]
+				delete(inst.ExpandedDevices, "eth0")
+				inst.ExpandedConfig["volatile.net0.hwaddr"] = "10:66:6A:00:00:01"
+
+				st := p.States[testlib.InstanceName(0)]
+				iface := st.Network["eth0"]
+				iface.Hwaddr = "10:66:6a:00:00:01"
+				st.Network["eth0"] = iface
+			},
+			running:  true,
+			wantNets: []string{"p/net0"},
+			wantIPv4: []string{"10.0.0.10"},
+		},
+		{
+			name: "a NIC that pins its own guest name is found by it",
+			change: func(p *testlib.Project) {
+				inst := &p.Instances[0]
+				nic := inst.ExpandedDevices["eth0"]
+				nic["name"] = "eth0"
+				inst.ExpandedDevices["incus-ovn"] = nic
+				delete(inst.ExpandedDevices, "eth0")
+			},
+			running:  true,
+			wantNets: []string{"p/net0"},
+			wantIPv4: []string{"10.0.0.10"},
+		},
+		{
 			name: "devices fall back to the instance's own when nothing is expanded",
 			change: func(p *testlib.Project) {
 				p.Instances[0].Devices = p.Instances[0].ExpandedDevices
