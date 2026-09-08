@@ -521,6 +521,7 @@ func (p *Plugin) settleRead(ctx context.Context, res result) {
 		if res.err == nil {
 			p.state.setProject(c.project, res.project.Config)
 			p.updateMetrics()
+			p.fanOut(ctx, p.state.projectInstances(c.project))
 		}
 
 		// A project that would not answer still counts: the run is over either
