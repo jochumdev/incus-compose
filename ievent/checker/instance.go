@@ -360,12 +360,18 @@ func saveInstance(instances map[string]*instance, ev *iutil.Event) (*instance, e
 			restartDelay: baseRestartDelay(instConfig),
 		}
 
-		if instConfig.startPeriod > 0 {
+		if !instConfig.running {
+			inst.state = instanceParked
+			inst.action = ""
+		} else if instConfig.startPeriod > 0 {
 			inst.inRestart = true
 			inst.restartDone = now.Add(instConfig.startPeriod)
 		}
 
 		instances[k] = inst
+	} else if !instConfig.running && inst.action == instanceActionCheck {
+		inst.state = instanceParked
+		inst.action = ""
 	}
 
 	s, ok := evInst.ConfigValue(shared.HealthStatusKey)
@@ -416,6 +422,8 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 		if !ok {
 			return
 		}
+
+		inst.config.running = false
 
 		// Before the branches below, one of which stops watching it entirely.
 		reportStatus(ctx, logger, conn, ev.ProjectName(), results, inst, shared.HealthStatusStopped)
@@ -771,8 +779,8 @@ func runInstanceActions(ctx context.Context, logger *slog.Logger, conn *iclient.
 			inst.actionDeadline = now.Add(restartTimeout)
 			inst.actionContext, inst.actionCancel = actionCtx, cancel
 		case instanceActionCheck:
-			// No need to check an instance without a test.
-			if len(inst.config.test) == 0 {
+			// No need to check an instance without a test, or one that is not running.
+			if len(inst.config.test) == 0 || !inst.config.running {
 				continue
 			}
 
@@ -866,6 +874,7 @@ func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclien
 		// one already stopped at discovery never had one - so the restart is
 		// scheduled here too, and the event path leaves a queued one alone.
 		if errors.Is(res.err, ErrNotRunning) {
+			inst.config.running = false
 			reportStatus(ctx, logger, conn, res.project, results, inst, shared.HealthStatusStopped)
 
 			if slices.Contains(shared.RestartPolicies, inst.config.restart) {
