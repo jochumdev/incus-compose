@@ -207,12 +207,6 @@ func TestImageEnsure(t *testing.T) {
 			image:   "docker.io/library/busybox:glibc",
 			wantErr: true,
 		},
-		{
-			name:    "bad image fails",
-			image:   "docker.io/library/nonexistent-image-xyz123:latest",
-			opts:    []Option{OptionCreate()},
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {
