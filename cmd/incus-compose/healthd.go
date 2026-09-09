@@ -27,7 +27,7 @@ import (
 var DefaultHealthdImage = "ghcr.io/lxc/incus-compose/ic-healthd:{version}"
 
 const (
-	defaultHealthdCPU         = 2
+	defaultHealthdCPU         = "200ms/100ms"
 	defaultHealthdMemoryLimit = "256MiB"
 )
 
@@ -167,10 +167,7 @@ func healthdCarriedConfig(config map[string]string) map[string]string {
 // have outgrown. Only a plain count or byte size compares; a CPU pin such as
 // "1-1" or a memory percentage is deliberate and left alone.
 func healthdFloorLimits(carried map[string]string) {
-	cpu, err := strconv.Atoi(carried["limits.cpu"])
-	if err == nil && cpu < defaultHealthdCPU {
-		carried["limits.cpu"] = strconv.Itoa(defaultHealthdCPU)
-	}
+	carried["limits.cpu.allowance"] = defaultHealthdCPU
 
 	// An empty value parses as zero bytes, which would floor a limit into being.
 	if carried["limits.memory"] == "" {
@@ -327,7 +324,7 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 		Image: imgRes.Name(),
 		Type:  incusApi.InstanceTypeContainer,
 		Extensions: map[string]string{
-			"limits.cpu":                       strconv.Itoa(defaultHealthdCPU),
+			"limits.cpu.allowance":             defaultHealthdCPU,
 			"limits.memory":                    defaultHealthdMemoryLimit,
 			client.HealthKeyPrefix + "restart": "unless-stopped", // Needed for instance.Start to wait for it.
 			client.HealthKeyPrefix + "daemon":  "true",
