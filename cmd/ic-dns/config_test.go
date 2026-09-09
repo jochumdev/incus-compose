@@ -89,10 +89,10 @@ func TestConfigFromCommand(t *testing.T) {
 // TestConfigFromEnvironment pins the half a container actually uses. A flag
 // that reads no environment variable is a flag a compose file cannot set.
 func TestConfigFromEnvironment(t *testing.T) {
-	t.Setenv("DNS_INCUS", "https://env:8443")
-	t.Setenv("DNS_LISTEN", "127.0.0.1:5353")
-	t.Setenv("DNS_WORKERS", "8")
-	t.Setenv("DNS_LOG", "DEBUG")
+	t.Setenv("INCUS_COMPOSE_DNS_INCUS", "https://env:8443")
+	t.Setenv("INCUS_COMPOSE_DNS_LISTEN", "127.0.0.1:5353")
+	t.Setenv("INCUS_COMPOSE_DNS_WORKERS", "8")
+	t.Setenv("INCUS_COMPOSE_DNS_LOG", "DEBUG")
 
 	cfg := parse(t)
 
@@ -109,22 +109,22 @@ func TestConfigFromEnvironment(t *testing.T) {
 	cfg = parse(t, "--listen", "127.0.0.1:15353")
 	assert.Equal(t, "127.0.0.1:15353", cfg.DNSAddr)
 
-	t.Setenv("DNS_PROJECT_MARKER", "user.custom=val")
+	t.Setenv("INCUS_COMPOSE_DNS_PROJECT_MARKER", "user.custom=val")
 	cfg = parse(t)
 	assert.Equal(t, "user.custom", cfg.ProjectMarker)
 	assert.Equal(t, "val", cfg.ProjectMarkerValue)
 
-	t.Setenv("DNS_PROJECT_MARKER", "user.dns")
+	t.Setenv("INCUS_COMPOSE_DNS_PROJECT_MARKER", "user.dns")
 	cfg = parse(t)
 	assert.Equal(t, "user.dns", cfg.ProjectMarker)
 	assert.Equal(t, "true", cfg.ProjectMarkerValue)
 
-	t.Setenv("DNS_PROJECT_MARKER", "")
+	t.Setenv("INCUS_COMPOSE_DNS_PROJECT_MARKER", "")
 	cfg = parse(t)
 	assert.Equal(t, "", cfg.ProjectMarker)
 	assert.Equal(t, "true", cfg.ProjectMarkerValue)
 
-	t.Setenv("DNS_PROJECT_MARKER", "user.env=fromenv")
+	t.Setenv("INCUS_COMPOSE_DNS_PROJECT_MARKER", "user.env=fromenv")
 	cfg = parse(t, "--project-marker", "user.cli=fromcli")
 	assert.Equal(t, "user.cli", cfg.ProjectMarker)
 	assert.Equal(t, "fromcli", cfg.ProjectMarkerValue)
