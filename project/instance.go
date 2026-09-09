@@ -438,7 +438,15 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		networkDef, defOk := p.Networks[name]
 		if defOk {
 			netConfig.External = bool(networkDef.External)
-			netConfig.Extensions = networkExtensions(networkDef)
+			exts, err := networkExtensions(networkDef)
+			if err != nil {
+				errs = errors.Join(errs, fmt.Errorf("network %q: %w", name, err))
+				continue
+			}
+			netConfig.Extensions = exts
+			if networkDef.Driver != "" {
+				netConfig.Type = networkDef.Driver
+			}
 			// compose-go always fills Name in, with the key for an external network
 			// and {project}_{key} otherwise; anything else is a `name:` the user
 			// wrote, and it beats the extension.
@@ -1246,22 +1254,60 @@ func xICInstanceNetwork(networkDef types.NetworkConfig) string {
 	return n
 }
 
-// networkExtensions extracts the x-incus extension map from a compose network
-// definition and returns it as a flat map[string]string for use as Incus network
-// config. Keys and values are taken verbatim from the x-incus YAML block.
-func networkExtensions(networkDef types.NetworkConfig) map[string]string {
+// networkExtensions extracts Incus network config from x-incus and ipam.
+func networkExtensions(networkDef types.NetworkConfig) (map[string]string, error) {
+	result := map[string]string{}
+
+	if len(networkDef.Ipam.Config) > 2 {
+		return nil, fmt.Errorf("ipam.config with more than 2 pools is not supported")
+	}
+
+	for _, pool := range networkDef.Ipam.Config {
+		if pool == nil {
+			continue
+		}
+		if pool.Gateway == "" {
+			return nil, fmt.Errorf("ipam gateway cannot be empty")
+		}
+
+		_, ipNet, err := net.ParseCIDR(pool.Subnet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse subnet %q: %w", pool.Subnet, err)
+		}
+
+		gw := net.ParseIP(pool.Gateway)
+		if gw == nil {
+			return nil, fmt.Errorf("failed to parse gateway %q", pool.Gateway)
+		}
+		if !ipNet.Contains(gw) {
+			return nil, fmt.Errorf("gateway %q is not in subnet %q", pool.Gateway, pool.Subnet)
+		}
+
+		ones, _ := ipNet.Mask.Size()
+		addr := fmt.Sprintf("%s/%d", gw.String(), ones)
+
+		key := "ipv6.address"
+		if gw.To4() != nil {
+			key = "ipv4.address"
+		}
+		if _, exists := result[key]; exists {
+			return nil, fmt.Errorf("multiple %s pools are not supported", key[:4])
+		}
+		result[key] = addr
+	}
+
 	var raw map[string]any
 	ok, err := networkDef.Extensions.Get("x-incus", &raw)
-	if !ok || err != nil || len(raw) == 0 {
-		return map[string]string{}
+	if err != nil {
+		return nil, err
+	}
+	if ok && len(raw) > 0 {
+		for k, v := range raw {
+			result[k] = fmt.Sprint(v)
+		}
 	}
 
-	result := make(map[string]string, len(raw))
-	for k, v := range raw {
-		result[k] = fmt.Sprint(v)
-	}
-
-	return result
+	return result, nil
 }
 
 // xIncusExtensions extracts the x-incus extension map from a compose
