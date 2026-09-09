@@ -373,6 +373,8 @@ func saveInstance(instances map[string]*instance, ev *iutil.Event) (*instance, e
 	} else if !instConfig.running && inst.action == instanceActionCheck {
 		inst.state = instanceParked
 		inst.action = ""
+	} else if instConfig.running && inst.state == instanceParked {
+		instanceStarted(inst, time.Now())
 	}
 
 	s, ok := evInst.ConfigValue(shared.HealthStatusKey)
@@ -408,8 +410,6 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 			return
 		}
 
-		inst.config.running = true
-
 		// An action in flight owns the instance; its result says what comes next.
 		if inst.state == instanceChecking || inst.state == instanceRestarting {
 			return
@@ -419,14 +419,15 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 		instanceStarted(inst, time.Now())
 
 	case incusApi.EventLifecycleInstanceStopped, incusApi.EventLifecycleInstanceShutdown:
-		k := instKey(ev)
-
-		inst, ok := instances[k]
-		if !ok {
+		inst, err := saveInstance(instances, ev)
+		if err != nil {
+			res := newDiscoveredResult(ev.Name(), ev.ProjectName(), err)
+			select {
+			case <-ctx.Done():
+			case results <- res:
+			}
 			return
 		}
-
-		inst.config.running = false
 
 		// Before the branches below, one of which stops watching it entirely.
 		reportStatus(ctx, logger, conn, ev.ProjectName(), results, inst, shared.HealthStatusStopped)
@@ -438,7 +439,7 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 				inst.actionCancel()
 			}
 
-			delete(instances, k)
+			delete(instances, instKey(ev))
 
 			return
 		}
@@ -473,7 +474,8 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 	case incusApi.EventLifecycleInstanceDeleted:
 		k := instKey(ev)
 
-		if inst, ok := instances[k]; ok && inst.actionCancel != nil {
+		inst, ok := instances[k]
+		if ok && inst.actionCancel != nil {
 			inst.actionCancel()
 		}
 
@@ -987,6 +989,6 @@ func handleInstanceResult(ctx context.Context, logger *slog.Logger, conn *iclien
 		}
 
 		// Only transitions get here, so this stays quiet on a healthy fleet.
-		logger.Info("Health status", "instance", res.name, "status", res.status)
+		logger.Info("Health status", "project", res.project, "instance", res.name, "status", res.status)
 	}
 }
