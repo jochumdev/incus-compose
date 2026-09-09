@@ -44,7 +44,7 @@ type runArgs struct {
 	Group        string
 	Workdir      string
 	Name         string
-	Init         string
+	SleepImage   string
 	Remove       bool
 	NoDeps       bool
 	Detach       bool
@@ -264,7 +264,7 @@ func runTools(ctx context.Context, c *client.Client, args runArgs) (*client.Stor
 
 	// Resolved once: {version} is what the flag holds, and an error naming that
 	// sends the reader looking for a tag nobody ever asked a registry for.
-	name := resolveImageVersion(args.Init)
+	name := resolveImageVersion(args.SleepImage)
 
 	res, err := sys.Resource(client.KindImage, name, &client.ImageConfig{})
 	if err != nil {
@@ -275,7 +275,7 @@ func runTools(ctx context.Context, c *client.Client, args runArgs) (*client.Stor
 	if err != nil {
 		c.LogError("Fetching the tools image", "image", name, "error", err)
 		c.LogError("`run` execs into it. Fetch it with `incus-compose pull` while connected, " +
-			"or point --init or x-incus-compose.init at an image this server can reach")
+			"or point --sleep-image or x-incus-compose.sleep-image at an image this server can reach")
 
 		return nil, "", errLogged.Wrap(err)
 	}
@@ -551,10 +551,10 @@ func newRunCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_RUN_PULL"),
 			},
 			&cli.StringFlag{
-				Name:    "init",
+				Name:    "sleep-image",
 				Usage:   "Image the blocking helper comes from",
 				Value:   DefaultInitImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_INIT_IMAGE"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
 			},
 			&cli.DurationFlag{
 				Name:    "timeout",
@@ -624,7 +624,7 @@ func newRunCommand() *cli.Command {
 				Group:        cmd.String("group"),
 				Workdir:      cmd.String("workdir"),
 				Name:         name,
-				Init:         cmd.String("init"),
+				SleepImage:   cmd.String("sleep-image"),
 				Remove:       cmd.Bool("rm"),
 				NoDeps:       cmd.Bool("no-deps"),
 				Detach:       cmd.Bool("detach"),

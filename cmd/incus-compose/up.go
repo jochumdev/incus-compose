@@ -100,10 +100,10 @@ func newUpCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
 			},
 			&cli.StringFlag{
-				Name:    "init",
+				Name:    "sleep-image",
 				Usage:   "Image the `run` helper comes from",
 				Value:   DefaultInitImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_INIT_IMAGE"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
 			},
 			&cli.StringFlag{
 				Name:    "healthd-binary",
@@ -237,7 +237,7 @@ func newUpCommand() *cli.Command {
 				WithDeps:        !cmd.Bool("no-deps"),
 				IgnoreBuildable: true,
 				NoHealthd:       true,
-				Init:            cmd.String("init"),
+				SleepImage:      cmd.String("sleep"),
 				Pull:            pullMode,
 				Scale:           scale,
 				Workers:         cmd.Root().Int("workers"),

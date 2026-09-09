@@ -167,9 +167,9 @@ type XICProject struct {
 	Healthd XICHealthd
 	XIncus  map[string]string
 
-	// Init is the image `run` takes its blocking helper from. Empty means the
+	// SleepImage is the image `run` takes its blocking helper from. Empty means the
 	// one this build ships; `run --init` overrides both.
-	Init string
+	SleepImage string
 
 	// NoAutoVolumes is x-incus-compose.auto-volumes: false, which leaves the
 	// paths an image declares as volumes to Incus.
@@ -228,7 +228,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			// A pointer: absent means on, which a bool cannot say.
 			AutoVolumes *bool `mapstructure:"auto-volumes"`
 
-			Init string `mapstructure:"init"`
+			SleepImage string `mapstructure:"sleep-image"`
 
 			Healthd struct {
 				Incus          string         `mapstructure:"incus"`
@@ -261,7 +261,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.Healthd.RestartWorkers = ext.Healthd.RestartWorkers
 			p.ClientConfig.Backup = ext.Backup
 			p.ClientConfig.NoAutoVolumes = ext.AutoVolumes != nil && !*ext.AutoVolumes
-			p.ClientConfig.Init = ext.Init
+			p.ClientConfig.SleepImage = ext.SleepImage
 
 			for k, v := range ext.Healthd.XIncus {
 				p.ClientConfig.Healthd.XIncus[k] = fmt.Sprint(v)

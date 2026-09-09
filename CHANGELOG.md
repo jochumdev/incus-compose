@@ -126,8 +126,8 @@ form.
   them without `--rm`, and ic-healthd never restarts one. The command runs
   through an exec into a blocking helper, so it is not PID 1; `pull` and `up`
   prefetch that helper, which is the only step needing the network, so an
-  air-gapped site can `run` later. `--init` / `INCUS_COMPOSE_INIT_IMAGE` /
-  `x-incus-compose.init` point it at a mirror. A cluster mixing CPU
+  air-gapped site can `run` later. `--sleep-image` / `INCUS_COMPOSE_SLEEP_IMAGE`
+  / `x-incus-compose.init` point it at a mirror. A cluster mixing CPU
   architectures is not supported. (by @jochumdev)
 
 - `pause`, `unpause`, `kill`, `cp`, `top`, `events` and `port`, matching their

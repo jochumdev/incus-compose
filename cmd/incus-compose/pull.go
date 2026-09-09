@@ -22,14 +22,14 @@ type pullArgs struct {
 	NoHealthd          bool
 	HealthdImage       string
 
-	// Init is the tools image `run` needs. Prefetched here so an air-gapped
+	// SleepImage is the tools image `run` needs. Prefetched here so an air-gapped
 	// site that can pull can also run a one-off later.
-	Init    string
-	Pull    client.PullMode
-	Scale   map[string]int
-	Workers int
-	Debug   bool
-	Writer  io.Writer
+	SleepImage string
+	Pull       client.PullMode
+	Scale      map[string]int
+	Workers    int
+	Debug      bool
+	Writer     io.Writer
 }
 
 // pull fetches the images of the project's services.
@@ -104,7 +104,7 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 		}
 	}
 
-	downloadTools(ctx, c, args.Init)
+	downloadTools(ctx, c, args.SleepImage)
 
 	// Only "always" acts on the answer, and "never" may not touch the source at all.
 	if args.Pull == client.PullAlways {
@@ -238,10 +238,10 @@ func newPullCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
 			},
 			&cli.StringFlag{
-				Name:    "init",
+				Name:    "sleep-image",
 				Usage:   "Image the `run` helper comes from",
 				Value:   DefaultInitImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_INIT_IMAGE"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -279,7 +279,7 @@ func newPullCommand() *cli.Command {
 				IgnorePullFailures: cmd.Bool("ignore-pull-failures"),
 				NoHealthd:          cmd.Bool("no-healthd"),
 				HealthdImage:       cmd.String("healthd-image"),
-				Init:               cmd.String("init"),
+				SleepImage:         cmd.String("sleep-image"),
 				Pull:               pullMode,
 				Workers:            cmd.Root().Int("workers"),
 				Debug:              cmd.Root().Bool("debug"),

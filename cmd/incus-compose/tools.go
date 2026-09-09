@@ -239,12 +239,12 @@ func copyTools(ctx context.Context, c *client.Client, sys *client.Client, master
 // A failure only warns: most projects never run a one-off, and `up` reaches
 // here too, so an unreachable tools image must not take the whole command
 // down. `run` says so loudly enough when it is the one that needs it.
-func downloadTools(ctx context.Context, c *client.Client, init string) {
-	if init == "" {
+func downloadTools(ctx context.Context, c *client.Client, sleepImage string) {
+	if sleepImage == "" {
 		return
 	}
 
-	image := resolveImageVersion(init)
+	image := resolveImageVersion(sleepImage)
 
 	sys, err := c.Global().EnsureProject(systemProject, client.EnsureProjectWithCreate())
 	if err != nil {
