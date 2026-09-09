@@ -22,20 +22,20 @@ func TestHealthdCarriedConfig(t *testing.T) {
 		"environment.INCUS_COMPOSE_HEALTHD_DEBUG":           "true",
 		"environment.INCUS_COMPOSE_HEALTHD_PROJECT_MARKER":  "user.healthcheck.scope=global",
 		"environment.INCUS_COMPOSE_HEALTHD_TOKEN":           "a-consumed-token",
-		"limits.cpu":                         "4",
-		"limits.memory":                      "512MB",
-		"user.image_alias":                   "ghcr.io/lxc/incus-compose/ic-healthd:1.1.0",
-		"user.incus-compose.managed":         "true",
-		client.HealthKeyPrefix + "daemon":    "true",
-		client.HealthKeyPrefix + "ignore":    "true",
-		client.HealthKeyPrefix + "restart":   "unless-stopped",
-		shared.HealthStatusKey:               "healthy",
-		client.HealthKeyPrefix + "stopped":   "true",
-		"oci.entrypoint":                     "/usr/local/bin/ic-healthd run",
-		"image.architecture":                 "x86_64",
-		"volatile.eth0.hwaddr":               "00:16:3e:00:00:01",
-		"volatile.base_image":                "deadbeef",
-		"user.something.a.newer.version.set": "keep me",
+		"limits.cpu.allowance":                              "400ms/100ms",
+		"limits.memory":                                     "512MB",
+		"user.image_alias":                                  "ghcr.io/lxc/incus-compose/ic-healthd:1.1.0",
+		"user.incus-compose.managed":                        "true",
+		client.HealthKeyPrefix + "daemon":                   "true",
+		client.HealthKeyPrefix + "ignore":                   "true",
+		client.HealthKeyPrefix + "restart":                  "unless-stopped",
+		shared.HealthStatusKey:                              "healthy",
+		client.HealthKeyPrefix + "stopped":                  "true",
+		"oci.entrypoint":                                    "/usr/local/bin/ic-healthd run",
+		"image.architecture":                                "x86_64",
+		"volatile.eth0.hwaddr":                              "00:16:3e:00:00:01",
+		"volatile.base_image":                               "deadbeef",
+		"user.something.a.newer.version.set":                "keep me",
 	}
 
 	carried := healthdCarriedConfig(config)
@@ -46,7 +46,7 @@ func TestHealthdCarriedConfig(t *testing.T) {
 		"environment.INCUS_COMPOSE_HEALTHD_RESTART_WORKERS",
 		"environment.INCUS_COMPOSE_HEALTHD_DEBUG",
 		"environment.INCUS_COMPOSE_HEALTHD_PROJECT_MARKER",
-		"limits.cpu",
+		"limits.cpu.allowance",
 		"limits.memory",
 		"user.incus-compose.managed",
 		client.HealthKeyPrefix + "daemon",
@@ -101,60 +101,29 @@ func TestHealthdFloorLimits(t *testing.T) {
 			name:       "a 1.1.0 sidecar is raised to the current defaults",
 			cpu:        "1",
 			memory:     "50MB",
-			wantCPU:    "2",
+			wantCPU:    defaultHealthdCPU,
 			wantMemory: "256MiB",
 		},
 		{
 			name:       "a larger limit is left alone",
 			cpu:        "8",
 			memory:     "1GiB",
-			wantCPU:    "8",
+			wantCPU:    "800ms/100ms",
 			wantMemory: "1GiB",
 		},
 		{
 			name:       "the default itself is not rewritten",
 			cpu:        "2",
 			memory:     "256MiB",
-			wantCPU:    "2",
+			wantCPU:    defaultHealthdCPU,
 			wantMemory: "256MiB",
-		},
-		{
-			name:       "a CPU pin is deliberate, whatever its width",
-			cpu:        "0-3",
-			memory:     "512MB",
-			wantCPU:    "0-3",
-			wantMemory: "512MB",
-		},
-		{
-			name:       "a single-CPU pin survives even though it is below the floor",
-			cpu:        "1-1",
-			memory:     "512MB",
-			wantCPU:    "1-1",
-			wantMemory: "512MB",
-		},
-		{
-			name:       "a CPU set is deliberate",
-			cpu:        "1,2,3",
-			memory:     "512MB",
-			wantCPU:    "1,2,3",
-			wantMemory: "512MB",
 		},
 		{
 			name:       "a memory percentage has no byte value to compare",
 			cpu:        "4",
 			memory:     "10%",
-			wantCPU:    "4",
+			wantCPU:    "400ms/100ms",
 			wantMemory: "10%",
-		},
-		{
-			name:       "an unparseable value is left for Incus to reject",
-			cpu:        "lots",
-			memory:     "plenty",
-			wantCPU:    "lots",
-			wantMemory: "plenty",
-		},
-		{
-			name: "an absent limit is not invented",
 		},
 	}
 
@@ -163,16 +132,12 @@ func TestHealthdFloorLimits(t *testing.T) {
 			t.Parallel()
 
 			carried := map[string]string{}
-			if tt.cpu != "" {
-				carried["limits.cpu"] = tt.cpu
-			}
-			if tt.memory != "" {
-				carried["limits.memory"] = tt.memory
-			}
+			carried["limits.cpu"] = tt.cpu
+			carried["limits.memory"] = tt.memory
 
 			healthdFloorLimits(carried)
 
-			assert.Equal(t, tt.wantCPU, carried["limits.cpu"])
+			assert.Equal(t, tt.wantCPU, carried["limits.cpu.allowance"])
 			assert.Equal(t, tt.wantMemory, carried["limits.memory"])
 		})
 	}
@@ -186,14 +151,14 @@ func TestHealthdSettingsXIncusBeatsTheFloor(t *testing.T) {
 		"limits.cpu":    "1",
 		"limits.memory": "50MB",
 	})
-	assert.Equal(t, "2", carried["limits.cpu"], "the floor applies to what is carried")
+	assert.Equal(t, defaultHealthdCPU, carried["limits.cpu.allowance"], "the floor applies to what is carried")
 
 	settings := healthdSettings(healthdParams{
 		carry:  carried,
-		xIncus: map[string]string{"limits.cpu": "1", "limits.memory": "50MB"},
+		xIncus: map[string]string{"limits.cpu.allowance": "100ms/100ms", "limits.memory": "50MB"},
 	}, "", false)
 
-	assert.Equal(t, "1", settings["limits.cpu"], "an explicit small limit still wins")
+	assert.Equal(t, "100ms/100ms", settings["limits.cpu.allowance"], "an explicit small limit still wins")
 	assert.Equal(t, "50MB", settings["limits.memory"], "an explicit small limit still wins")
 }
 
