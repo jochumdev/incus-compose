@@ -1073,8 +1073,32 @@ func TestStartedUnparksAStoppedInstance(t *testing.T) {
 	s.event(incusApi.EventLifecycleInstanceRestarted, "web-1")
 
 	require.Equal(t, instanceIdle, inst.state, "parked has no other way out")
+	require.True(t, inst.config.running)
 	require.Equal(t, instanceActionCheck, inst.action)
 	require.WithinDuration(t, now, inst.due, time.Second, "a returning instance is checked at once")
+}
+
+func TestStartedWithNotRunningReadMarksRunningAndChecks(t *testing.T) {
+	t.Parallel()
+
+	s := newScheduler(t)
+
+	cfg := testConfig()
+	cfg.running = false
+	inst := s.add("web-1", cfg)
+	inst.state = instanceParked
+	inst.action = ""
+
+	now := time.Now()
+	s.eventRead(incusApi.EventLifecycleInstanceStarted, "web-1", false, healthKeys(eventConfig(cfg)))
+
+	require.True(t, inst.config.running, "a start event must mark the instance running")
+	require.Equal(t, instanceIdle, inst.state)
+	require.Equal(t, instanceActionCheck, inst.action)
+	require.WithinDuration(t, now, inst.due, time.Second)
+
+	s.run()
+	require.Equal(t, instanceChecking, inst.state, "the check must be scheduled despite the read's running=false")
 }
 
 // TestStartedCancelsAPendingRestart covers an instance that came back without

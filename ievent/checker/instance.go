@@ -172,6 +172,7 @@ type instance struct {
 // instanceStarted puts an instance in the shape a fresh start leaves it in: due
 // for a check at once, its failure run cleared and its start period re-armed.
 func instanceStarted(inst *instance, now time.Time) {
+	inst.config.running = true
 	inst.state = instanceIdle
 	inst.action = instanceActionCheck
 	inst.failures = 0
@@ -406,6 +407,8 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 			}
 			return
 		}
+
+		inst.config.running = true
 
 		// An action in flight owns the instance; its result says what comes next.
 		if inst.state == instanceChecking || inst.state == instanceRestarting {
