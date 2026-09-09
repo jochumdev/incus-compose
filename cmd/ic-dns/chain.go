@@ -15,8 +15,8 @@ import (
 	proxypkg "github.com/coredns/coredns/plugin/pkg/proxy"
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
+	"github.com/lxc/incus-compose/cmd/ic-dns/dns"
 	"github.com/lxc/incus-compose/ievent/debounce"
-	"github.com/lxc/incus-compose/ievent/dns"
 	"github.com/lxc/incus-compose/ievent/enricher"
 	"github.com/lxc/incus-compose/ievent/http"
 	"github.com/lxc/incus-compose/ievent/iutil"

@@ -28,9 +28,10 @@ form.
   processing daemon event streams through ordered, composable plugins (`source`,
   `debounce`, `enricher`, `checker`, `dns`, `http`, `log`). (by @jochumdev)
 - ic-healthd serves `/metrics`, `/health` and `/ready` on `:9153`; an empty
-  `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by @jochumdev)
-- `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus metrics
-  in ic-healthd (defaults to true). (by @jochumdev)
+  `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by
+  @jochumdev)
+- `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus
+  metrics in ic-healthd (defaults to true). (by @jochumdev)
 - Running ic-healthd by hand can now present an already-trusted certificate
   (`--client-cert` with `--client-key`) or connect as a remote from the Incus
   CLI configuration (`--remote` with `--use-remote`). (by @jochumdev)

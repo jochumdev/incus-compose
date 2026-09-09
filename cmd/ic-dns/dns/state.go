@@ -4,7 +4,7 @@ import (
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
 	"github.com/koji-hirono/go-critbit"
 
-	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
+	"github.com/lxc/incus-compose/cmd/ic-dns/dns/ecs_view"
 	"github.com/lxc/incus-compose/ievent/iutil"
 )
 

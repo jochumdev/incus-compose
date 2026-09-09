@@ -22,8 +22,8 @@ import (
 	// Set the AUTOMEMLIMIT environment variable to a ratio in (0.0, 1.0], or "off".
 	_ "github.com/KimMachineGun/automemlimit"
 
+	"github.com/lxc/incus-compose/cmd/ic-healthd/checker"
 	"github.com/lxc/incus-compose/iclient"
-	"github.com/lxc/incus-compose/ievent/checker"
 	"github.com/lxc/incus-compose/ievent/source"
 	"github.com/lxc/incus-compose/incustrust"
 	"github.com/lxc/incus-compose/shared"

@@ -7,7 +7,7 @@ import (
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
-	"github.com/lxc/incus-compose/ievent/checker"
+	"github.com/lxc/incus-compose/cmd/ic-healthd/checker"
 	"github.com/lxc/incus-compose/ievent/debounce"
 	"github.com/lxc/incus-compose/ievent/enricher"
 	"github.com/lxc/incus-compose/ievent/http"
