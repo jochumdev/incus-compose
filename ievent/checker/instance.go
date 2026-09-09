@@ -446,10 +446,12 @@ func handleInstanceEvent(ctx context.Context, logger *slog.Logger, conn *iclient
 
 		// Already waiting on a restart: leave its backoff alone.
 		if inst.action == instanceActionRestart {
+			inst.state = instanceIdle
 			return
 		}
 
 		// A stop nobody asked for, so widen the window: a crash loop backs off.
+		inst.state = instanceIdle
 		inst.action = instanceActionRestart
 		inst.due = time.Now().Add(inst.restartDelay)
 		inst.restartDelay = min(inst.restartDelay*2, maxRestartDelay)

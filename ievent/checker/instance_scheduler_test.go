@@ -113,7 +113,8 @@ func (s *scheduler) event(action string, name string) {
 		cfg = eventConfig(tracked.config)
 	}
 
-	s.eventRead(action, name, true, healthKeys(cfg))
+	running := action != incusApi.EventLifecycleInstanceStopped && action != incusApi.EventLifecycleInstanceShutdown
+	s.eventRead(action, name, running, healthKeys(cfg))
 }
 
 // eventRead feeds one enriched event the way the enricher delivers it. A
@@ -962,6 +963,7 @@ func TestStoppedSchedulesARestartWithBackoff(t *testing.T) {
 	now := time.Now()
 	s.event(incusApi.EventLifecycleInstanceStopped, "web-1")
 
+	require.Equal(t, instanceIdle, inst.state)
 	require.Equal(t, instanceActionRestart, inst.action)
 	requireDue(t, inst, now, 30*time.Second)
 	require.Equal(t, 60*time.Second, inst.restartDelay,
