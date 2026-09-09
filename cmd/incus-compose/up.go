@@ -273,6 +273,10 @@ func newUpCommand() *cli.Command {
 					Writer:     cmd.Root().Writer,
 					Reverse:    true,
 					NoHealthd:  !usesHealthd,
+
+					// A delete that failed here must not look like success: the
+					// ensure below would accept the surviving instance and exit 0.
+					ReportErrors: true,
 				})
 				if err != nil {
 					return err

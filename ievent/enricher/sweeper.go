@@ -112,13 +112,13 @@ type sweepArgs struct {
 // runSweep reads the fleet once: the projects, then every network of every
 // project, then the instances. The order is the point - an instance read before
 // its network is known cannot be placed.
-func runSweep(ctx context.Context, a sweepArgs) error {
-	served, projects, err := sweepProjects(ctx, a)
+func runSweep(ctx context.Context, logger *slog.Logger, a sweepArgs) error {
+	served, projects, err := sweepProjects(ctx, logger, a)
 	if err != nil {
 		return err
 	}
 
-	err = sweepNetworks(ctx, a, projects)
+	err = sweepNetworks(ctx, logger, a, projects)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func runSweep(ctx context.Context, a sweepArgs) error {
 		return err
 	}
 
-	return sweepInstances(ctx, a, served)
+	return sweepInstances(ctx, logger, a, served)
 }
 
 // sweepProjects reads every project and answers two lists: served is where the
@@ -138,7 +138,7 @@ func runSweep(ctx context.Context, a sweepArgs) error {
 //
 // A project that could not be read still counts as served, or it would be
 // pruned on the strength of a failed request.
-func sweepProjects(ctx context.Context, a sweepArgs) (served, projects []string, err error) {
+func sweepProjects(ctx context.Context, logger *slog.Logger, a sweepArgs) (served, projects []string, err error) {
 	readCtx, cancel := context.WithTimeout(ctx, a.timeout)
 	names, err := a.conn.GetProjectNames(readCtx)
 
@@ -160,7 +160,7 @@ func sweepProjects(ctx context.Context, a sweepArgs) (served, projects []string,
 		cancel()
 
 		if err != nil {
-			slog.Warn("a project of the fleet could not be read, keeping what is held",
+			logger.Warn("a project of the fleet could not be read, keeping what is held",
 				"plugin", name, "project", projectName, "err", err)
 
 			served = append(served, projectName)
@@ -196,7 +196,7 @@ func sweepProjects(ctx context.Context, a sweepArgs) (served, projects []string,
 //
 // Per project rather than one listing: a project with features.networks has
 // networks of its own, and asking one project answers with that project's alone.
-func sweepNetworks(ctx context.Context, a sweepArgs, projects []string) error {
+func sweepNetworks(ctx context.Context, logger *slog.Logger, a sweepArgs, projects []string) error {
 	for _, project := range projects {
 		readCtx, cancel := context.WithTimeout(ctx, a.timeout)
 		names, err := a.conn.GetNetworkNames(readCtx, project)
@@ -205,7 +205,7 @@ func sweepNetworks(ctx context.Context, a sweepArgs, projects []string) error {
 
 		if err != nil {
 			// One project failing costs its own networks rather than the fleet's.
-			slog.Warn("the networks of one project could not be listed, keeping what is held",
+			logger.Warn("the networks of one project could not be listed, keeping what is held",
 				"plugin", name, "project", project, "err", err)
 
 			continue
@@ -249,7 +249,7 @@ func sweepNetworks(ctx context.Context, a sweepArgs, projects []string) error {
 // sweepInstances lists each served project's instances and trickles the names.
 // The listing goes over as one message before any of it is trickled, so absence
 // is decided against what was held when the request went out.
-func sweepInstances(ctx context.Context, a sweepArgs, served []string) error {
+func sweepInstances(ctx context.Context, logger *slog.Logger, a sweepArgs, served []string) error {
 	for _, project := range served {
 		readCtx, cancel := context.WithTimeout(ctx, a.timeout)
 		names, err := a.conn.GetInstanceNames(readCtx, project, nil)
@@ -257,7 +257,7 @@ func sweepInstances(ctx context.Context, a sweepArgs, served []string) error {
 		cancel()
 
 		if err != nil {
-			slog.Warn("the instances of one project could not be listed, keeping what is held",
+			logger.Warn("the instances of one project could not be listed, keeping what is held",
 				"plugin", name, "project", project, "err", err)
 
 			continue
@@ -296,7 +296,7 @@ func sweepInstances(ctx context.Context, a sweepArgs, served []string) error {
 //
 // The first run goes at no delay, because nothing is served until it lands, and
 // so does one that follows a run that broke.
-func runSweeper(ctx context.Context, a sweepArgs, interval time.Duration) {
+func runSweeper(ctx context.Context, logger *slog.Logger, a sweepArgs, interval time.Duration) {
 	go func() {
 		fast := true
 
@@ -306,7 +306,7 @@ func runSweeper(ctx context.Context, a sweepArgs, interval time.Duration) {
 				run.delay = 0
 			}
 
-			err := runSweep(ctx, run)
+			err := runSweep(ctx, logger, run)
 
 			fast = err != nil
 

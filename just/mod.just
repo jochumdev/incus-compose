@@ -125,8 +125,6 @@ lint path="./...":
 
 # Lint and fix all files. Imports are gopls' job, not this one - see AGENTS.md.
 fix path="./...":
-    npx --yes prettier --write .
-    cd docs; npx --yes prettier --write .
     golangci-lint run --fix {{ path }}
 
 # Run `go mod tidy`.

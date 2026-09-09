@@ -17,7 +17,8 @@ const (
 	defaultDataDir    = "/var/lib/dns-incus"
 	defaultSecretsDir = "/run/secrets"
 
-	defaultProjectMarker = "user.label.dns.scope=global"
+	defaultProjectMarker      = "user.label.dns.scope"
+	defaultProjectMarkerValue = "global"
 
 	// defaultSuffix is the TLD every project's zone is built under.
 	defaultSuffix = "incus"
@@ -64,7 +65,7 @@ type config struct {
 	AllowTransfer []netip.Prefix
 
 	// How the chain behaves.
-	TTL            uint32
+	TTL            uint
 	DebounceWindow time.Duration
 	Workers        int
 	ReadTimeout    time.Duration
@@ -80,6 +81,13 @@ type config struct {
 	Log string
 
 	Pprof bool
+}
+
+func newConfig() *config {
+	return &config{
+		ProjectMarker:      defaultProjectMarker,
+		ProjectMarkerValue: defaultProjectMarkerValue,
+	}
 }
 
 // parseMarker splits the project marker. A bare key means "true", so

@@ -36,6 +36,8 @@ type Plugin struct {
 	out chan<- iutil.Command
 }
 
+var _ iutil.Plugin = (*Plugin)(nil)
+
 // options is what main decides about this plugin. Its own rather than a type
 // shared in iutil: naming one is already naming this package.
 type options struct {
@@ -53,7 +55,7 @@ func Window(d time.Duration) Option { return func(o *options) { o.Window = d } }
 func InboxSize(n int) Option { return func(o *options) { o.InboxSize = n } }
 
 // New builds a debounce whose window closes once a key has been quiet for it.
-func New(opts ...Option) *Plugin {
+func New(logger *slog.Logger, opts ...Option) *Plugin {
 	o := options{
 		Window:    defaultWindow,
 		InboxSize: defaultInboxSize,
@@ -63,7 +65,7 @@ func New(opts ...Option) *Plugin {
 		opt(&o)
 	}
 
-	slog.Info("Starting", "plugin", name, "config", o)
+	logger.Info("Starting", "plugin", name, "config", o)
 
 	return &Plugin{
 		window: o.Window,

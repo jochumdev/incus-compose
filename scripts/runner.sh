@@ -21,7 +21,7 @@ POOL_SOURCE="${RUNNER_POOL_SOURCE:-/mnt/tmpfs}"
 # POOL is the ramdisk, so only POOL is created here and dropped again on the way
 # down; an ICT pool of its own is expected to exist already and is left alone.
 ICT_POOL="${RUNNER_ICT_POOL:-${POOL}}"
-TMPFS_SIZE="${RUNNER_TMPFS_SIZE:-32g}"
+TMPFS_SIZE="${RUNNER_TMPFS_SIZE:-40g}"
 CERT="${RUNNER_CERT:-work/runner.crt}"
 COMPRESSION="${RUNNER_COMPRESSION:-none}"
 STOP_TIMEOUT="${RUNNER_STOP_TIMEOUT:-120}"
@@ -178,6 +178,7 @@ up() {
             -c security.privileged=true
     fi
 
+    sleep 5
     readd_remotes
 }
 
@@ -206,7 +207,7 @@ down() {
 
     stop_runner
     publish_runner ||
-        warn "publish failed, the 'runner' image is the one from the last run"
+        die "publish failed, the 'runner' image is the one from the last run"
 
     # --- Drop everything that lives on the ramdisk --------------------------
 
@@ -215,14 +216,11 @@ down() {
         incus delete --force "${ict}" || warn "could not delete instance ${ict}"
     done
 
-    if incus storage show "${POOL}" >/dev/null 2>&1; then
-        step "Removing what is left on pool ${POOL}"
-        volumes="$(incus storage volume list "${POOL}" --all-projects --format csv -c en)"
-        while IFS=, read -r project name; do
-            incus delete --force --project "${project}" "${name}" ||
-                warn "could not delete instance ${project}/${name}"
-        done <<<"${volumes}"
+    if [[ ${POOL} != "tmpfs" ]]; then
+      return 0
+    fi
 
+    if incus storage show "${POOL}" >/dev/null 2>&1; then
         step "Removing storage pool ${POOL}"
         if ! incus storage delete "${POOL}"; then
             warn "pool ${POOL} stayed behind, it is still used by:"
@@ -286,6 +284,7 @@ case "$cmd" in
     up) up ;;
     down) down ;;
     backup) backup ;;
+    readd) readd_remotes ;;
     -h | --help | help) usage ;;
     *)
         usage >&2

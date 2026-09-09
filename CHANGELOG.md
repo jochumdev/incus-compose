@@ -11,6 +11,67 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
+## [Unreleased]
+
+### Added
+
+- `ic-dns`: A new split-horizon authoritative DNS daemon for Incus instances,
+  built on the new `ievent` event framework and CoreDNS. Resolves instance names
+  dynamically within per-project or shared zones (`.incus`), serving records
+  based on querier network visibility and client subnet (RFC 7871 ECS). Supports
+  UDP and TCP on port 53, zone transfers (`--allow-transfer`), upstream
+  forwarding (`--forward`), configurable TTL, and Prometheus metrics and health
+  endpoints on `:8080` (or `--http`). Projects opt in via `--project-marker`
+  (defaulting to `user.label.dns.scope=global`), an explicit `--project` list,
+  or serve all visible projects with `--project-marker ""`. (by @jochumdev)
+- `ievent`: A pluggable event pipeline framework for Incus lifecycle events,
+  processing daemon event streams through ordered, composable plugins (`source`,
+  `debounce`, `enricher`, `checker`, `dns`, `http`, `log`). (by @jochumdev)
+- ic-healthd serves `/metrics`, `/health` and `/ready` on `:9153`; an empty
+  `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by @jochumdev)
+- `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus metrics
+  in ic-healthd (defaults to true). (by @jochumdev)
+- Running ic-healthd by hand can now present an already-trusted certificate
+  (`--client-cert` with `--client-key`) or connect as a remote from the Incus
+  CLI configuration (`--remote` with `--use-remote`). (by @jochumdev)
+
+### Changed
+
+- ic-healthd is migrated to the `ievent` framework: one chain of plugins
+  replaces its listener, router and per-project schedulers. The sidecar contract
+  is unchanged - the same flags, environment variables and status writes, and
+  `healthd reload` still forces a full resync. (by @jochumdev)
+
+## [v1.3.3] - 2026-09-07
+
+### Fixed
+
+- `up --recreate` no longer reports success when deleting an existing instance
+  fails. `down()` previously logged deletion errors as warnings and returned
+  `nil`, causing the subsequent ensure step to accept the still-running instance
+  and exit 0 without recreating anything. A failed deletion during recreate now
+  aborts the run with an error, while standalone `down` remains best-effort. (by
+  @alien43)
+
+- A network attachment with `internal: true` now correctly sets `ipv4.gateway`
+  and `ipv6.gateway` to `none` even without a static address. Previously,
+  gateway overrides were only written when a static IP was defined, allowing
+  services without static addresses on internal networks to keep default routes
+  and unintended outbound network access. (by @alien43)
+
+- Auto-volume generation now recognizes mount paths covered by custom disk and
+  tmpfs devices declared in `x-incus-compose.devices`. Previously, mount paths
+  on extra devices were not populated on the typed structs, making them
+  invisible to path deduplication. This caused duplicate storage volumes to be
+  created for image-declared `VOLUME` paths, failing instance creation with
+  `More than one disk device uses the same path`. (by @alien43)
+
+- Service-name DNS registration (`raw.dnsmasq`) is now skipped on non-bridge
+  networks such as OVN. Because `raw.dnsmasq` is a bridge-only configuration
+  option, attempting to write it on OVN networks caused `up`, `start`, and
+  `stop` commands to fail, preventing projects attached to external OVN networks
+  from converging. (by @sandroden)
+
 ## [v1.3.2] - 2026-08-30
 
 ### Changed

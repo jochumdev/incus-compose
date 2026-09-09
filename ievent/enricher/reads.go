@@ -111,6 +111,9 @@ type deferred struct {
 	// it rather than issuing another.
 	calls map[string]*call
 
+	// pendingProject is instance reads held until the project's own read lands.
+	pendingProject map[string][]string
+
 	// warm says the first whole-fleet pass has landed, so every network an
 	// instance might sit on is known. Never cleared once set.
 	warm bool
@@ -141,10 +144,11 @@ func newDeferred(workers int, timeout time.Duration) *deferred {
 	timer.Stop()
 
 	return &deferred{
-		timeout: timeout,
-		results: make(chan result, workers),
-		calls:   map[string]*call{},
-		timer:   timer,
+		timeout:        timeout,
+		results:        make(chan result, workers),
+		calls:          map[string]*call{},
+		pendingProject: map[string][]string{},
+		timer:          timer,
 	}
 }
 
@@ -191,6 +195,16 @@ func (d *deferred) send(ctx context.Context, c *call) {
 		d.cold = append(d.cold, c.key)
 
 		return
+	}
+
+	if c.kind == kindInstance {
+		projKey := resourceKey(kindProject, c.project, "")
+		_, projRunning := d.calls[projKey]
+		if projRunning {
+			d.pendingProject[c.project] = append(d.pendingProject[c.project], c.key)
+
+			return
+		}
 	}
 
 	err := d.submit(ctx, c)
@@ -256,6 +270,22 @@ func (d *deferred) done(ctx context.Context, c *call) {
 
 	if d.asked {
 		d.flush(ctx)
+	}
+
+	pending := d.pendingProject[c.project]
+	delete(d.pendingProject, c.project)
+
+	for _, key := range pending {
+		instCall, ok := d.calls[key]
+		if !ok {
+			continue
+		}
+
+		err := d.submit(ctx, instCall)
+		if err != nil {
+			d.waiting = append(d.waiting, instCall)
+			d.timer.Reset(poolDelay)
+		}
 	}
 }
 

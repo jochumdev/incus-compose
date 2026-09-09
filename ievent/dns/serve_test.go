@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"testing"
 
@@ -44,9 +45,9 @@ func query(name string) *dns.Msg {
 func TestWireWithNothingAfter(t *testing.T) {
 	t.Parallel()
 
-	view := ecs_view.New()
+	view := ecs_view.New(slog.Default())
 
-	wire(newXFR(nil), view, nil)
+	wire(newXFR(slog.Default(), nil), view, nil)
 
 	require.NotNil(t, view.Next)
 
@@ -76,9 +77,9 @@ func TestWireOrdersTheChain(t *testing.T) {
 	a := &marker{name: "a", walked: &walked}
 	b := &marker{name: "b", walked: &walked}
 
-	view := ecs_view.New()
+	view := ecs_view.New(slog.Default())
 
-	wire(newXFR(nil), view, []plugin.Plugin{
+	wire(newXFR(slog.Default(), nil), view, []plugin.Plugin{
 		func(next plugin.Handler) plugin.Handler { a.Next = next; return a },
 		func(next plugin.Handler) plugin.Handler { b.Next = next; return b },
 	})
@@ -164,7 +165,7 @@ func TestAdapter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			a := &adapter{chain: &fakeChain{fn: tc.chain, rcode: tc.rcode}}
+			a := &adapter{logger: slog.Default(), chain: &fakeChain{fn: tc.chain, rcode: tc.rcode}}
 
 			w := &recorder{}
 
@@ -187,10 +188,12 @@ func TestAdapterLeavesAnAnsweredQueryAlone(t *testing.T) {
 		Name: "incus.test.", Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 30,
 	}}}
 
-	a := &adapter{chain: &fakeChain{
-		fn:    func(w dns.ResponseWriter, _ *dns.Msg) { _ = w.WriteMsg(written) },
-		rcode: dns.RcodeNameError,
-	}}
+	a := &adapter{
+		logger: slog.Default(),
+		chain: &fakeChain{
+			fn:    func(w dns.ResponseWriter, _ *dns.Msg) { _ = w.WriteMsg(written) },
+			rcode: dns.RcodeNameError,
+		}}
 
 	w := &recorder{}
 	a.ServeDNS(w, query("web.incus.test"))

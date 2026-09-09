@@ -1,8 +1,6 @@
 package iutil
 
 import (
-	"context"
-
 	"github.com/lxc/incus-compose/iclient"
 )
 
@@ -73,10 +71,6 @@ type Command struct {
 // SetupArgs is everything a plugin is handed at Setup. An argument bundle, not
 // state: a plugin that needs Context past Setup copies it to a field of its own.
 type SetupArgs struct {
-	// Context is the process lifetime and bounds the daemon reads a plugin makes; canceling it is
-	// an abort, not a shutdown - CommandDrain is how a plugin is told to finish.
-	Context context.Context
-
 	// Conn is the Incus connection, handed to every plugin and used by the ones
 	// that read or write.
 	Conn *iclient.Connection

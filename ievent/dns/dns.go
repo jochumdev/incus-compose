@@ -4,6 +4,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -28,8 +29,7 @@ const defaultInboxSize = 1024
 // Trailing edge only, and invisible against a TTL measured in seconds.
 const publishWindow = 150 * time.Millisecond
 
-// Config is what this plugin serves and where, its own type because none of it
-// is the machinery an Option carries.
+// Config is what this plugin serves and where.
 type Config struct {
 	// Listen is the address to answer on, UDP and TCP both.
 	Listen string
@@ -84,20 +84,21 @@ type Config struct {
 // Plugin folds events into a fleet-wide snapshot, publishes it, and answers
 // from it. Run's goroutine writes one atomic pointer; every query goroutine reads it.
 type Plugin struct {
-	cfg Config
+	cfg    Config
+	logger *slog.Logger
 
 	actions []string
 
 	next  iutil.Next
 	inbox chan *iutil.Event
 
-	// out puts an event in at the head of the chain, which is how readiness
+	// commandOut puts an event in at the head of the chain, which is how readiness
 	// reaches every position rather than only what comes after this one.
-	out chan<- iutil.Command
+	commandOut chan<- iutil.Command
 
-	// in is the source asking this plugin to finish, on a channel of its own so
+	// commandIn is the source asking this plugin to finish, on a channel of its own so
 	// it arrives whatever the inbox looks like.
-	in <-chan iutil.Command
+	commandIn <-chan iutil.Command
 
 	// view is the engine. It sources nothing and derives nothing: what it holds
 	// is whatever was last handed to it here.
@@ -120,6 +121,8 @@ type Plugin struct {
 	// trees being patched. Run's goroutine alone, never Handle's caller.
 	state *state
 }
+
+var _ iutil.Plugin = (*Plugin)(nil)
 
 // Option sets one of them. The zero value means unset, and New fills this
 // plugin's own default in.
@@ -174,7 +177,7 @@ func Project(fn func(p *incusapi.Project) bool) Option {
 
 // New builds the DNS plugin and starts nothing: Run owns every goroutine,
 // listener and cold store included.
-func New(opts ...Option) *Plugin {
+func New(logger *slog.Logger, opts ...Option) *Plugin {
 	cfg := Config{
 		InboxSize: defaultInboxSize,
 	}
@@ -183,20 +186,21 @@ func New(opts ...Option) *Plugin {
 		opt(&cfg)
 	}
 
-	slog.Info("Starting", "plugin", name, "config", cfg)
+	logger.Info("Starting", "plugin", name, "config", cfg)
 
-	view := ecs_view.New()
+	view := ecs_view.New(logger)
 	view.EchoSubnet = cfg.EchoSubnet
 	view.Metrics = cfg.Metrics
 	view.Server = cfg.Listen
 
 	p := &Plugin{
-		cfg:   cfg,
-		view:  view,
-		xfr:   newXFR(cfg.AllowTransfer),
-		cold:  cold(cfg),
-		state: newState(map[string]zoneSerial{}),
-		inbox: make(chan *iutil.Event, cfg.InboxSize),
+		cfg:    cfg,
+		logger: logger,
+		view:   view,
+		xfr:    newXFR(logger, cfg.AllowTransfer),
+		cold:   newCold(logger, cfg),
+		state:  newState(map[string]zoneSerial{}),
+		inbox:  make(chan *iutil.Event, cfg.InboxSize),
 	}
 
 	wants := p.Wants()
@@ -209,14 +213,14 @@ func New(opts ...Option) *Plugin {
 	return p
 }
 
-// cold is where this plugin keeps what it published: memory where asked for,
+// newCold is where this plugin keeps what it published: memory where asked for,
 // otherwise the data directory.
-func cold(cfg Config) *coldStore {
+func newCold(logger *slog.Logger, cfg Config) *coldStore {
 	if cfg.ColdMemory {
 		return newMemoryStore(cfg.ColdSeed)
 	}
 
-	return newColdStore(cfg.ColdDir)
+	return newColdStore(logger, cfg.ColdDir)
 }
 
 // Name identifies the plugin, and names it in the reason of what it drops.
@@ -225,10 +229,6 @@ func (p *Plugin) Name() string { return name }
 // Addr is where this plugin answers, for a main that wants to report it.
 func (p *Plugin) Addr() string { return p.cfg.Listen }
 
-// wantsInstance is everything this plugin needs read of an instance: the
-// instance itself, where it sits, and what its project sets. A name is built
-// from all three, and this plugin folds the two sides of a label itself, so an
-// event carrying fewer is one it cannot answer from.
 const wantsInstance = iutil.EnrichedInstance |
 	iutil.EnrichedInstanceWithInterfaces |
 	iutil.EnrichedProject
@@ -241,11 +241,12 @@ func (p *Plugin) Wants() []iutil.Want {
 	// so collapsing it buys nothing and costs the whole window in latency.
 	return []iutil.Want{
 		{Action: incusapi.EventLifecycleInstanceStarted, Enrich: wantsInstance},
+		{Action: incusapi.EventLifecycleInstanceRestarted, Enrich: wantsInstance},
+		{Action: incusapi.EventLifecycleInstanceResumed, Enrich: wantsInstance},
 		{Action: incusapi.EventLifecycleInstanceStopped, Enrich: wantsInstance},
+		{Action: incusapi.EventLifecycleInstanceShutdown, Enrich: wantsInstance},
 		{Action: incusapi.EventLifecycleInstanceUpdated, Enrich: wantsInstance, Debounce: true},
 		{Action: incusapi.EventLifecycleInstanceDeleted},
-		// No Debounce: collapsing two renames keeps the last OldName and loses
-		// the middle name, so the record under it would never be dropped.
 		{Action: incusapi.EventLifecycleInstanceRenamed, Enrich: wantsInstance},
 		{Action: incusapi.EventLifecycleNetworkUpdated, Enrich: iutil.EnrichedNetwork, Debounce: true},
 	}
@@ -255,7 +256,7 @@ func (p *Plugin) Wants() []iutil.Want {
 // this plugin reads for itself is only which instances still exist.
 func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.next = args.Next
-	p.in, p.out = args.CommandIn, args.CommandOut
+	p.commandIn, p.commandOut = args.CommandIn, args.CommandOut
 
 	return nil
 }
@@ -283,18 +284,19 @@ func (p *Plugin) Run(ctx context.Context) error {
 	// records themselves are replayed onto this plugin by the enricher.
 	p.state = newState(p.cold.load())
 
+	loopCtx, stopLoop := context.WithCancelCause(ctx)
+
 	// Not ctx, because this is the part that has to outlive the fold loop.
-	serveCtx, stopServing := context.WithCancel(context.WithoutCancel(ctx))
+	serveCtx, stopServing := context.WithCancel(context.WithoutCancel(loopCtx))
 
 	var wg sync.WaitGroup
-
-	errs := make(chan error, 1)
 
 	// Unwinding the other way round: close the store, then stop the listener and
 	// wait for both - closing last would drop the last encoding.
 	defer wg.Wait()
 	defer stopServing()
 	defer p.cold.close()
+	defer stopLoop(errors.New("end"))
 
 	if p.cold.enabled() {
 		wg.Go(p.cold.run)
@@ -304,9 +306,9 @@ func (p *Plugin) Run(ctx context.Context) error {
 	// folds asks for.
 	if p.cfg.Listen != "" {
 		wg.Go(func() {
-			err := serveDNS(serveCtx, p.cfg.Listen, &adapter{chain: p.xfr})
+			err := serveDNS(serveCtx, p.cfg.Listen, &adapter{logger: p.logger, chain: p.xfr})
 			if err != nil {
-				errs <- fmt.Errorf("answering on %s: %w", p.cfg.Listen, err)
+				stopLoop(fmt.Errorf("answering on %s: %w", p.cfg.Listen, err))
 			}
 		})
 	}
@@ -317,12 +319,12 @@ func (p *Plugin) Run(ctx context.Context) error {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-loopCtx.Done():
 			// An abort, not a shutdown: whatever arrived goes nowhere, and the
 			// transactions it went into are never committed.
 			return nil
 
-		case cmd := <-p.in:
+		case cmd := <-p.commandIn:
 			// Everything already on the inbox. Nothing is still feeding it - the
 			// source stopped, and the enricher answered its own drain first.
 		drained:
@@ -342,14 +344,11 @@ func (p *Plugin) Run(ctx context.Context) error {
 			// Answered last, so the plugin after this one is asked only once
 			// everything held here has been pushed into it.
 			select {
-			case p.out <- cmd:
-			case <-ctx.Done():
+			case p.commandOut <- cmd:
+			case <-loopCtx.Done():
 			}
 
 			return nil
-
-		case err := <-errs:
-			return err
 
 		case <-window:
 			window = nil
@@ -388,7 +387,7 @@ func (p *Plugin) fold(ev *iutil.Event) {
 		// Non-blocking: the source may already have stopped reading, and waiting
 		// would hold up the drain this runs inside.
 		select {
-		case p.out <- iutil.Command{Action: action}:
+		case p.commandOut <- iutil.Command{Action: action}:
 		default:
 		}
 	}()
@@ -489,7 +488,7 @@ func (p *Plugin) publish() {
 	// []byte and it cannot reach into live state.
 	b, err := encodeCold(p.state.serials)
 	if err != nil {
-		slog.Warn("encoding the cold store", "err", err)
+		p.logger.Warn("encoding the cold store", "err", err)
 
 		return
 	}

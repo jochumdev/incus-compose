@@ -70,7 +70,7 @@ purge-networks:
 
     if [[ -z "${networks}" ]]; then
         echo "No dangling networks found."
-        exit 1
+        exit
     fi
 
     echo "Deleting dangling networks on remote '${remote}':"
@@ -90,7 +90,7 @@ purge-images *args:
 
     if [[ -z "${images}" ]]; then
         echo "No images found."
-        exit 1
+        exit
     fi
 
     echo "Deleting images on remote '${remote}':"
@@ -110,7 +110,7 @@ purge-projects:
 
     if [[ -z "${projects}" ]]; then
         echo "No projects found."
-        exit 1
+        exit
     fi
 
     echo "Deleting projects on remote '${remote}':"
@@ -129,7 +129,7 @@ purge-tokens:
 
     if [[ -z "${tokens}" ]]; then
         echo "No tokens found."
-        exit 1
+        exit
     fi
 
     echo "Revoking tokens on remote '${remote}':"
@@ -149,7 +149,7 @@ purge-certs:
 
     if [[ -z "${certs}" ]]; then
         echo "No certificates found."
-        exit 1
+        exit
     fi
 
     echo "Removing certificates on remote '${remote}':"

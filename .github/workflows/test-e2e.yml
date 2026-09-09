@@ -11,7 +11,7 @@ concurrency:
 
 env:
   # https://stackoverflow.com/a/79780883/3368468
-  GOTOOLCHAIN: "go1.26.0+auto"
+  GOTOOLCHAIN: "go1.27.0+auto"
   REPORTS_DIR: reports
 
 jobs:
@@ -68,22 +68,18 @@ jobs:
           sha="${{ github.sha }}"
           short="${sha:0:7}"
           echo "VERSION=${short}" >> "$GITHUB_ENV"
-          echo "INCUS_COMPOSE_HEALTHD_IMAGE=ghcr.io/lxc/incus-compose/ic-healthd:${short}" >> "$GITHUB_ENV"
-          echo "INCUS_COMPOSE_INIT_IMAGE=ghcr.io/lxc/incus-compose/ic-sleep:${short}" >> "$GITHUB_ENV"
 
-      - name: Build healthd
+      - name: Build containers
         run: |
-          echo "Using healthd image: ${INCUS_COMPOSE_HEALTHD_IMAGE}"
-          just run -P cmd/ic-healthd build --os-env
+          echo "Using VERSION: ${VERSION}"
+          just run -f container/build.yaml build --os-env
           just run healthd down --force || true
-
-      - name: Build ic-sleep
-        run: |
-          echo "Using tools image: ${INCUS_COMPOSE_INIT_IMAGE}"
-          just run -P cmd/ic-sleep build --os-env
+          just run --trace healthd up
+          just run healthd status
 
       - name: Test
         run: |
+          echo "Using VERSION: ${VERSION}"
           mkdir -p "$REPORTS_DIR" "$INCUS_COMPOSE_TEST_COVERDIR"
 
           gotestsum \
@@ -91,7 +87,8 @@ jobs:
             --junitfile "$REPORTS_DIR/junit.xml" \
             --jsonfile="$REPORTS_DIR/test.json" \
             --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num=10 --jsonfile=$REPORTS_DIR/test.json'" \
-            -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+            -- -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v} -X github.com/lxc/incus-compose/internal/testlib.version=v${VERSION#v}" \
+               -count=1 -parallel "$TEST_PROCS" -timeout 15m \
                -cover -covermode=atomic -coverpkg ./... -v \
                -args -test.gocoverdir="$INCUS_COMPOSE_TEST_COVERDIR" 2>&1
 
@@ -174,19 +171,14 @@ jobs:
           sha="${{ github.sha }}"
           short="${sha:0:7}"
           echo "VERSION=${short}" >> "$GITHUB_ENV"
-          echo "INCUS_COMPOSE_HEALTHD_IMAGE=ghcr.io/lxc/incus-compose/ic-healthd:${short}" >> "$GITHUB_ENV"
-          echo "INCUS_COMPOSE_INIT_IMAGE=ghcr.io/lxc/incus-compose/ic-sleep:${short}" >> "$GITHUB_ENV"
 
-      - name: Build healthd
+      - name: Build containers
         run: |
-          echo "Using healthd image: ${INCUS_COMPOSE_HEALTHD_IMAGE}"
-          just run -P cmd/ic-healthd build --os-env
+          echo "Using VERSION: ${VERSION}"
+          just run -f container/build.yaml build --os-env
           just run healthd down --force || true
-
-      - name: Build ic-sleep
-        run: |
-          echo "Using tools image: ${INCUS_COMPOSE_INIT_IMAGE}"
-          just run -P cmd/ic-sleep build --os-env
+          just run --trace healthd up
+          just run healthd status
 
       - name: Test
         run: |

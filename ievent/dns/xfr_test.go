@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"log/slog"
 	"net/netip"
 	"strings"
 	"testing"
@@ -98,7 +99,7 @@ func xfrServed(t *testing.T, allow []netip.Prefix, held map[string]*instance) *x
 
 	s.step(true, xfrTTL)
 
-	x := newXFR(allow)
+	x := newXFR(slog.Default(), allow)
 	x.Replace(s.snapshot())
 
 	return x

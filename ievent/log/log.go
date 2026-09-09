@@ -28,11 +28,12 @@ type Config struct {
 type Plugin struct {
 	cfg Config
 
-	// ctx is the process lifetime, kept because slog takes one.
-	ctx context.Context
+	logger *slog.Logger
 
 	next iutil.Next
 }
+
+var _ iutil.Plugin = (*Plugin)(nil)
 
 // Option sets one field of Config; the zero value means unset.
 type Option func(*Config)
@@ -46,7 +47,7 @@ func Level(l string) Option {
 }
 
 // New builds a log for one position.
-func New(opts ...Option) *Plugin {
+func New(logger *slog.Logger, opts ...Option) *Plugin {
 	cfg := Config{
 		Level: slog.LevelDebug,
 	}
@@ -62,9 +63,9 @@ func New(opts ...Option) *Plugin {
 		cfg.At = name
 	}
 
-	slog.Info("Starting", "plugin", cfg.At, "config", cfg)
+	logger.Info("Starting", "plugin", cfg.At, "config", cfg)
 
-	return &Plugin{cfg: cfg}
+	return &Plugin{cfg: cfg, logger: logger}
 }
 
 // Name identifies the position rather than the plugin.
@@ -75,7 +76,7 @@ func (p *Plugin) Wants() []iutil.Want { return nil }
 
 // Setup keeps the successor and the context, and starts nothing.
 func (p *Plugin) Setup(args iutil.SetupArgs) error {
-	p.ctx, p.next = args.Context, args.Next
+	p.next = args.Next
 
 	return nil
 }
@@ -123,7 +124,7 @@ func (p *Plugin) Handle(ev *iutil.Event) {
 	// Time since the source decoded it, not since this position saw it.
 	attrs = append(attrs, "age", time.Since(ev.At()).Round(time.Microsecond))
 
-	slog.Log(p.ctx, level, "event", attrs...)
+	p.logger.Log(context.Background(), level, "event", attrs...)
 
 	p.next(ev)
 }

@@ -1,0 +1,29 @@
+ARG VERSION
+
+FROM docker.io/library/golang:1.27.1-alpine3.24 AS build
+ARG VERSION
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+COPY . ./
+# Verified in the builder rather than trusted: the version subcommand is the
+# cheapest thing that proves the binary links and its command tree parses -
+# which is what a chain composed at compile time can silently get wrong.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -tags=netgo -ldflags="-w -s -X main.version=${VERSION}" -trimpath -o /ic-healthd ./cmd/ic-healthd && \
+    /ic-healthd version && \
+    /ic-healthd run --help > /dev/null
+
+FROM docker.io/library/busybox:glibc
+COPY --from=build /ic-healthd /usr/local/bin/ic-healthd
+
+WORKDIR /
+
+USER 65534:65534
+
+# 9153 is /metrics, /health and /ready.
+EXPOSE 9153
+
+CMD ["ic-healthd", "run"]

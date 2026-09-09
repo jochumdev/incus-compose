@@ -306,7 +306,7 @@ func TestFetchIntoAStateLeavesTheInstanceAlone(t *testing.T) {
 	gc, err := NewTestClient(testContext(t))
 	require.NoError(t, err)
 
-	name := "fetch-isolation-" + strings.ToLower(RandString(12))
+	name := "fetch-isolation-" + strings.ToLower(shared.RandString(12))
 	c, err := createProjectClient(gc, name)
 	require.NoError(t, err)
 

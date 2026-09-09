@@ -70,7 +70,7 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 	// outside every zone is the common case and never touches the name tree.
 	z := snap.ZoneOf(qname)
 	if z == nil {
-		slog.Debug("unknown, falling through", "zone", qname)
+		v.logger.Debug("unknown, falling through", "zone", qname)
 
 		return false, dns.RcodeSuccess, nil
 	}
@@ -80,7 +80,7 @@ func (v *ECSView) Answer(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 	// A zone claiming only the names in it, the apex included: naming a server
 	// for a domain we hold one name in would claim the rest of that domain too.
 	if z.Shadowing && !held {
-		slog.Debug("not claimed, falling through", "name", qname, "zone", z.Name)
+		v.logger.Debug("not claimed, falling through", "name", qname, "zone", z.Name)
 
 		return false, dns.RcodeSuccess, nil
 	}

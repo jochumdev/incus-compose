@@ -86,6 +86,8 @@ const poolDelay = 20 * time.Millisecond
 // Everything below the inbox belongs to the goroutine Run owns; a pool worker
 // touches nothing here, which is what keeps this package free of a mutex.
 type Plugin struct {
+	logger *slog.Logger
+
 	args iutil.SetupArgs
 	opts options
 
@@ -121,6 +123,8 @@ type Plugin struct {
 	chain iutil.ChainState
 }
 
+var _ iutil.Plugin = (*Plugin)(nil)
+
 // options is what main decides about this plugin, kept separate from a shared
 // iutil options type since nothing here has a debounce window.
 type options struct {
@@ -133,6 +137,7 @@ type options struct {
 	TTL           time.Duration
 	Project       func(p *incusapi.Project) bool
 	StoreFile     string
+	Metrics       bool
 }
 
 // Option sets one of the options; New fills in defaults for whatever is left
@@ -181,11 +186,14 @@ func StoreFile(f string) Option { return func(o *options) { o.StoreFile = f } }
 // says to write it. A run that changed nothing writes nothing whatever this is.
 func StoreInterval(d time.Duration) Option { return func(o *options) { o.StoreInterval = d } }
 
+// Metrics turns counters and gauges on.
+func Metrics(v bool) Option { return func(o *options) { o.Metrics = v } }
+
 // New builds an enricher.
 //
 // ReadTimeout starts when a worker picks a read up, not when it is offered to
 // the pool, so time spent waiting for a worker is never charged to the daemon.
-func New(opts ...Option) *Plugin {
+func New(logger *slog.Logger, opts ...Option) *Plugin {
 	o := options{
 		Workers:       defaultWorkers,
 		ReadTimeout:   defaultReadTimeout,
@@ -199,12 +207,13 @@ func New(opts ...Option) *Plugin {
 		opt(&o)
 	}
 
-	slog.Info("Starting", "plugin", name, "config", o)
+	logger.Info("Starting", "plugin", name, "config", o)
 
 	// Unbuffered, so the sweeper's pace is felt rather than run ahead of.
 	sweeps := make(chan sweepMsg)
 
 	p := &Plugin{
+		logger: logger,
 		opts:   o,
 		inbox:  make(chan *iutil.Event, o.InboxSize),
 		sweeps: sweeps,
@@ -241,6 +250,15 @@ func (p *Plugin) storeClone() {
 	p.state.dirty = false
 
 	storeSend(p.storeIn, p.state.clone())
+}
+
+func (p *Plugin) updateMetrics() {
+	if !p.opts.Metrics {
+		return
+	}
+
+	projectsGauge.Set(float64(p.state.projectCount()))
+	instancesGauge.Set(float64(p.state.instanceCount()))
 }
 
 // Name identifies the plugin, and names it in the reason of what it fails.
@@ -322,7 +340,7 @@ func (p *Plugin) Run(ctx context.Context) error {
 		}
 	}()
 
-	runSweeper(sweepCtx, p.sweepArgs(), p.opts.SweepInterval)
+	runSweeper(sweepCtx, p.logger, p.sweepArgs(), p.opts.SweepInterval)
 
 	if p.storeIn != nil {
 		ticker := time.NewTicker(p.opts.StoreInterval)
@@ -341,12 +359,12 @@ func (p *Plugin) Run(ctx context.Context) error {
 			select {
 			case <-p.storeDone:
 			case <-time.After(storeStopTimeout):
-				slog.Warn("the fleet was still being written when this stopped waiting",
+				p.logger.Warn("the fleet was still being written when this stopped waiting",
 					"plugin", name)
 			}
 		}()
 
-		runStore(storeCtx, p.storeArgs())
+		runStore(storeCtx, p.logger, p.storeArgs())
 	}
 
 	drain := func(cmd iutil.Command) {
@@ -502,6 +520,8 @@ func (p *Plugin) settleRead(ctx context.Context, res result) {
 	case kindProject:
 		if res.err == nil {
 			p.state.setProject(c.project, res.project.Config)
+			p.updateMetrics()
+			p.fanOut(ctx, p.state.projectInstances(c.project))
 		}
 
 		// A project that would not answer still counts: the run is over either
@@ -514,6 +534,9 @@ func (p *Plugin) settleRead(ctx context.Context, res result) {
 	}
 
 	inst, landed := p.patchState(ctx, c.project, c.name, res.instance, res.state, res.err)
+	if landed {
+		p.updateMetrics()
+	}
 
 	// Before the event it made below, which is then compared against what they
 	// filed.
@@ -610,6 +633,7 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 	if ev.Action() == incusapi.EventLifecycleInstanceDeleted {
 		p.state.deleteInstance(ev.ProjectName(), ev.Name())
 		p.archive.forget(ev.ProjectName(), ev.Name())
+		p.updateMetrics()
 		p.q.push(ev, true)
 
 		return
@@ -620,6 +644,7 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 	if ev.Action() == incusapi.EventLifecycleInstanceRenamed && ev.OldName() != "" {
 		p.state.deleteInstance(ev.ProjectName(), ev.OldName())
 		p.archive.forget(ev.ProjectName(), ev.OldName())
+		p.updateMetrics()
 	}
 
 	// Both have to be true: wanted for instance enrichment, and the action

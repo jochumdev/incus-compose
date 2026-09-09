@@ -51,7 +51,7 @@ func waitHealthy(t *testing.T, c *client.Client, name string) {
 	}, 90*time.Second, time.Second, "%s never became healthy, last status %q", name, status)
 }
 
-// TestE2EHealthdGlobalScope is the new default: no sidecar of the project's
+// TestE2EHealthdGlobalScope is the default: no sidecar of the project's
 // own, one shared daemon in its own project, and the project marked so the
 // daemon picks it up.
 func TestE2EHealthdGlobalScope(t *testing.T) {

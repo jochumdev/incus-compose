@@ -438,7 +438,15 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		networkDef, defOk := p.Networks[name]
 		if defOk {
 			netConfig.External = bool(networkDef.External)
-			netConfig.Extensions = networkExtensions(networkDef)
+			exts, err := networkExtensions(networkDef)
+			if err != nil {
+				errs = errors.Join(errs, fmt.Errorf("network %q: %w", name, err))
+				continue
+			}
+			netConfig.Extensions = exts
+			if networkDef.Driver != "" {
+				netConfig.Type = networkDef.Driver
+			}
 			// compose-go always fills Name in, with the key for an external network
 			// and {project}_{key} otherwise; anything else is a `name:` the user
 			// wrote, and it beats the extension.
@@ -496,6 +504,7 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		extensions := map[string]string{}
 		userExtensions := map[string]string{}
 		noGateway := false
+		internal := false
 		if sNet != nil && sNet.Extensions != nil {
 			userExtensions = xIncusExtensions(sNet.Extensions)
 
@@ -507,6 +516,7 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 			if err == nil && ext.Internal {
 				gateway4 = "none"
 				gateway6 = "none"
+				internal = true
 			}
 
 			noGateway = ext.Gateway != nil && !*ext.Gateway
@@ -533,7 +543,13 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 			continue
 		}
 
-		if ((ipv4Address != "" && gateway4 == "none") || (ipv6Address != "" && gateway6 == "none")) &&
+		// `internal: true` is a request for no gateway, so it must be written with
+		// or without a static address — otherwise the "none" computed above is
+		// discarded and the instance silently keeps a default route.
+		writeGateway4 := ipv4Address != "" || internal
+		writeGateway6 := ipv6Address != "" || internal
+
+		if ((writeGateway4 && gateway4 == "none") || (writeGateway6 && gateway6 == "none")) &&
 			!c.Global().HasExtension(shared.Incus73Extension) {
 			c.LogWarn(
 				"For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS",
@@ -545,11 +561,17 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 
 		if ipv4Address != "" {
 			extensions["ipv4.address"] = ipv4Address
+		}
+
+		if writeGateway4 {
 			extensions["ipv4.gateway"] = gateway4
 		}
 
 		if ipv6Address != "" {
 			extensions["ipv6.address"] = ipv6Address
+		}
+
+		if writeGateway6 {
 			extensions["ipv6.gateway"] = gateway6
 		}
 
@@ -1232,22 +1254,60 @@ func xICInstanceNetwork(networkDef types.NetworkConfig) string {
 	return n
 }
 
-// networkExtensions extracts the x-incus extension map from a compose network
-// definition and returns it as a flat map[string]string for use as Incus network
-// config. Keys and values are taken verbatim from the x-incus YAML block.
-func networkExtensions(networkDef types.NetworkConfig) map[string]string {
+// networkExtensions extracts Incus network config from x-incus and ipam.
+func networkExtensions(networkDef types.NetworkConfig) (map[string]string, error) {
+	result := map[string]string{}
+
+	if len(networkDef.Ipam.Config) > 2 {
+		return nil, fmt.Errorf("ipam.config with more than 2 pools is not supported")
+	}
+
+	for _, pool := range networkDef.Ipam.Config {
+		if pool == nil {
+			continue
+		}
+		if pool.Gateway == "" {
+			return nil, fmt.Errorf("ipam gateway cannot be empty")
+		}
+
+		_, ipNet, err := net.ParseCIDR(pool.Subnet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse subnet %q: %w", pool.Subnet, err)
+		}
+
+		gw := net.ParseIP(pool.Gateway)
+		if gw == nil {
+			return nil, fmt.Errorf("failed to parse gateway %q", pool.Gateway)
+		}
+		if !ipNet.Contains(gw) {
+			return nil, fmt.Errorf("gateway %q is not in subnet %q", pool.Gateway, pool.Subnet)
+		}
+
+		ones, _ := ipNet.Mask.Size()
+		addr := fmt.Sprintf("%s/%d", gw.String(), ones)
+
+		key := "ipv6.address"
+		if gw.To4() != nil {
+			key = "ipv4.address"
+		}
+		if _, exists := result[key]; exists {
+			return nil, fmt.Errorf("multiple %s pools are not supported", key[:4])
+		}
+		result[key] = addr
+	}
+
 	var raw map[string]any
 	ok, err := networkDef.Extensions.Get("x-incus", &raw)
-	if !ok || err != nil || len(raw) == 0 {
-		return map[string]string{}
+	if err != nil {
+		return nil, err
+	}
+	if ok && len(raw) > 0 {
+		for k, v := range raw {
+			result[k] = fmt.Sprint(v)
+		}
 	}
 
-	result := make(map[string]string, len(raw))
-	for k, v := range raw {
-		result[k] = fmt.Sprint(v)
-	}
-
-	return result
+	return result, nil
 }
 
 // xIncusExtensions extracts the x-incus extension map from a compose
@@ -1333,13 +1393,31 @@ func serviceExtraDevices(service types.ServiceConfig) ([]client.InstanceDevice, 
 			return nil, fmt.Errorf("x-incus-compose.devices: device %q is missing 'type'", name)
 		}
 
-		devices = append(devices, client.InstanceDevice{
-			Name: name,
-			Config: client.InstanceDeviceConfig{
-				DeviceType: ext["type"],
-				Extensions: ext,
-			},
-		})
+		cfg := client.InstanceDeviceConfig{
+			DeviceType: ext["type"],
+			Extensions: ext,
+		}
+
+		// Mirror the mount point into the typed config as well as Extensions.
+		// devicePath() -- which decides whether a path an image declares as a
+		// VOLUME is already covered by a device -- reads Config.Disk.Path and
+		// Config.Tmpfs.Path, never Extensions. Leaving them empty made every
+		// x-incus-compose disk invisible to that check, so prefetchVolumes()
+		// created an auto-volume for an already-covered path and Incus then
+		// rejected the instance with "More than one disk device uses the same
+		// path" -- after `up --recreate` had already deleted the old instance.
+		//
+		// Rendering is unaffected: toDiskDevice()/toTmpfsDevice() apply
+		// maps.Copy(device, Extensions) last, so Extensions still win with the
+		// identical value.
+		switch ext["type"] {
+		case client.InstanceDeviceTypeDisk:
+			cfg.Disk.Path = ext["path"]
+		case client.InstanceDeviceTypeTmpfs:
+			cfg.Tmpfs.Path = ext["path"]
+		}
+
+		devices = append(devices, client.InstanceDevice{Name: name, Config: cfg})
 	}
 
 	return devices, nil

@@ -14,16 +14,15 @@ import (
 )
 
 // setup wires a log to a successor that keeps what reached it.
-func setup(t *testing.T, at string, opts ...Option) (*Plugin, *[]*iutil.Event) {
+func setup(t *testing.T, logger *slog.Logger, at string, opts ...Option) (*Plugin, *[]*iutil.Event) {
 	t.Helper()
 
 	var seen []*iutil.Event
 
-	p := New(append([]Option{At(at)}, opts...)...)
+	p := New(logger, append([]Option{At(at)}, opts...)...)
 
 	err := p.Setup(iutil.SetupArgs{
-		Context: t.Context(),
-		Next:    func(ev *iutil.Event) { seen = append(seen, ev) },
+		Next: func(ev *iutil.Event) { seen = append(seen, ev) },
 	})
 	require.NoError(t, err)
 
@@ -34,8 +33,8 @@ func setup(t *testing.T, at string, opts ...Option) (*Plugin, *[]*iutil.Event) {
 func TestNameIsThePosition(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "log/arrival", New(At("arrival")).Name())
-	assert.Equal(t, "log", New().Name())
+	assert.Equal(t, "log/arrival", New(slog.Default(), At("arrival")).Name())
+	assert.Equal(t, "log", New(slog.Default()).Name())
 }
 
 // TestHandlePassesEverythingOn pins the one thing a log must never do, which is decide.
@@ -84,7 +83,7 @@ func TestHandlePassesEverythingOn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			p, seen := setup(t, "served")
+			p, seen := setup(t, slog.Default(), "served")
 
 			p.Handle(tc.ev)
 
@@ -110,7 +109,6 @@ func (c *capture) WithAttrs([]slog.Attr) slog.Handler { return c }
 func (c *capture) WithGroup(string) slog.Handler      { return c }
 
 // TestLevel pins what a position prints at.
-// Not t.Parallel(): Handle logs through the process-wide slog default, which every case swaps out.
 func TestLevel(t *testing.T) {
 	event := func() *iutil.Event {
 		return iutil.NewEvent(time.Now(), "instance-started", "shop", "web", "")
@@ -162,15 +160,11 @@ func TestLevel(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p, seen := setup(t, "served", tc.opts...)
-
-			// Swapped after New, which logs the position on the default logger.
 			c := &capture{}
+			p, seen := setup(t, slog.New(c), "served", tc.opts...)
 
-			restore := slog.Default()
-			slog.SetDefault(slog.New(c))
-
-			t.Cleanup(func() { slog.SetDefault(restore) })
+			// New logs the position on the same logger; drop it, so only the event is judged.
+			c.levels = nil
 
 			p.Handle(tc.ev)
 

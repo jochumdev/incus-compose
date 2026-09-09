@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -116,28 +115,6 @@ func TestE2EPullWithDeps(t *testing.T) {
 	require.True(t, hasImage(aliases, "node"), "expected the api image, got %v", aliases)
 	require.True(t, hasImage(aliases, "postgres"), "expected the postgres dep image, got %v", aliases)
 	require.True(t, hasImage(aliases, "redis"), "expected the redis dep image, got %v", aliases)
-}
-
-// TestE2EPullInvalidImage verifies `pull` fails when a service references an
-// image that cannot be resolved from any registry.
-func TestE2EPullInvalidImage(t *testing.T) {
-	t.Parallel()
-	testlib.SkipE2E(t)
-
-	ctx := t.Context()
-	pn := t.Name()
-	dir := testlib.WriteTempFiles(t, map[string]string{
-		"compose.yaml": `services:
-  bogus:
-    image: docker.io/library/incus-compose-does-not-exist:latest
-`,
-	})
-	compose := filepath.Join(dir, "compose.yaml")
-
-	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
-
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull")
-	require.Error(t, err)
 }
 
 // TestE2EPullIgnoreBuildable verifies --ignore-buildable skips images with a

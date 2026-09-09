@@ -116,13 +116,257 @@ func TestNetworkExtensionsExtractsXIncus(t *testing.T) {
 	proj, err := New().Load(t.Context(), LoadWorkingDir(fixturePath("with-network-ranges")))
 	require.NoError(t, err)
 
+	exts, err := networkExtensions(proj.Networks["backend"])
+	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
 		"ipv4.address":     "10.200.0.1/24",
 		"ipv4.dhcp.ranges": "10.200.0.100-10.200.0.200",
 		"ipv6.address":     "fd42:1::1/64",
-	}, networkExtensions(proj.Networks["backend"]))
+	}, exts)
 	// Never nil: callers write defaults such as ipv4.nat into it.
-	assert.Equal(t, map[string]string{}, networkExtensions(types.NetworkConfig{}))
+	emptyExts, err := networkExtensions(types.NetworkConfig{})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{}, emptyExts)
+}
+
+func TestNetworkExtensionsIPAM(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		config    types.NetworkConfig
+		want      map[string]string
+		expectErr bool
+	}{
+		{
+			name: "subnet and gateway calculates ipv4.address",
+			config: types.NetworkConfig{
+				Driver: "bridge",
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"ipv4.address": "192.168.178.1/25",
+			},
+		},
+		{
+			name: "subnet without gateway fails",
+			config: types.NetworkConfig{
+				Driver: "bridge",
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet: "192.168.178.0/25",
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "ipv6 subnet and gateway calculates ipv6.address",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "fd00:dead:beef::/64",
+							Gateway: "fd00:dead:beef::1",
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"ipv6.address": "fd00:dead:beef::1/64",
+			},
+		},
+		{
+			name: "x-incus overrides ipam",
+			config: types.NetworkConfig{
+				Extensions: types.Extensions{
+					"x-incus": map[string]any{
+						"ipv4.address": "10.0.0.1/24",
+					},
+				},
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"ipv4.address": "10.0.0.1/24",
+			},
+		},
+		{
+			name: "x-incus overrides ipam with none",
+			config: types.NetworkConfig{
+				Extensions: types.Extensions{
+					"x-incus": map[string]any{
+						"ipv4.address": "none",
+					},
+				},
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"ipv4.address": "none",
+			},
+		},
+		{
+			name: "x-incus overrides ipam with empty string",
+			config: types.NetworkConfig{
+				Extensions: types.Extensions{
+					"x-incus": map[string]any{
+						"ipv4.address": "",
+					},
+				},
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"ipv4.address": "",
+			},
+		},
+		{
+			name: "gateway not in subnet fails",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "10.0.0.1",
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "invalid subnet fails",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "not-a-cidr",
+							Gateway: "192.168.178.1",
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "invalid gateway fails",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "not-an-ip",
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "dual-stack IPv4 and IPv6 pools",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+						{
+							Subnet:  "fd00:dead:beef::/64",
+							Gateway: "fd00:dead:beef::1",
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"ipv4.address": "192.168.178.1/25",
+				"ipv6.address": "fd00:dead:beef::1/64",
+			},
+		},
+		{
+			name: "multiple IPv4 pools rejected",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+						{
+							Subnet:  "192.168.178.128/25",
+							Gateway: "192.168.178.129",
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "more than 2 pools rejected",
+			config: types.NetworkConfig{
+				Ipam: types.IPAMConfig{
+					Config: []*types.IPAMPool{
+						{
+							Subnet:  "192.168.178.0/25",
+							Gateway: "192.168.178.1",
+						},
+						{
+							Subnet:  "fd00:dead:beef::/64",
+							Gateway: "fd00:dead:beef::1",
+						},
+						{
+							Subnet:  "10.0.0.0/24",
+							Gateway: "10.0.0.1",
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := networkExtensions(tt.config)
+			if tt.expectErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestServiceXIncusExtensionsExtractsXIncus(t *testing.T) {
@@ -834,6 +1078,55 @@ func TestServiceExtraDevices(t *testing.T) {
 		assert.Equal(t, map[string]string{"type": "gpu", "gputype": "physical"}, cfg)
 	})
 
+	// prefetchVolumes() skips a path only when devicePath() reports a device
+	// covering it, and devicePath() reads Config.Disk.Path / Config.Tmpfs.Path --
+	// never Extensions. Leaving them unset makes the device invisible to that
+	// check, so an auto-volume is created for an already-covered path.
+	t.Run("typed mount point is populated so the auto-volume check can see it", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{
+				"devices": map[string]any{
+					"app-config": map[string]any{
+						"type": "disk", "pool": "default",
+						"source": "web-config", "path": "/config",
+					},
+				},
+			},
+		}}
+
+		devices, err := serviceExtraDevices(service)
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "/config", devices[0].Config.Disk.Path,
+			"Disk.Path must be set or devicePath() cannot see this mount")
+
+		// And rendering is unchanged: Extensions are copied last, so they still
+		// win with the identical value.
+		_, cfg, derr := devices[0].ToIncusDevice()
+		require.Nil(t, derr)
+		assert.Equal(t, map[string]string{
+			"type": "disk", "pool": "default",
+			"source": "web-config", "path": "/config",
+		}, cfg)
+	})
+
+	t.Run("tmpfs mount point is populated too", func(t *testing.T) {
+		t.Parallel()
+		service := types.ServiceConfig{Name: "influxdb", Extensions: types.Extensions{
+			"x-incus-compose": map[string]any{
+				"devices": map[string]any{
+					"scratch": map[string]any{"type": "tmpfs", "path": "/var/lib/influxdb2"},
+				},
+			},
+		}}
+
+		devices, err := serviceExtraDevices(service)
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "/var/lib/influxdb2", devices[0].Config.Tmpfs.Path)
+	})
+
 	t.Run("missing type errors", func(t *testing.T) {
 		t.Parallel()
 		service := types.ServiceConfig{Name: "web", Extensions: types.Extensions{
@@ -1137,6 +1430,38 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
 	})
 
+	t.Run("internal network gets gateway none without a static address", func(t *testing.T) {
+		t.Parallel()
+		testlib.SkipNoExtension(t, shared.Incus73Extension, "For `gateway=none` on a network you need at least incus 7.3 or 7.0.2 LTS")
+
+		p := &types.Project{Networks: types.Networks{"isolated": {}}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"isolated": {Extensions: types.Extensions{"x-incus-compose": map[string]any{"internal": true}}},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
+		assert.Equal(t, "none", devices[0].Config.Extensions["ipv6.gateway"])
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv4.address")
+	})
+
+	t.Run("an ordinary address-less network still gets no gateway key", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{"frontend": {}}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"frontend": {},
+		}}
+
+		devices, _, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv4.gateway")
+		assert.NotContains(t, devices[0].Config.Extensions, "ipv6.gateway")
+	})
+
 	t.Run("an external network is named by its compose name", func(t *testing.T) {
 		t.Parallel()
 
@@ -1233,6 +1558,48 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		require.Len(t, devices, 1)
 		assert.Equal(t, "10.0.0.5", devices[0].Config.Extensions["ipv4.address"])
 		assert.Equal(t, "fd42::5", devices[0].Config.Extensions["ipv6.address"])
+	})
+
+	t.Run("ipam config calculates ipv4.address and gateway", func(t *testing.T) {
+		t.Parallel()
+		p := &types.Project{
+			Name: "proj",
+			Networks: types.Networks{
+				"lan": {
+					Driver: "bridge",
+					Ipam: types.IPAMConfig{
+						Config: []*types.IPAMPool{
+							{
+								Subnet:  "192.168.178.0/25",
+								Gateway: "192.168.178.1",
+							},
+						},
+					},
+				},
+			},
+		}
+		service := types.ServiceConfig{
+			Name: "web",
+			Networks: map[string]*types.ServiceNetworkConfig{
+				"lan": {
+					Ipv4Address: "192.168.178.10",
+				},
+			},
+		}
+
+		devices, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		require.Len(t, resources, 1)
+
+		assert.Equal(t, "192.168.178.10", devices[0].Config.Extensions["ipv4.address"])
+		assert.Equal(t, "192.168.178.1", devices[0].Config.Extensions["ipv4.gateway"])
+
+		netRes, ok := resources[0].(*client.Network)
+		require.True(t, ok)
+		assert.Equal(t, "192.168.178.1/25", netRes.Config.Extensions["ipv4.address"])
+		assert.Equal(t, "true", netRes.Config.Extensions["ipv4.nat"])
+		assert.Equal(t, "bridge", netRes.Config.Type)
 	})
 }
 

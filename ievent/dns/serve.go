@@ -17,7 +17,8 @@ import (
 // adapter puts a CoreDNS plugin chain after a miekg/dns server, shaped after
 // dnsserver.Server.ServeDNS at CoreDNS v1.14.6 - diff it by hand on a bump.
 type adapter struct {
-	chain plugin.Handler
+	logger *slog.Logger
+	chain  plugin.Handler
 }
 
 func (a *adapter) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
@@ -36,7 +37,7 @@ func (a *adapter) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			return
 		}
 
-		slog.Error("recovered from a panic while serving",
+		a.logger.Error("recovered from a panic while serving",
 			"qname", r.Question[0].Name, "panic", rec)
 
 		// CoreDNS's own counter, normally incremented by core/dnsserver, which
@@ -68,7 +69,7 @@ func (a *adapter) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	rcode, err := a.chain.ServeDNS(context.Background(), w, r)
 	if err != nil {
-		slog.Error("serving", "qname", r.Question[0].Name, "err", err)
+		a.logger.Error("serving", "qname", r.Question[0].Name, "err", err)
 	}
 
 	// A plugin that returned an rcode without writing gets a reply written for

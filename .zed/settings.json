@@ -1,0 +1,21 @@
+// Folder-specific settings
+//
+// For a full list of overridable settings, and general information on folder-specific settings,
+// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
+{
+  "context_servers": {
+    "fff": {
+      "settings": {
+        "fff_binary_path": "fff-mcp",
+        "base_path": null,
+        "frecency_db": null,
+        "history_db": null,
+        "log_file": null,
+        "log_level": "info",
+        "no_update_check": false,
+        "no_warmup": false,
+        "max_cached_files": null
+      }
+    }
+  }
+}

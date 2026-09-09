@@ -1,0 +1,11 @@
+FROM busybox:glibc
+
+ARG TARGETPLATFORM
+ARG VERSION
+
+COPY ${TARGETPLATFORM}/ic-dns /usr/local/sbin/ic-dns
+
+# Everything else comes from the environment: DNS_INCUS, DNS_TOKEN,
+# DNS_FORWARD and the rest, which is what a compose file sets. There is no
+# configuration file to mount.
+CMD ["ic-dns", "run"]

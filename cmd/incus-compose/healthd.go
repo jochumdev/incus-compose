@@ -27,7 +27,7 @@ import (
 var DefaultHealthdImage = "ghcr.io/lxc/incus-compose/ic-healthd:{version}"
 
 const (
-	defaultHealthdCPU         = 2
+	defaultHealthdCPU         = "200ms/100ms"
 	defaultHealthdMemoryLimit = "256MiB"
 )
 
@@ -164,12 +164,22 @@ func healthdCarriedConfig(config map[string]string) map[string]string {
 
 // healthdFloorLimits raises a carried limit below the sidecar's default, so a
 // daemon created by an older version is not kept at a size its worker pools
-// have outgrown. Only a plain count or byte size compares; a CPU pin such as
-// "1-1" or a memory percentage is deliberate and left alone.
+// have outgrown.
 func healthdFloorLimits(carried map[string]string) {
-	cpu, err := strconv.Atoi(carried["limits.cpu"])
-	if err == nil && cpu < defaultHealthdCPU {
-		carried["limits.cpu"] = strconv.Itoa(defaultHealthdCPU)
+	_, hasOldCPULimit := carried["limits.cpu"]
+	if hasOldCPULimit {
+		i, err := strconv.Atoi(carried["limits.cpu"])
+		if err != nil {
+			return
+		}
+		// Upgrade v1.1.0 `limits.cpu: 1` to v1.2 `limits.cpu: 2`
+		if i < 2 {
+			i = 2
+		}
+
+		// Upgrade to current "limits.cpu.allowance"
+		carried["limits.cpu.allowance"] = fmt.Sprintf("%dms/100ms", i*100)
+		delete(carried, "limits.cpu")
 	}
 
 	// An empty value parses as zero bytes, which would floor a limit into being.
@@ -182,8 +192,8 @@ func healthdFloorLimits(carried map[string]string) {
 		return
 	}
 
-	deflt, err := units.ParseByteSizeString(defaultHealthdMemoryLimit)
-	if err == nil && memory < deflt {
+	def, err := units.ParseByteSizeString(defaultHealthdMemoryLimit)
+	if err == nil && memory < def {
 		carried["limits.memory"] = defaultHealthdMemoryLimit
 	}
 }
@@ -327,7 +337,7 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 		Image: imgRes.Name(),
 		Type:  incusApi.InstanceTypeContainer,
 		Extensions: map[string]string{
-			"limits.cpu":                       strconv.Itoa(defaultHealthdCPU),
+			"limits.cpu.allowance":             defaultHealthdCPU,
 			"limits.memory":                    defaultHealthdMemoryLimit,
 			client.HealthKeyPrefix + "restart": "unless-stopped", // Needed for instance.Start to wait for it.
 			client.HealthKeyPrefix + "daemon":  "true",

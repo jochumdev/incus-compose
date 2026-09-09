@@ -60,6 +60,8 @@ type Plugin struct {
 	lastEvent atomic.Int64
 }
 
+var _ iutil.Plugin = (*Plugin)(nil)
+
 // Option sets one field of Config; the zero value means unset.
 type Option func(*Config)
 
@@ -76,14 +78,14 @@ func Metrics(v bool) Option { return func(cfg *Config) { cfg.Metrics = v } }
 func Pprof(v bool) Option { return func(cfg *Config) { cfg.Pprof = v } }
 
 // New builds the endpoint server. It starts nothing: Run owns the goroutine.
-func New(opts ...Option) *Plugin {
+func New(logger *slog.Logger, opts ...Option) *Plugin {
 	var cfg Config
 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	slog.Info("Starting", "plugin", name, "config", cfg)
+	logger.Info("Starting", "plugin", name, "config", cfg)
 
 	p := &Plugin{cfg: cfg}
 	p.lastEvent.Store(time.Now().UnixNano())

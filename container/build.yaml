@@ -1,0 +1,24 @@
+name: incus-compose
+services:
+  ic-healthd:
+    image: ghcr.io/lxc/incus-compose/ic-healthd:${VERSION}
+    build:
+      args:
+        VERSION: ${VERSION}
+      context: ${PROJECT_ROOT}
+      dockerfile: container/ic-healthd/Containerfile
+
+  ic-dns:
+    image: ghcr.io/lxc/incus-compose/ic-dns:${VERSION}
+    container_name: ic-dns
+    build:
+      args:
+        VERSION: ${VERSION}
+      context: ${PROJECT_ROOT}
+      dockerfile: container/ic-dns/Containerfile
+
+  ic-sleep:
+    image: ghcr.io/lxc/incus-compose/ic-sleep:${VERSION}
+    build:
+      context: ${PROJECT_ROOT}
+      dockerfile: container/ic-sleep/Containerfile

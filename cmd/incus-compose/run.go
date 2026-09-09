@@ -24,6 +24,7 @@ import (
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // DefaultInitImage ships the blocking helper a one-off runs as its entrypoint.
@@ -607,7 +608,7 @@ func newRunCommand() *cli.Command {
 
 			name := cmd.String("name")
 			if name == "" {
-				name = all[0] + "-run-" + strings.ToLower(client.RandString(8))
+				name = all[0] + "-run-" + strings.ToLower(shared.RandString(8))
 			}
 
 			return run(ctx, p, c, runArgs{

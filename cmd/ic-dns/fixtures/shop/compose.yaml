@@ -26,7 +26,6 @@ services:
     build:
       context: "${PROJECT_ROOT}"
       dockerfile: container/ic-dns/Containerfile
-    entrypoint: ["entrypoint.sh", "run"]
     networks:
       dns:
         ipv4_address: "${IPV4_IC_DNS}/24"

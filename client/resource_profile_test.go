@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lxc/incus-compose/shared"
 )
 
 // ----------------------------------------------------------------------------
@@ -389,7 +391,7 @@ func TestProfileEnsure_ConcurrentCreate(t *testing.T) {
 
 	// One project, so every worker races for the same profile.
 	c := newRandomTestClient(t, "profile-race-")
-	name := "ic-prof-" + strings.ToLower(RandString(6))
+	name := "ic-prof-" + strings.ToLower(shared.RandString(6))
 
 	const workers = 6
 	profiles := make([]Resource, workers)

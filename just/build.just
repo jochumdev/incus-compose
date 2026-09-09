@@ -1,114 +1,48 @@
 # Building and running incus-compose and its ic-healthd sidecar.
 
 # Build a dev binary
-build: update-healthd build-sleep-image
+build: _build-deps
     #!/usr/bin/env bash
     set -euo pipefail
 
-    image=$(source .env; echo "${INCUS_COMPOSE_HEALTHD_IMAGE:-}")
-    version="${image##*:}"
-
-    if [[ "${version}" == "${image}" ]]; then
-        version="`git describe --tags --always --long --dirty="-dirty"`"
+    if [[ ! -f .env ]]; then
+      cp .env.sample .env
     fi
 
-    go install -C ./cmd/incus-compose -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${version#v}"
+    VERSION=$(source .env; echo "${VERSION:-}")
+    if [[ -z ${VERSION} ]]; then
+        VERSION="`git describe --tags --always --long --dirty="-dirty"`"
+        sed -i -e 's|export VERSION=".*"|export VERSION="'${VERSION}'"|g' .env
+    fi
+
+    IC_SUBNET=$(source .env; echo "${IC_SUBNET:-}")
+    if [[ -z "${IC_SUBNET:-}" ]]; then
+      hash=$(printf '%s' "${PWD}" | cksum | cut -d' ' -f1)
+      IC_SUBNET="10.$(( (hash / 256) % 256 )).$(( hash % 256 ))"
+      sed -i -e 's|export IC_SUBNET=".*"|export IC_SUBNET="'${IC_SUBNET}'"|g' .env
+    fi
+
+    go install -C ./cmd/incus-compose -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v}"
+
+    just run healthd down --force 1>/dev/null 2>&1 || true
+    just run --trace healthd up
 
 # Usage: just run -f test/fixtures/simple/compose.yaml config
 run *args:
-    @go run ./cmd/incus-compose {{ args }}
+    @go run -ldflags "-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v}" ./cmd/incus-compose {{ args }}
 
-# Build ic-healthd binary
-build-healthd:
-    CGO_ENABLED=0 go build -tags=netgo -ldflags="-w -s -X github.com/lxc/incus-compose/cmd/ic-healthd/version.Version=`git describe --tags --always --long --dirty="-dirty"`" -trimpath -o bin/ic-healthd ./cmd/ic-healthd
-
-# Build ic-healthd container image
-build-healthd-image tag_base="ghcr.io/lxc/incus-compose/ic-healthd":
+[private]
+_build-deps:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ ! -f .env ]]; then
-      cp .env.sample .env
-    fi
+    export PROJECT_ROOT={{ justfile_directory() }}
+    export VERSION=$(source .env; echo "${VERSION#v}")
 
-    # The random suffix gives a clear sign that your version is running.
-    VERSION="`git describe --tags --always --long --dirty="-dirty"`-`openssl rand -hex 4`"
-    # Container tags carry no v prefix, `release` pushes them without one too.
-    export VERSION="${VERSION#v}"
-    echo ${VERSION}
-
-    echo "Building for the 'default' cache on '${INCUS_REMOTE}'"
-    just run -P cmd/ic-healthd build --os-env # os-env cause of VERSION
+    echo "Building deps for the 'default' cache on '${INCUS_REMOTE}'"
+    just run -f container/build.yaml build --os-env # os-env cause of VERSION
 
     if [[ ${INCUS_COMPOSE_IMAGE_CACHE:-} != "incus-compose-tests-cache" ]]; then
-      echo "Building for the 'incus-compose-tests-cache' cache on '${INCUS_REMOTE}'"
-      just run --image-cache="incus-compose-tests-cache" -P cmd/ic-healthd build --os-env
+      echo "Building deps for the 'incus-compose-tests-cache' cache on '${INCUS_REMOTE}'"
+      just run --image-cache="incus-compose-tests-cache" -f container/build.yaml build --os-env
     fi
-
-    sed -i -e 's|export INCUS_COMPOSE_HEALTHD_IMAGE=".*"|export INCUS_COMPOSE_HEALTHD_IMAGE="{{ tag_base }}:'${VERSION}'"|g' .env
-
-# Build the ic-sleep container image, which holds every architecture's helper
-build-sleep-image tag_base="ghcr.io/lxc/incus-compose/ic-sleep":
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    if [[ ! -f .env ]]; then
-      cp .env.sample .env
-    fi
-
-    # The random suffix gives a clear sign that your version is running.
-    VERSION="`git describe --tags --always --long --dirty="-dirty"`-`openssl rand -hex 4`"
-    # Container tags carry no v prefix, `release` pushes them without one too.
-    export VERSION="${VERSION#v}"
-    echo ${VERSION}
-
-    echo "Building for the 'default' cache on '${INCUS_REMOTE}'"
-    just run -P cmd/ic-sleep build --os-env # os-env cause of VERSION
-
-    if [[ ${INCUS_COMPOSE_IMAGE_CACHE:-} != "incus-compose-tests-cache" ]]; then
-      echo "Building for the 'incus-compose-tests-cache' cache on '${INCUS_REMOTE}'"
-      just run --image-cache="incus-compose-tests-cache" -P cmd/ic-sleep build --os-env
-    fi
-
-    line='export INCUS_COMPOSE_INIT_IMAGE="{{ tag_base }}:'${VERSION}'"'
-    if grep -q '^export INCUS_COMPOSE_INIT_IMAGE=' .env; then
-      sed -i -e "s|^export INCUS_COMPOSE_INIT_IMAGE=.*|${line}|" .env
-    else
-      echo "${line}" >> .env
-    fi
-
-# Rebuild the ic-healthd image and put the shared daemon on it
-update-healthd *args="--trace": build-healthd-image
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    remote="${INCUS_REMOTE:-local}"
-
-    echo "Deleting the global ic-healthd on remote '${remote}'"
-    echo "yes" | incus project rm --force "incus-compose" || true
-
-    # New image
-    export INCUS_COMPOSE_HEALTHD_IMAGE=$(source .env; echo "$INCUS_COMPOSE_HEALTHD_IMAGE")
-    echo "Image ${INCUS_COMPOSE_HEALTHD_IMAGE}"
-
-    # The healthd-scope project is left behind as the handle for `healthd logs`.
-    just run healthd up {{ args }}
-
-# Build ic-healthd container image
-release-healthd-image tag="ghcr.io/lxc/incus-compose/ic-healthd:latest":
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    VERSION="`git describe --tags --always --long --dirty="-dirty"`-`openssl rand -hex 4`"
-
-    # New image
-    podman build --tag "{{ tag }}" --build-arg VERSION="${VERSION}" -f ./cmd/ic-healthd/Dockerfile .
-    echo "Image ${INCUS_COMPOSE_HEALTHD_IMAGE}"
-
-    echo "${GITHUB_TOKEN}" | podman login --username "${GITHUB_USERNAME}" --password-stdin ghcr.io
-    podman push "{{ tag }}"
-
-# Run with local healthd binary (for testing without an explicit OCI image) (ex. just run-healthd -f test/healthd/debug/compose.yaml up )
-run-healthd compose="examples/immich/compose.yaml" name="immich": build-healthd
-    go run ./cmd/incus-compose --debug -f {{ compose }} healthd up --recreate --binary bin/ic-healthd
-    go run ./cmd/incus-compose -f {{ compose }} incus exec {{ name }}-ic-healthd -- tail -n 1000 -f /var/log/ic-healthd.log

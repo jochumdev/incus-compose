@@ -32,6 +32,8 @@ const maxEnvelope = 63000
 // the query path is built not to, and one atomic.Pointer with one writer and
 // many readers is cheaper than a second reader of somebody else's.
 type xfr struct {
+	logger *slog.Logger
+
 	Next plugin.Handler
 
 	// allow is who may ask. Empty allows nobody, so a transfer is opt-in at the
@@ -43,8 +45,8 @@ type xfr struct {
 
 // newXFR returns a handler already holding an empty snapshot, so a transfer
 // arriving before the first publish is refused rather than answered from nil.
-func newXFR(allow []netip.Prefix) *xfr {
-	x := &xfr{allow: allow}
+func newXFR(logger *slog.Logger, allow []netip.Prefix) *xfr {
+	x := &xfr{logger: logger, allow: allow}
 	x.current.Store(ecs_view.EmptySnapshot())
 
 	return x
@@ -124,7 +126,7 @@ func (x *xfr) transfer(state request.Request) (int, error) {
 		serial = asked.Serial
 	}
 
-	slog.Debug("Transfer", "zone", zoneName, "qtype", state.QType(), "peer", peer,
+	x.logger.Debug("Transfer", "zone", zoneName, "qtype", state.QType(), "peer", peer,
 		"serial", serial, "have", apex.Serial)
 
 	// Already current. There is no journal here to cut a delta from, so an
