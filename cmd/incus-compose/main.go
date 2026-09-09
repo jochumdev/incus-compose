@@ -346,6 +346,8 @@ func newRootCommand() *cli.Command {
 			// reaches ic-healthd, which does have one.
 			logger := initLogger(cmd.Bool("debug") || cmd.Bool("trace"), noColor, logWriter)
 
+			logger.Debug("incus-compose", "version", version.Current())
+
 			// Commands that don't need an Incus client connection
 			noClientCommands := []string{"config", "version", "incus"}
 
