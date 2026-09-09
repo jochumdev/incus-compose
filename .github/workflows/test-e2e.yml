@@ -77,6 +77,7 @@ jobs:
 
       - name: Test
         run: |
+          echo "Using VERSION: ${VERSION}"
           mkdir -p "$REPORTS_DIR" "$INCUS_COMPOSE_TEST_COVERDIR"
 
           gotestsum \
@@ -85,7 +86,7 @@ jobs:
             --jsonfile="$REPORTS_DIR/test.json" \
             --post-run-command "bash -c 'echo; echo Slowest tests; gotestsum tool slowest --num=10 --jsonfile=$REPORTS_DIR/test.json'" \
             -- -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v} -X github.com/lxc/incus-compose/internal/testlib.version=v${VERSION#v}" \
-               -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+               -count=1 -parallel "$TEST_PROCS" -timeout 30m \
                -cover -covermode=atomic -coverpkg ./... -v \
                -args -test.gocoverdir="$INCUS_COMPOSE_TEST_COVERDIR" 2>&1
 
