@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
@@ -95,4 +96,51 @@ func TestE2ENoImageCache(t *testing.T) {
 
 	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--image-cache", "")
 	require.NoError(t, err)
+}
+
+// TestE2EUpRecreateDependents pins that `up --recreate` on a service brings back
+// services that depend on it (#192).
+func TestE2EUpRecreateDependents(t *testing.T) {
+	t.Parallel()
+	testlib.SkipE2E(t)
+
+	ctx := t.Context()
+	pn := t.Name()
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `services:
+  alpha:
+    image: docker.io/alpine:edge
+  beta:
+    image: docker.io/alpine:edge
+    depends_on:
+      - alpha
+`})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	uuid := func(name string) string {
+		inst, _, err := conn.GetInstance(ctx, c.IncusProject(), name, nil)
+		require.NoError(t, err)
+
+		return inst.Config["volatile.uuid"]
+	}
+
+	alphaUUID := uuid("alpha-1")
+	betaUUID := uuid("beta-1")
+	require.NotEmpty(t, alphaUUID)
+	require.NotEmpty(t, betaUUID)
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--recreate", "--no-healthd", "alpha")
+	require.NoError(t, err)
+
+	require.NotEqual(t, alphaUUID, uuid("alpha-1"), "alpha must be recreated")
+	require.NotEqual(t, betaUUID, uuid("beta-1"), "beta must be recreated")
 }
