@@ -614,7 +614,6 @@ func healthdTeardown(ctx context.Context, c *client.Client, global bool, timeout
 
 	runOpts := []client.Option{client.OptionForce(), client.OptionTimeout(timeout)}
 
-	var errs error
 	if err := stack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, runOpts...); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("stopping healthd resources: %w", err))
 	}
