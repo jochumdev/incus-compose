@@ -66,6 +66,7 @@ func TestSkipE2E(t *testing.T) {
 	})
 
 	t.Run("runs in the e2e stage", func(t *testing.T) {
+		t.Setenv(testlib.EnvLocal, "")
 		t.Setenv(testlib.EnvE2E, "1")
 		assert.True(t, ran(t, testlib.SkipE2E))
 	})
