@@ -698,19 +698,20 @@ func healthdTeardown(ctx context.Context, c *client.Client, global bool, timeout
 
 	runOpts := []client.Option{client.OptionForce(), client.OptionTimeout(timeout)}
 
+	var errs error
 	if err := stack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, runOpts...); err != nil {
-		return fmt.Errorf("stopping healthd resources: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("stopping healthd resources: %w", err))
 	}
 
 	if err := stack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, runOpts...); err != nil {
-		return fmt.Errorf("deleting healthd resources: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("deleting healthd resources: %w", err))
 	}
 
 	if err := healthdRevokeCert(ctx, c, global); err != nil {
-		return fmt.Errorf("revoking the healthd cert: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("revoking the healthd cert: %w", err))
 	}
 
-	return nil
+	return errs
 }
 
 // healthdResolve returns the daemon watching p and the client of the project it
