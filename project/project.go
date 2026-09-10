@@ -165,6 +165,7 @@ type Project struct {
 type XICProject struct {
 	Backup  client.BackupConfig `mapstructure:"backup"`
 	Healthd XICHealthd
+	DNS     XICDNS
 	XIncus  map[string]string
 
 	// SleepImage is the image `run` takes its blocking helper from. Empty means the
@@ -193,10 +194,25 @@ type XICHealthd struct {
 	XIncus map[string]string
 }
 
+// XICDNS is the x-incus-compose.dns block.
+type XICDNS struct {
+	Disabled    bool   `mapstructure:"disabled"`
+	Network     string `mapstructure:"network"`
+	IPv4Address string `mapstructure:"ipv4_address"`
+	IPv6Address string `mapstructure:"ipv6_address"`
+	NoMetrics   bool   `mapstructure:"no_metrics"`
+	Scope       string `mapstructure:"scope"`
+	Zone        string `mapstructure:"zone"`
+}
+
+// DefaultDNSZone is the default DNS zone used when none is specified.
+const DefaultDNSZone = "incus"
+
 // New creates a new Project.
 func New() *Project {
 	return &Project{ClientConfig: XICProject{
 		Healthd: XICHealthd{XIncus: map[string]string{}},
+		DNS:     XICDNS{},
 		XIncus:  map[string]string{},
 	}}
 }
@@ -239,6 +255,16 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 				RestartWorkers int            `mapstructure:"restart-workers"`
 				XIncus         map[string]any `mapstructure:"x-incus"`
 			} `mapstructure:"healthd"`
+
+			DNS struct {
+				Disabled    bool   `mapstructure:"disabled"`
+				Network     string `mapstructure:"network"`
+				IPv4Address string `mapstructure:"ipv4_address"`
+				IPv6Address string `mapstructure:"ipv6_address"`
+				NoMetrics   bool   `mapstructure:"no_metrics"`
+				Scope       string `mapstructure:"scope"`
+				Zone        string `mapstructure:"zone"`
+			} `mapstructure:"dns"`
 		}
 		ok, err := p.Extensions.Get("x-incus-compose", &ext)
 		if err != nil {
@@ -263,6 +289,17 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.NoAutoVolumes = ext.AutoVolumes != nil && !*ext.AutoVolumes
 			p.ClientConfig.SleepImage = ext.SleepImage
 
+			p.ClientConfig.DNS.Disabled = ext.DNS.Disabled
+			p.ClientConfig.DNS.Network = ext.DNS.Network
+			p.ClientConfig.DNS.IPv4Address = ext.DNS.IPv4Address
+			p.ClientConfig.DNS.IPv6Address = ext.DNS.IPv6Address
+			p.ClientConfig.DNS.NoMetrics = ext.DNS.NoMetrics
+			p.ClientConfig.DNS.Scope = ext.DNS.Scope
+			p.ClientConfig.DNS.Zone = ext.DNS.Zone
+			if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
+				p.ClientConfig.DNS.Zone = DefaultDNSZone
+			}
+
 			for k, v := range ext.Healthd.XIncus {
 				p.ClientConfig.Healthd.XIncus[k] = fmt.Sprint(v)
 			}
@@ -284,6 +321,10 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 	// Last, so x-incus cannot drop them.
 	p.InstanceMarks = options.InstanceMarks
 	maps.Copy(p.ClientConfig.XIncus, options.ProjectMarks)
+
+	if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
+		p.ClientConfig.DNS.Zone = DefaultDNSZone
+	}
 
 	return p, nil
 }

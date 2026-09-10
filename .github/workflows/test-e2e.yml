@@ -77,6 +77,10 @@ jobs:
           just run --trace healthd up
           just run healthd status
 
+          just run dns down --force || true
+          just run --trace dns up
+          just run dns status
+
       - name: Test
         run: |
           echo "Using VERSION: ${VERSION}"
@@ -179,6 +183,10 @@ jobs:
           just run healthd down --force || true
           just run --trace healthd up
           just run healthd status
+
+          just run dns down --force || true
+          just run --trace dns up
+          just run dns status
 
       - name: Test
         run: |

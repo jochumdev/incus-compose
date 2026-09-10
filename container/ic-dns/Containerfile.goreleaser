@@ -5,6 +5,11 @@ ARG VERSION
 
 COPY ${TARGETPLATFORM}/ic-dns /usr/local/sbin/ic-dns
 
+EXPOSE 53 53/udp 9153
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --quiet --spider http://127.0.0.1:9153/ready || exit 1
+
 # Everything else comes from the environment: DNS_INCUS, DNS_TOKEN,
 # DNS_FORWARD and the rest, which is what a compose file sets. There is no
 # configuration file to mount.

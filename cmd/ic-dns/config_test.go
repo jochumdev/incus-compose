@@ -34,7 +34,7 @@ func TestConfigDefaults(t *testing.T) {
 	cfg := parse(t)
 
 	assert.Equal(t, ":53", cfg.DNSAddr)
-	assert.Equal(t, ":8080", cfg.HTTPAddr)
+	assert.Equal(t, ":9153", cfg.HTTPAddr)
 	assert.Equal(t, "/var/lib/dns-incus", cfg.DataDir)
 	assert.Equal(t, "/run/secrets", cfg.SecretsDir)
 	assert.Equal(t, 250*time.Millisecond, cfg.DebounceWindow)

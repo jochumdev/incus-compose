@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"os"
 	"os/signal"
 	"slices"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/project"
+	"github.com/lxc/incus-compose/shared"
 )
 
 func newUpCommand() *cli.Command {
@@ -102,7 +104,7 @@ func newUpCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "sleep-image",
 				Usage:   "Image the `run` helper comes from",
-				Value:   DefaultInitImage,
+				Value:   DefaultSleepImage,
 				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
 			},
 			&cli.StringFlag{
@@ -124,6 +126,17 @@ func newUpCommand() *cli.Command {
 				Name:    "healthd-scope",
 				Usage:   "Which healthd watches this project: `global` (shared, in its own project) or `project` (a sidecar of its own); loses to a scope the project already carries",
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_SCOPE"),
+			},
+			&cli.StringFlag{
+				Name:    "dns-image",
+				Usage:   "ic-dns image",
+				Value:   DefaultDNSImage,
+				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_IMAGE"),
+			},
+			&cli.BoolFlag{
+				Name:    "disable-dns",
+				Usage:   "Don't start or configure DNS for the project",
+				Sources: cli.EnvVars("INCUS_COMPOSE_DISABLE_DNS"),
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -236,8 +249,9 @@ func newUpCommand() *cli.Command {
 				Services:        cmd.Args().Slice(),
 				WithDeps:        !cmd.Bool("no-deps"),
 				IgnoreBuildable: true,
-				NoHealthd:       true,
-				SleepImage:      cmd.String("sleep"),
+				HealthdImage:    cmd.String("healthd-image"),
+				SleepImage:      cmd.String("sleep-image"),
+				DNSImage:        cmd.String("dns-image"),
 				Pull:            pullMode,
 				Scale:           scale,
 				Workers:         cmd.Root().Int("workers"),
@@ -300,6 +314,53 @@ func newUpCommand() *cli.Command {
 				if err != nil {
 					return err
 				}
+			}
+
+			var dnsConfigs map[string]string
+			usesDNS := !p.ClientConfig.DNS.Disabled && !cmd.Bool("disable-dns")
+			if usesDNS {
+				err = dnsUp(ctx, p, c, dnsUpArgs{
+					Image:   cmd.String("dns-image"),
+					Pull:    cmd.String("pull"),
+					Timeout: cmd.Duration("timeout"),
+					Workers: cmd.Root().Int("workers"),
+					Debug:   cmd.Root().Bool("debug"),
+					Writer:  cmd.Root().Writer,
+				})
+				if err != nil {
+					return err
+				}
+
+				dnsIP, err := resolveDNSIP(ctx, c, cmd.Duration("timeout"))
+				if err != nil {
+					c.LogError("Getting dns daemon IP", "error", err)
+					return errLogged.Wrap(err)
+				}
+
+				zone := p.ClientConfig.DNS.Zone
+				if zone == "" {
+					pConfig, pErr := c.Global().ProjectConfig(p.Name)
+					if pErr == nil && pConfig[shared.DNSZoneKey] != "" {
+						zone = pConfig[shared.DNSZoneKey]
+					} else {
+						zone = project.DefaultDNSZone
+					}
+				}
+				err = c.Global().UpdateProjectConfig(p.Name, map[string]string{shared.DNSZoneKey: zone})
+				if err != nil {
+					c.LogError("Updating project dns zone", "error", err)
+					return errLogged.Wrap(err)
+				}
+
+				dnsConfigs = map[string]string{
+					"oci.dns.nameservers": dnsIP,
+					"oci.dns.search":      strings.TrimSuffix(zone, "."),
+				}
+
+				if p.InstanceMarks == nil {
+					p.InstanceMarks = map[string]string{}
+				}
+				maps.Copy(p.InstanceMarks, dnsConfigs)
 			}
 
 			var progress *progressRenderer
@@ -386,6 +447,21 @@ func newUpCommand() *cli.Command {
 					if err != nil {
 						c.LogError("Ensuring the recreated instances", "error", err)
 						return errLogged.Wrap(err)
+					}
+				}
+			}
+
+			if len(dnsConfigs) > 0 {
+				for _, res := range myResources {
+					for _, r := range res {
+						inst, ok := r.(*client.Instance)
+						if ok && inst.IsEnsured() {
+							err = inst.AddConfigs(ctx, dnsConfigs)
+							if err != nil {
+								c.LogError("Adding DNS configs to instance", "instance", inst.Name(), "error", err)
+								return errLogged.Wrap(err)
+							}
+						}
 					}
 				}
 			}

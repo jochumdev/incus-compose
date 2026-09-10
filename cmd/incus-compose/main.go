@@ -230,6 +230,7 @@ func newRootCommand() *cli.Command {
 		newLogsCommand(),
 		newIncusCommand(),
 		newHealthdCommand(),
+		newDNSCommand(),
 		newVersionCommand(),
 	}
 

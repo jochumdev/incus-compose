@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/project"
+	"github.com/lxc/incus-compose/shared"
 )
 
 // startArgs holds the start() options, mirroring the start command's flags.
@@ -73,6 +75,39 @@ func start(ctx context.Context, p *project.Project, c *client.Client, args start
 	); err != nil {
 		c.LogError("Getting resources", "error", err)
 		errs = errors.Join(errs, err)
+	}
+
+	if !p.ClientConfig.DNS.Disabled {
+		dnsIP, err := resolveDNSIP(ctx, c, args.Timeout)
+		if err == nil && dnsIP != "" {
+			zone := p.ClientConfig.DNS.Zone
+			if zone == "" {
+				pConfig, pErr := c.Global().ProjectConfig(p.Name)
+				if pErr == nil && pConfig[shared.DNSZoneKey] != "" {
+					zone = pConfig[shared.DNSZoneKey]
+				} else {
+					zone = project.DefaultDNSZone
+				}
+			}
+
+			dnsConfigs := map[string]string{
+				"oci.dns.nameservers": dnsIP,
+				"oci.dns.search":      strings.TrimSuffix(zone, "."),
+			}
+
+			for _, res := range myResources {
+				for _, r := range res {
+					inst, ok := r.(*client.Instance)
+					if ok && inst.IsEnsured() {
+						err = inst.AddConfigs(ctx, dnsConfigs)
+						if err != nil {
+							c.LogError("Adding DNS configs to instance", "instance", inst.Name(), "error", err)
+							errs = errors.Join(errs, err)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Without --with-deps the linked services are not in scope, so don't

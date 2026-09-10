@@ -643,6 +643,47 @@ func (c *GlobalClient) AddMissingProjectConfig(name string, config map[string]st
 	return nil
 }
 
+// UpdateProjectConfig updates or sets config keys on the project.
+func (c *GlobalClient) UpdateProjectConfig(name string, config map[string]string) error {
+	if len(config) == 0 {
+		return nil
+	}
+
+	incusName := SanitizeProjectName(name)
+
+	project, etag, err := c.incus.GetProject(c.ctx, incusName)
+	if err != nil {
+		return fmt.Errorf("reading project %s: %w", incusName, err)
+	}
+
+	writable := project.Writable()
+	if writable.Config == nil {
+		writable.Config = incusApi.ConfigMap{}
+	}
+
+	changed := []string{}
+	for key, value := range config {
+		if writable.Config[key] != value {
+			writable.Config[key] = value
+			changed = append(changed, key)
+		}
+	}
+
+	if len(changed) == 0 {
+		return nil
+	}
+
+	slices.Sort(changed)
+	c.logger.DebugContext(c.ctx, "Updating project config", "name", name, "incus_name", incusName, "keys", changed)
+
+	err = c.incus.UpdateProject(c.ctx, incusName, writable, etag)
+	if err != nil {
+		return fmt.Errorf("updating project %s: %w", incusName, err)
+	}
+
+	return nil
+}
+
 func (c *GlobalClient) createProject(name string, config map[string]string) (*Client, error) {
 	incusName := SanitizeProjectName(name)
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
@@ -13,23 +12,25 @@ import (
 	"github.com/lxc/incus-compose/project"
 )
 
+// DefaultDNSImage ic-dns image.
+const DefaultDNSImage = "ghcr.io/lxc/incus-compose/ic-dns:{version}"
+
 // pullArgs holds the pull() options, mirroring the pull command's flags.
 type pullArgs struct {
 	Services           []string
 	WithDeps           bool
 	IgnoreBuildable    bool
 	IgnorePullFailures bool
-	NoHealthd          bool
-	HealthdImage       string
 
-	// SleepImage is the tools image `run` needs. Prefetched here so an air-gapped
-	// site that can pull can also run a one-off later.
-	SleepImage string
-	Pull       client.PullMode
-	Scale      map[string]int
-	Workers    int
-	Debug      bool
-	Writer     io.Writer
+	HealthdImage string
+	SleepImage   string
+	DNSImage     string
+
+	Pull    client.PullMode
+	Scale   map[string]int
+	Workers int
+	Debug   bool
+	Writer  io.Writer
 }
 
 // pull fetches the images of the project's services.
@@ -81,30 +82,10 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 		}
 	}
 
-	if !args.NoHealthd && healthdInUseByProject(c.Global(), p) {
-		hparams := healthdParams{
-			binary:       "",
-			image:        resolveImageVersion(args.HealthdImage),
-			incus:        nil,
-			network:      "",
-			timeout:      time.Second,
-			stackWorkers: args.Workers,
-		}
-
-		_, hResources, err := healthdGetResources(c, hparams)
-		if err != nil {
-			c.LogError("Creating healthd resources", "error", err)
-			return errLogged.Wrap(err)
-		}
-
-		for _, r := range hResources {
-			if r.Kind() == client.KindImage {
-				stack.Add(r)
-			}
-		}
+	err = downloadTools(ctx, c, args.HealthdImage, args.SleepImage, args.DNSImage)
+	if err != nil {
+		c.LogWarn("While downloading tools", "error", err)
 	}
-
-	downloadTools(ctx, c, args.SleepImage)
 
 	// Only "always" acts on the answer, and "never" may not touch the source at all.
 	if args.Pull == client.PullAlways {
@@ -226,11 +207,6 @@ func newPullCommand() *cli.Command {
 				Value:   "always",
 				Sources: cli.EnvVars("INCUS_COMPOSE_PULL_POLICY"),
 			},
-			&cli.BoolFlag{
-				Name:    "no-healthd",
-				Usage:   "Don't pull the healthd sidecar",
-				Sources: cli.EnvVars("INCUS_COMPOSE_NO_HEALTHD"),
-			},
 			&cli.StringFlag{
 				Name:    "healthd-image",
 				Usage:   `Healthd OCI image to use; {version} is replaced with the incus-compose version`,
@@ -240,8 +216,14 @@ func newPullCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "sleep-image",
 				Usage:   "Image the `run` helper comes from",
-				Value:   DefaultInitImage,
+				Value:   DefaultSleepImage,
 				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
+			},
+			&cli.StringFlag{
+				Name:    "dns-image",
+				Usage:   "ic-dns image",
+				Value:   DefaultDNSImage,
+				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_IMAGE"),
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -277,9 +259,9 @@ func newPullCommand() *cli.Command {
 				WithDeps:           cmd.Bool("include-deps"),
 				IgnoreBuildable:    cmd.Bool("ignore-buildable"),
 				IgnorePullFailures: cmd.Bool("ignore-pull-failures"),
-				NoHealthd:          cmd.Bool("no-healthd"),
 				HealthdImage:       cmd.String("healthd-image"),
 				SleepImage:         cmd.String("sleep-image"),
+				DNSImage:           cmd.String("dns-image"),
 				Pull:               pullMode,
 				Workers:            cmd.Root().Int("workers"),
 				Debug:              cmd.Root().Bool("debug"),

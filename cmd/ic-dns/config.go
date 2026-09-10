@@ -11,7 +11,7 @@ import (
 // these are the ones a deployment sees.
 const (
 	defaultDNSAddr  = ":53"
-	defaultHTTPAddr = ":8080"
+	defaultHTTPAddr = ":9153"
 
 	// defaultDataDir holds the enrolled certificate and what was last served.
 	defaultDataDir    = "/var/lib/dns-incus"

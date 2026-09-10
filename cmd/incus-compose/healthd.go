@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -496,26 +495,17 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 	return inst, []client.Resource{img, volume}, nil
 }
 
-// healthdNetworkRef describes the network ic-healthd attaches to, decoded from
-// params.network (the --healthd-network flag / x-incus-compose.healthd.network).
-type healthdNetworkRef struct {
-	project   string // Incus project of a managed network; empty for a bridge or the default
-	name      string // network or bridge name
-	deflt     bool   // the project's own default network, created if missing
-	incusName string // pins the bridge name instead of deriving it from the project
-}
-
 // parseHealthdNetwork decodes the healthd network selector. An empty value means
 // the project's default network, or the shared daemon's own bridge. A
 // "<project>:<network>" value references a managed network that must already
 // exist; anything else is a host bridge name.
-func parseHealthdNetwork(c *client.Client, network string, global bool) (healthdNetworkRef, error) {
+func parseHealthdNetwork(c *client.Client, network string, global bool) (sidecarNetworkRef, error) {
 	if network == "" {
 		if global {
-			return healthdNetworkRef{name: globalHealthdNetwork, deflt: true, incusName: globalHealthdNetwork}, nil
+			return sidecarNetworkRef{name: globalHealthdNetwork, deflt: true, incusName: globalHealthdNetwork}, nil
 		}
 
-		return healthdNetworkRef{name: "default", deflt: true}, nil
+		return sidecarNetworkRef{name: "default", deflt: true}, nil
 	}
 
 	if strings.Contains(network, ":") {
@@ -525,13 +515,13 @@ func parseHealthdNetwork(c *client.Client, network string, global bool) (healthd
 			p = c.Project()
 		}
 		if n == "" || strings.Contains(n, ":") {
-			return healthdNetworkRef{}, errors.New("`--healthd-network` is wrong, need something like `<project>:<network>` or `<bridge>`")
+			return sidecarNetworkRef{}, errors.New("`--healthd-network` is wrong, need something like `<project>:<network>` or `<bridge>`")
 		}
 
-		return healthdNetworkRef{project: p, name: n}, nil
+		return sidecarNetworkRef{project: p, name: n}, nil
 	}
 
-	return healthdNetworkRef{name: network}, nil
+	return sidecarNetworkRef{name: network}, nil
 }
 
 // healthdConfigDrift names the settings params asks for that the running daemon
@@ -580,103 +570,13 @@ func healthdEnsureNetwork(ctx context.Context, c *client.Client, params healthdP
 		return nil, err
 	}
 
-	var netRes client.Resource
-	switch {
-	case ref.deflt:
-		// The project's own default network. healthd may bring it up before the
-		// rest of the project, so allow creation.
-		netRes, err = c.Resource(client.KindNetwork, ref.name, &client.NetworkConfig{OverrideName: ref.incusName})
-	case ref.project != "" && ref.project != c.Project():
-		// A managed network in another project; must pre-exist (External).
-		var nc *client.Client
-		nc, err = c.Global().EnsureProject(ref.project)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch the healthd network: %w", err)
-		}
-
-		netRes, err = nc.Resource(client.KindNetwork, ref.name, &client.NetworkConfig{External: true})
-	default:
-		// A referenced network in this project or a host bridge; must pre-exist.
-		netRes, err = c.Resource(client.KindNetwork, ref.name, &client.NetworkConfig{External: true})
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get a healthd network: %w", err)
-	}
-
-	err = client.RunAction(ctx, netRes, client.ActionEnsure, client.OptionCreate())
-	if err != nil {
-		return nil, fmt.Errorf("failed to ensure a network for healthd: %w", err)
-	}
-
-	network, ok := netRes.(*client.Network)
-	if !ok {
-		return nil, client.ErrUnknown.WithResource(netRes).WithText("failed to cast")
-	}
-
-	if !network.IsEnsured() {
-		return nil, client.ErrNotEnsured.WithResource(network)
-	}
-
-	return network, nil
+	return sidecarEnsureNetwork(ctx, c, ref, "healthd")
 }
 
 // healthdIncusURL is the endpoint the sidecar dials: --healthd-incus, then
 // core.https_address once it names a host, then the bridge gateway.
 func healthdIncusURL(c *client.Client, params healthdParams, network *client.Network) (*url.URL, error) {
-	u := params.incus
-
-	if u == nil {
-		addr, err := c.Global().HTTPSAddress()
-		if err == nil {
-			host, port, splitErr := net.SplitHostPort(addr)
-
-			// An unspecified address means every interface, so it names no host
-			// to dial; the bridge gateway below is the reachable form of it.
-			if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
-				host = ""
-			}
-
-			if splitErr == nil && host != "" && port != "" {
-				parsed, parseErr := url.Parse(fmt.Sprintf("https://%s:%s", host, port))
-				if parseErr == nil {
-					u = parsed
-				}
-			}
-		}
-	}
-
-	if u == nil {
-		if !c.IsRemote() {
-			return nil, errors.New("healthd works only with a https connection, provide one with INCUS_COMPOSE_HEALTHD_INCUS")
-		}
-
-		var err error
-
-		u, err = c.Global().URL()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get the url: %w", err)
-		}
-
-		cidr := network.State().IncusNetwork.Config["ipv4.address"]
-		if cidr == "" {
-			return nil, fmt.Errorf("ip of network %q is empty", network.Name())
-		}
-
-		ip, _, err := net.ParseCIDR(cidr)
-		if err != nil {
-			return nil, fmt.Errorf("parsing the address of network %q: %w", network.Name(), err)
-		}
-
-		u.Host = net.JoinHostPort(ip.String(), u.Port())
-	}
-
-	if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
-		return nil, fmt.Errorf(
-			"the Incus endpoint %q is a loopback address the ic-healthd container cannot reach; "+
-				"bind core.https_address to a reachable address, or set --healthd-incus", u.Host)
-	}
-
-	return u, nil
+	return sidecarIncusURL(c, params.incus, network, "ic-healthd", "INCUS_COMPOSE_HEALTHD_INCUS")
 }
 
 // healthdTeardown removes a healthd sidecar, its volume and its certificate
@@ -702,25 +602,26 @@ func healthdTeardown(ctx context.Context, c *client.Client, global bool, timeout
 
 	c.LogDebug("Ensure", "resources", stack.All())
 
+	var errs error
 	if err := stack.ForAction(client.ActionEnsure).Run(ctx, client.ActionEnsure); err != nil {
-		return fmt.Errorf("ensuring healthd: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("ensuring healthd: %w", err))
 	}
 
 	runOpts := []client.Option{client.OptionForce(), client.OptionTimeout(timeout)}
 
 	if err := stack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, runOpts...); err != nil {
-		return fmt.Errorf("stopping healthd resources: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("stopping healthd resources: %w", err))
 	}
 
 	if err := stack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, runOpts...); err != nil {
-		return fmt.Errorf("deleting healthd resources: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("deleting healthd resources: %w", err))
 	}
 
 	if err := healthdRevokeCert(ctx, c, global); err != nil {
-		return fmt.Errorf("revoking the healthd cert: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("revoking the healthd cert: %w", err))
 	}
 
-	return nil
+	return errs
 }
 
 // healthdResolve returns the daemon watching p and the client of the project it

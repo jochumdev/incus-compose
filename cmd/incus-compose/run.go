@@ -27,8 +27,8 @@ import (
 	"github.com/lxc/incus-compose/shared"
 )
 
-// DefaultInitImage ships the blocking helper a one-off runs as its entrypoint.
-const DefaultInitImage = "ghcr.io/lxc/incus-compose/ic-sleep:{version}"
+// DefaultSleepImage ships the blocking helper a one-off runs as its entrypoint.
+const DefaultSleepImage = "ghcr.io/lxc/incus-compose/ic-sleep:{version}"
 
 // runArgs holds the run() options, mirroring the run command's flags.
 type runArgs struct {
@@ -93,7 +93,9 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		Services:        []string{args.Service},
 		WithDeps:        !args.NoDeps,
 		IgnoreBuildable: true,
-		NoHealthd:       true,
+		HealthdImage:    DefaultHealthdImage,
+		SleepImage:      DefaultSleepImage,
+		DNSImage:        DefaultDNSImage,
 		Pull:            args.Pull,
 		Workers:         args.Workers,
 		Debug:           args.Debug,
@@ -553,7 +555,7 @@ func newRunCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "sleep-image",
 				Usage:   "Image the blocking helper comes from",
-				Value:   DefaultInitImage,
+				Value:   DefaultSleepImage,
 				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
 			},
 			&cli.DurationFlag{
