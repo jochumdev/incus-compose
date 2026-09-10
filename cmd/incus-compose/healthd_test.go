@@ -19,19 +19,19 @@ func TestParseHealthdNetwork(t *testing.T) {
 		name    string
 		network string
 		global  bool
-		want    healthdNetworkRef
+		want    sidecarNetworkRef
 		wantErr bool
 	}{
 		{
 			name:    "empty is the project default network",
 			network: "",
-			want:    healthdNetworkRef{name: "default", deflt: true},
+			want:    sidecarNetworkRef{name: "default", deflt: true},
 		},
 		{
 			name:    "empty is the shared daemon's own bridge",
 			network: "",
 			global:  true,
-			want: healthdNetworkRef{
+			want: sidecarNetworkRef{
 				name:      globalHealthdNetwork,
 				deflt:     true,
 				incusName: globalHealthdNetwork,
@@ -41,22 +41,22 @@ func TestParseHealthdNetwork(t *testing.T) {
 			name:    "an explicit bridge wins for the shared daemon too",
 			network: "incusbr0",
 			global:  true,
-			want:    healthdNetworkRef{name: "incusbr0"},
+			want:    sidecarNetworkRef{name: "incusbr0"},
 		},
 		{
 			name:    "project:network references a managed network",
 			network: "default:default",
-			want:    healthdNetworkRef{project: "default", name: "default"},
+			want:    sidecarNetworkRef{project: "default", name: "default"},
 		},
 		{
 			name:    "project:network with distinct names",
 			network: "infra:backend",
-			want:    healthdNetworkRef{project: "infra", name: "backend"},
+			want:    sidecarNetworkRef{project: "infra", name: "backend"},
 		},
 		{
 			name:    "no colon is a bridge name",
 			network: "incusbr0",
-			want:    healthdNetworkRef{name: "incusbr0"},
+			want:    sidecarNetworkRef{name: "incusbr0"},
 		},
 		{
 			name:    "missing network errors",

@@ -61,6 +61,29 @@ func TestProjectZoneOverridesTheGeneratedOne(t *testing.T) {
 	assert.True(t, db)
 }
 
+func TestProjectUserLabelZoneOverridesTheGeneratedOne(t *testing.T) {
+	t.Parallel()
+
+	own := map[string]string{"user.label.dns.zone": "custom.zone.lan"}
+
+	held := map[string]*instance{
+		"shop/web": patchInstance(labeled("shop", "web", nil, own), "incus"),
+	}
+
+	s := newState(nil)
+	for key, inst := range held {
+		s.apply(key, inst, 5)
+	}
+
+	snap := s.snapshot()
+	named := snap.ZoneOf("web.custom.zone.lan.")
+	require.NotNil(t, named)
+	assert.Equal(t, "custom.zone.lan.", named.Name)
+
+	_, web := snap.Answers("web.custom.zone.lan.")
+	assert.True(t, web)
+}
+
 // TestPatchInstanceNSResolvesAgainstTheZone pins where the zone's NS set comes
 // from: the project's own label, resolved the way an alias is - a trailing dot
 // absolute, anything else relative to the zone.

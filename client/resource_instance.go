@@ -1818,6 +1818,46 @@ func (r *Instance) addMissingConfig(ctx context.Context) error {
 	return r.patchConfig(ctx, missing)
 }
 
+// AddConfigs adds config keys to the instance. If a key is already set,
+// it logs a warning and skips that key.
+func (r *Instance) AddConfigs(ctx context.Context, config map[string]string) error {
+	if len(config) == 0 {
+		return nil
+	}
+
+	toPatch := map[string]string{}
+	var existingConfig map[string]string
+	if info := r.State().IncusInstance; info != nil {
+		existingConfig = info.Config
+	} else if r.Config.Extensions != nil {
+		existingConfig = r.Config.Extensions
+	}
+
+	for key, value := range config {
+		if existingConfig != nil {
+			if existingVal, ok := existingConfig[key]; ok && existingVal != "" {
+				if existingVal != value {
+					r.client.LogWarn("Config key already set, skipping", "instance", r.IncusName(), "key", key, "existing", existingVal, "skipped", value)
+				}
+				continue
+			}
+		}
+
+		toPatch[key] = value
+	}
+
+	if len(toPatch) == 0 {
+		return nil
+	}
+
+	if r.Config.Extensions == nil {
+		r.Config.Extensions = make(map[string]string)
+	}
+	maps.Copy(r.Config.Extensions, toPatch)
+
+	return r.patchConfig(ctx, toPatch)
+}
+
 // MarkDelete marks a instance to be deleted after Ensure(),
 // this is for down scaling instances.
 func (r *Instance) MarkDelete() {

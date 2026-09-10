@@ -7,6 +7,7 @@ package ecsviewbench
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"testing"
@@ -16,7 +17,7 @@ import (
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
 	"github.com/miekg/dns"
 
-	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
+	"github.com/lxc/incus-compose/cmd/ic-dns/dns/ecs_view"
 )
 
 // benchTTL is what the snapshot is rendered with. Any value does, as long as the
@@ -165,7 +166,7 @@ func BenchmarkServeDNS(b *testing.B) {
 	} {
 		b.Run(mode.name, func(b *testing.B) {
 			for _, c := range cases {
-				v := ecs_view.New()
+				v := ecs_view.New(slog.Default())
 				v.EchoSubnet = mode.echo
 				v.Metrics = mode.metrics
 

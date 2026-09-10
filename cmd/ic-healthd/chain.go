@@ -4,10 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
-	"github.com/lxc/incus-compose/ievent/checker"
+	"github.com/lxc/incus-compose/cmd/ic-healthd/checker"
 	"github.com/lxc/incus-compose/ievent/debounce"
 	"github.com/lxc/incus-compose/ievent/enricher"
 	"github.com/lxc/incus-compose/ievent/http"
@@ -91,7 +92,8 @@ func serves(logger *slog.Logger, cfg *config) func(*incusapi.Project) bool {
 	}
 
 	return func(p *incusapi.Project) bool {
-		serve := p.Config[cfg.ProjectMarker] == cfg.ProjectMarkerValue
+		val := p.Config[cfg.ProjectMarker]
+		serve := val == cfg.ProjectMarkerValue || slices.Contains(strings.Split(cfg.ProjectMarkerValue, ","), val)
 		if !serve {
 			logger.Debug("Not watching project", "project", p.Name)
 		} else {
@@ -120,6 +122,6 @@ func serveable(cfg *config) func(*iutil.Event) bool {
 		}
 
 		value, ok := ev.Project().ConfigValue(cfg.ProjectMarker)
-		return ok && value == cfg.ProjectMarkerValue
+		return ok && (value == cfg.ProjectMarkerValue || slices.Contains(strings.Split(cfg.ProjectMarkerValue, ","), value))
 	}
 }

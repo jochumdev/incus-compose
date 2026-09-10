@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -231,40 +233,49 @@ func copyTools(ctx context.Context, c *client.Client, sys *client.Client, master
 	return vol, nil
 }
 
-// downloadTools fetches the tools image into the system project, where `run`
-// looks for it. It is the only part of a one-off that ever needs the network,
-// so fetching it from `pull` is what lets `run` work on a disconnected machine
-// later.
-//
-// A failure only warns: most projects never run a one-off, and `up` reaches
-// here too, so an unreachable tools image must not take the whole command
-// down. `run` says so loudly enough when it is the one that needs it.
-func downloadTools(ctx context.Context, c *client.Client, init string) {
-	if init == "" {
-		return
+func downloadTools(ctx context.Context, c *client.Client, healthdImage string, sleepImage string, dnsImage string) error {
+	var errs error
+	if healthdImage == "" {
+		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_HEALTHD_IMAGE is empty"))
+	}
+	healthdImage = resolveImageVersion(healthdImage)
+
+	if sleepImage == "" {
+		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_SLEEP_IMAGE is empty"))
+	}
+	sleepImage = resolveImageVersion(sleepImage)
+
+	if dnsImage == "" {
+		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_DNS_IMAGE is empty"))
+	}
+	dnsImage = resolveImageVersion(dnsImage)
+
+	if errs != nil {
+		return errs
 	}
 
-	image := resolveImageVersion(init)
+	for _, image := range []string{healthdImage, sleepImage, dnsImage} {
+		sysClient, err := c.Global().EnsureProject(systemProject, client.EnsureProjectWithCreate())
+		if err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to ensure the %q project: %w", systemProject, err))
+			continue
+		}
 
-	sys, err := c.Global().EnsureProject(systemProject, client.EnsureProjectWithCreate())
-	if err != nil {
-		c.LogWarn("Not fetching the tools image", "project", systemProject, "error", err)
+		res, err := sysClient.Resource(client.KindImage, image, &client.ImageConfig{})
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
 
-		return
+		// No pull mode: the reference is version-pinned, so refreshing it can only
+		// delete what is there and fetch the same bytes again - or fail, on a
+		// registry that never had this tag.
+		err = client.RunAction(ctx, res, client.ActionEnsure, client.OptionCreate())
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
 	}
 
-	res, err := sys.Resource(client.KindImage, image, &client.ImageConfig{})
-	if err != nil {
-		c.LogWarn("Not fetching the tools image", "image", image, "error", err)
-
-		return
-	}
-
-	// No pull mode: the reference is version-pinned, so refreshing it can only
-	// delete what is there and fetch the same bytes again - or fail, on a
-	// registry that never had this tag.
-	err = client.RunAction(ctx, res, client.ActionEnsure, client.OptionCreate())
-	if err != nil {
-		c.LogWarn("Failed to fetch the tools image, `run` will need it", "image", image, "error", err)
-	}
+	return errs
 }

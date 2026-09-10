@@ -26,7 +26,7 @@ func TestWellKnownRegistryQuayIO(t *testing.T) {
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "hello")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "hello")
 	require.NoError(t, err)
 }
 
@@ -47,6 +47,6 @@ func TestWellKnownRegistryMCR(t *testing.T) {
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "hello")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "hello")
 	require.NoError(t, err)
 }

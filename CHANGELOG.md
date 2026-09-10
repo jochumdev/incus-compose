@@ -28,9 +28,10 @@ form.
   processing daemon event streams through ordered, composable plugins (`source`,
   `debounce`, `enricher`, `checker`, `dns`, `http`, `log`). (by @jochumdev)
 - ic-healthd serves `/metrics`, `/health` and `/ready` on `:9153`; an empty
-  `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by @jochumdev)
-- `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus metrics
-  in ic-healthd (defaults to true). (by @jochumdev)
+  `--http-address` / `INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS` disables it. (by
+  @jochumdev)
+- `--metrics` / `INCUS_COMPOSE_HEALTHD_METRICS` flag to record Prometheus
+  metrics in ic-healthd (defaults to true). (by @jochumdev)
 - Running ic-healthd by hand can now present an already-trusted certificate
   (`--client-cert` with `--client-key`) or connect as a remote from the Incus
   CLI configuration (`--remote` with `--use-remote`). (by @jochumdev)
@@ -125,8 +126,8 @@ form.
   them without `--rm`, and ic-healthd never restarts one. The command runs
   through an exec into a blocking helper, so it is not PID 1; `pull` and `up`
   prefetch that helper, which is the only step needing the network, so an
-  air-gapped site can `run` later. `--init` / `INCUS_COMPOSE_INIT_IMAGE` /
-  `x-incus-compose.init` point it at a mirror. A cluster mixing CPU
+  air-gapped site can `run` later. `--sleep-image` / `INCUS_COMPOSE_SLEEP_IMAGE`
+  / `x-incus-compose.init` point it at a mirror. A cluster mixing CPU
   architectures is not supported. (by @jochumdev)
 
 - `pause`, `unpause`, `kill`, `cp`, `top`, `events` and `port`, matching their

@@ -68,10 +68,6 @@ func TestE2EPull(t *testing.T) {
 			name: "pull policy missing",
 			args: []string{"-f", compose, "pull", "--policy", "missing"},
 		},
-		{
-			name: "pull no-healthd",
-			args: []string{"-f", compose, "pull", "--no-healthd"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -99,7 +95,7 @@ func TestE2EPullWithDeps(t *testing.T) {
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
 	// Pulling just "api" copies its own image, not its dependencies.
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "api")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "api")
 	require.NoError(t, err)
 
 	aliases := pulledImageAliases(ctx, t, pn, compose)
@@ -108,7 +104,7 @@ func TestE2EPullWithDeps(t *testing.T) {
 	require.False(t, hasImage(aliases, "redis"), "did not expect dep images, got %v", aliases)
 
 	// --with-deps follows depends_on and also pulls postgres and redis.
-	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--no-healthd", "--with-deps", "api")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "pull", "--with-deps", "api")
 	require.NoError(t, err)
 
 	aliases = pulledImageAliases(ctx, t, pn, compose)

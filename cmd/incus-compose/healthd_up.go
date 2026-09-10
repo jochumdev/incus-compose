@@ -47,11 +47,7 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 		return errLogged.Wrap(err)
 	}
 
-	scope, err := resolveHealthdScope(projectConfig, args.Scope, p.ClientConfig.Healthd.Scope)
-	if err != nil {
-		c.LogError("Resolving the healthd scope", "error", err)
-		return errLogged.Wrap(err)
-	}
+	scope := resolveHealthdScope(projectConfig, args.Scope, p.ClientConfig.Healthd.Scope)
 
 	healthdIncus := p.ClientConfig.Healthd.Incus
 	healthdNetwork := p.ClientConfig.Healthd.Network
@@ -73,6 +69,7 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 
 	params := healthdParams{
 		global:         scope == shared.HealthScopeGlobal,
+		scope:          scope,
 		trace:          args.Trace,
 		binary:         args.Binary,
 		image:          resolveImageVersion(args.Image),
@@ -185,6 +182,7 @@ func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdU
 
 	params := healthdParams{
 		global:       true,
+		scope:        shared.HealthScopeGlobal,
 		trace:        args.Trace,
 		binary:       args.Binary,
 		image:        resolveImageVersion(args.Image),

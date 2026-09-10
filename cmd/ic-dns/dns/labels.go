@@ -81,6 +81,7 @@ func merged(ev *iutil.Event) map[string]string {
 	}
 
 	for key, value := range ev.Project().Config() {
+		key = strings.TrimPrefix(key, userLabelPrefix)
 		if kinds[key] == labelInstance {
 			continue
 		}

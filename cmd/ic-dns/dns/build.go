@@ -8,7 +8,7 @@ import (
 	incusutil "github.com/lxc/incus/v7/shared/util"
 	"github.com/miekg/dns"
 
-	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
+	"github.com/lxc/incus-compose/cmd/ic-dns/dns/ecs_view"
 	"github.com/lxc/incus-compose/ievent/iutil"
 )
 

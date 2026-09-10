@@ -245,6 +245,48 @@ func TestInstanceConfigPatchOnlyTouchesNamedKeys(t *testing.T) {
 	require.Equal(t, before.Architecture, got.Architecture, "PATCH must not wipe the architecture")
 }
 
+func TestInstanceAddConfigs(t *testing.T) {
+	t.Parallel()
+	skipLocal(t)
+	ctx := t.Context()
+	c := newRandomTestClient(t, "add-configs-")
+
+	imageResource, err := c.Resource(KindImage, "docker.io/nginx:alpine", &ImageConfig{})
+	require.NoError(t, err)
+	image, ok := imageResource.(*Image)
+	require.True(t, ok)
+
+	instRes, err := c.Resource(KindInstance, "web", &InstanceConfig{
+		Image: image.Name(),
+		Extensions: map[string]string{
+			"user.existing": "original-val",
+		},
+	})
+	require.NoError(t, err)
+	inst, ok := instRes.(*Instance)
+	require.True(t, ok)
+
+	stack := NewStack(c)
+	stack.Add(image, inst)
+	require.NoError(t, stack.ForAction(ActionEnsure).Run(ctx, ActionEnsure, OptionCreate()))
+	require.True(t, inst.IsEnsured())
+
+	err = inst.AddConfigs(ctx, map[string]string{
+		"user.existing": "new-val",
+		"user.fresh":    "added-val",
+	})
+	require.NoError(t, err)
+
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	got, _, err := conn.GetInstance(ctx, c.incusProject, inst.IncusName(), nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "original-val", got.Config["user.existing"], "existing config key must be skipped")
+	assert.Equal(t, "added-val", got.Config["user.fresh"], "new config key must be added")
+}
+
 // TestCloneInstancesFollowLifecycleEvents pins that instances on a cloned client
 // are kept fresh by the project client's listener; nothing else wakes them.
 func TestCloneInstancesFollowLifecycleEvents(t *testing.T) {

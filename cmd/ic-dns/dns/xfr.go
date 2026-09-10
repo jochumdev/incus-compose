@@ -14,7 +14,7 @@ import (
 	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
 
-	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
+	"github.com/lxc/incus-compose/cmd/ic-dns/dns/ecs_view"
 )
 
 // xfrName is what this handler is called in the chain.

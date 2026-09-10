@@ -7,7 +7,7 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/lxc/incus-compose/ievent/dns/ecs_view"
+	"github.com/lxc/incus-compose/cmd/ic-dns/dns/ecs_view"
 )
 
 // apply moves one instance from what the trees hold to what has arrived, taking

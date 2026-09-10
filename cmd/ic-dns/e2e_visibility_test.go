@@ -47,9 +47,9 @@ var visibility = []struct {
 	},
 }
 
-// TestVisibility stands the fixture up once and runs the whole battery against
+// TestE2EVisibility stands the fixture up once and runs the whole battery against
 // it. Subtests are parallel; the stack's cleanup runs only after they finish.
-func TestVisibility(t *testing.T) {
+func TestE2EVisibility(t *testing.T) {
 	testlib.SkipE2E(t)
 
 	su := newE2ESuite(t)

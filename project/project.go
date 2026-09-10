@@ -25,7 +25,6 @@ import (
 	"github.com/dominikbraun/graph"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/shared"
 )
 
 // ErrNoComposeFile says there was no compose file to load, so a caller that can
@@ -165,11 +164,12 @@ type Project struct {
 type XICProject struct {
 	Backup  client.BackupConfig `mapstructure:"backup"`
 	Healthd XICHealthd
+	DNS     XICDNS
 	XIncus  map[string]string
 
-	// Init is the image `run` takes its blocking helper from. Empty means the
+	// SleepImage is the image `run` takes its blocking helper from. Empty means the
 	// one this build ships; `run --init` overrides both.
-	Init string
+	SleepImage string
 
 	// NoAutoVolumes is x-incus-compose.auto-volumes: false, which leaves the
 	// paths an image declares as volumes to Incus.
@@ -193,10 +193,25 @@ type XICHealthd struct {
 	XIncus map[string]string
 }
 
+// XICDNS is the x-incus-compose.dns block.
+type XICDNS struct {
+	Disabled    bool   `mapstructure:"disabled"`
+	Network     string `mapstructure:"network"`
+	IPv4Address string `mapstructure:"ipv4_address"`
+	IPv6Address string `mapstructure:"ipv6_address"`
+	NoMetrics   bool   `mapstructure:"no_metrics"`
+	Scope       string `mapstructure:"scope"`
+	Zone        string `mapstructure:"zone"`
+}
+
+// DefaultDNSZoneSuffix is the default TLD suffix used when no zone is specified.
+const DefaultDNSZoneSuffix = "incus"
+
 // New creates a new Project.
 func New() *Project {
 	return &Project{ClientConfig: XICProject{
 		Healthd: XICHealthd{XIncus: map[string]string{}},
+		DNS:     XICDNS{},
 		XIncus:  map[string]string{},
 	}}
 }
@@ -228,7 +243,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			// A pointer: absent means on, which a bool cannot say.
 			AutoVolumes *bool `mapstructure:"auto-volumes"`
 
-			Init string `mapstructure:"init"`
+			SleepImage string `mapstructure:"sleep-image"`
 
 			Healthd struct {
 				Incus          string         `mapstructure:"incus"`
@@ -239,20 +254,22 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 				RestartWorkers int            `mapstructure:"restart-workers"`
 				XIncus         map[string]any `mapstructure:"x-incus"`
 			} `mapstructure:"healthd"`
+
+			DNS struct {
+				Disabled    bool   `mapstructure:"disabled"`
+				Network     string `mapstructure:"network"`
+				IPv4Address string `mapstructure:"ipv4_address"`
+				IPv6Address string `mapstructure:"ipv6_address"`
+				NoMetrics   bool   `mapstructure:"no_metrics"`
+				Scope       string `mapstructure:"scope"`
+				Zone        string `mapstructure:"zone"`
+			} `mapstructure:"dns"`
 		}
 		ok, err := p.Extensions.Get("x-incus-compose", &ext)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
-			switch ext.Healthd.Scope {
-			case "", shared.HealthScopeProject, shared.HealthScopeGlobal:
-			default:
-				return nil, fmt.Errorf(
-					"x-incus-compose.healthd.scope: %q must be %q or %q",
-					ext.Healthd.Scope, shared.HealthScopeProject, shared.HealthScopeGlobal)
-			}
-
 			p.ClientConfig.Healthd.Incus = ext.Healthd.Incus
 			p.ClientConfig.Healthd.Network = ext.Healthd.Network
 			p.ClientConfig.Healthd.External = ext.Healthd.External
@@ -261,7 +278,18 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.Healthd.RestartWorkers = ext.Healthd.RestartWorkers
 			p.ClientConfig.Backup = ext.Backup
 			p.ClientConfig.NoAutoVolumes = ext.AutoVolumes != nil && !*ext.AutoVolumes
-			p.ClientConfig.Init = ext.Init
+			p.ClientConfig.SleepImage = ext.SleepImage
+
+			p.ClientConfig.DNS.Disabled = ext.DNS.Disabled
+			p.ClientConfig.DNS.Network = ext.DNS.Network
+			p.ClientConfig.DNS.IPv4Address = ext.DNS.IPv4Address
+			p.ClientConfig.DNS.IPv6Address = ext.DNS.IPv6Address
+			p.ClientConfig.DNS.NoMetrics = ext.DNS.NoMetrics
+			p.ClientConfig.DNS.Scope = ext.DNS.Scope
+			p.ClientConfig.DNS.Zone = ext.DNS.Zone
+			if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
+				p.ClientConfig.DNS.Zone = p.Name + "." + DefaultDNSZoneSuffix
+			}
 
 			for k, v := range ext.Healthd.XIncus {
 				p.ClientConfig.Healthd.XIncus[k] = fmt.Sprint(v)
@@ -284,6 +312,10 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 	// Last, so x-incus cannot drop them.
 	p.InstanceMarks = options.InstanceMarks
 	maps.Copy(p.ClientConfig.XIncus, options.ProjectMarks)
+
+	if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
+		p.ClientConfig.DNS.Zone = p.Name + "." + DefaultDNSZoneSuffix
+	}
 
 	return p, nil
 }

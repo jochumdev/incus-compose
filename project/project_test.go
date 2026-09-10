@@ -713,16 +713,16 @@ func TestHealthdConfigExtractsXIncusCompose(t *testing.T) {
 	}, config.XIncus)
 }
 
-func TestHealthdConfigRejectsABadScope(t *testing.T) {
+func TestHealthdConfigAcceptsCustomScope(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	compose := "x-incus-compose:\n  healthd:\n    scope: worldwide\nservices:\n  web:\n    image: docker.io/alpine:edge\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(compose), 0o600))
 
-	_, err := New().Load(t.Context(), LoadWorkingDir(dir))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "x-incus-compose.healthd.scope")
+	p, err := New().Load(t.Context(), LoadWorkingDir(dir))
+	require.NoError(t, err)
+	assert.Equal(t, "worldwide", p.ClientConfig.Healthd.Scope)
 }
 
 func TestHealthdConfigEmptyWithoutExtension(t *testing.T) {
@@ -752,4 +752,131 @@ func TestBackupConfigExtractsXIncusCompose(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "mypool", proj.ClientConfig.Backup.Pool)
+}
+
+func TestDNSConfigExtractsXIncusCompose(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		yaml     string
+		expected XICDNS
+	}{
+		{
+			name: "all fields set",
+			yaml: `
+x-incus-compose:
+  dns:
+    disabled: true
+    network: dns-net
+    ipv4_address: 10.0.0.53
+    ipv6_address: fd00::53
+    no_metrics: true
+    scope: global
+    zone: shop.example.org
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Disabled:    true,
+				Network:     "dns-net",
+				IPv4Address: "10.0.0.53",
+				IPv6Address: "fd00::53",
+				NoMetrics:   true,
+				Scope:       shared.DNSScopeGlobal,
+				Zone:        "shop.example.org",
+			},
+		},
+		{
+			name: "disabled without zone",
+			yaml: `
+x-incus-compose:
+  dns:
+    disabled: true
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Disabled: true,
+			},
+		},
+		{
+			name: "scope project",
+			yaml: `
+name: myproject
+x-incus-compose:
+  dns:
+    scope: project
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Scope: shared.DNSScopeProject,
+				Zone:  "myproject.incus",
+			},
+		},
+		{
+			name: "scope multiple projects",
+			yaml: `
+name: myproject
+x-incus-compose:
+  dns:
+    scope: alpha,beta
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Scope: "alpha,beta",
+				Zone:  "myproject.incus",
+			},
+		},
+		{
+			name: "custom zone",
+			yaml: `
+x-incus-compose:
+  dns:
+    zone: my.internal.lan
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Zone: "my.internal.lan",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(tt.yaml), 0o600)
+			require.NoError(t, err)
+
+			proj, err := New().Load(t.Context(), LoadWorkingDir(dir))
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, proj.ClientConfig.DNS)
+		})
+	}
+}
+
+func TestDNSConfigEmptyWithoutExtension(t *testing.T) {
+	t.Parallel()
+
+	proj, err := New().Load(t.Context(), LoadWorkingDir(fixturePath("simple")))
+	require.NoError(t, err)
+
+	assert.False(t, proj.ClientConfig.DNS.Disabled)
+	assert.Empty(t, proj.ClientConfig.DNS.Network)
+	assert.Empty(t, proj.ClientConfig.DNS.IPv4Address)
+	assert.Empty(t, proj.ClientConfig.DNS.IPv6Address)
+	assert.False(t, proj.ClientConfig.DNS.NoMetrics)
+	assert.Empty(t, proj.ClientConfig.DNS.Scope)
+	assert.Equal(t, proj.Name+"."+
+		DefaultDNSZoneSuffix, proj.ClientConfig.DNS.Zone)
 }

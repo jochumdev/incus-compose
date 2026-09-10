@@ -58,7 +58,7 @@ func command() *cli.Command {
 }
 
 // runCommand is the flags and the environment together: every flag reads
-// DNS_<NAME> when it is not given. Apart from command() so a test can drive it.
+// INCUS_COMPOSE_DNS_<NAME> when it is not given. Apart from command() so a test can drive it.
 func runCommand(cfg *config) *cli.Command {
 	return &cli.Command{
 		Name:  "run",
@@ -68,13 +68,13 @@ func runCommand(cfg *config) *cli.Command {
 				Name:        "incus",
 				Usage:       "URL of the Incus API",
 				Destination: &cfg.IncusURL,
-				Sources:     cli.EnvVars("DNS_INCUS"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_INCUS", "DNS_INCUS"),
 			},
 			&cli.StringFlag{
 				Name:        "token",
 				Usage:       "One-time trust token; a token file under --secrets-dir is read when this is empty",
 				Destination: &cfg.Token,
-				Sources:     cli.EnvVars("DNS_TOKEN"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_TOKEN", "DNS_TOKEN"),
 			},
 			&cli.StringFlag{
 				Name: "data-dir",
@@ -82,32 +82,32 @@ func runCommand(cfg *config) *cli.Command {
 					"what was last served; empty keeps neither",
 				Value:       defaultDataDir,
 				Destination: &cfg.DataDir,
-				Sources:     cli.EnvVars("DNS_DATA_DIR"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_DATA_DIR", "DNS_DATA_DIR"),
 			},
 			&cli.StringFlag{
 				Name:        "secrets-dir",
 				Usage:       "Tmpfs directory holding the one-time trust token",
 				Value:       defaultSecretsDir,
 				Destination: &cfg.SecretsDir,
-				Sources:     cli.EnvVars("DNS_SECRETS_DIR"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_SECRETS_DIR", "DNS_SECRETS_DIR"),
 			},
 			&cli.StringFlag{
 				Name:        "client-cert",
 				Usage:       "Certificate to present instead of enrolling; needs --client-key",
 				Destination: &cfg.ClientCert,
-				Sources:     cli.EnvVars("DNS_CLIENT_CERT"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_CLIENT_CERT", "DNS_CLIENT_CERT"),
 			},
 			&cli.StringFlag{
 				Name:        "client-key",
 				Usage:       "Key for --client-cert",
 				Destination: &cfg.ClientKey,
-				Sources:     cli.EnvVars("DNS_CLIENT_KEY"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_CLIENT_KEY", "DNS_CLIENT_KEY"),
 			},
 			&cli.BoolFlag{
 				Name:        "restricted",
 				Usage:       "Enroll a certificate confined to --project; off means one server answers for every visible project",
 				Destination: &cfg.Restricted,
-				Sources:     cli.EnvVars("DNS_RESTRICTED"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_RESTRICTED", "DNS_RESTRICTED"),
 			},
 			&cli.StringFlag{
 				Name:        "remote",
@@ -119,7 +119,7 @@ func runCommand(cfg *config) *cli.Command {
 				Name:        "use-remote",
 				Usage:       "Allow the Incus CLI configuration to be used when there is no certificate and no token",
 				Destination: &cfg.UseRemote,
-				Sources:     cli.EnvVars("DNS_USE_REMOTE"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_USE_REMOTE", "DNS_USE_REMOTE"),
 			},
 
 			&cli.StringFlag{
@@ -127,18 +127,18 @@ func runCommand(cfg *config) *cli.Command {
 				Usage:       "TLD every project's zone is built under",
 				Value:       defaultSuffix,
 				Destination: &cfg.Suffix,
-				Sources:     cli.EnvVars("DNS_SUFFIX"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_SUFFIX", "DNS_SUFFIX"),
 			},
 			&cli.StringSliceFlag{
 				Name:        "project",
 				Usage:       "Project(s) to serve; empty means every visible project carrying --project-marker",
 				Destination: &cfg.Projects,
-				Sources:     cli.EnvVars("DNS_PROJECTS"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_PROJECTS", "DNS_PROJECTS"),
 			},
 			&cli.StringFlag{
 				Name:    "project-marker",
 				Usage:   "Project config `KEY=VALUE` that opts a project in when --project is empty; a bare KEY means KEY=true",
-				Sources: cli.EnvVars("DNS_PROJECT_MARKER"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_PROJECT_MARKER", "DNS_PROJECT_MARKER"),
 				Action: func(ctx context.Context, c *cli.Command, s string) error {
 					marker, value := parseMarker(s)
 					cfg.ProjectMarker = marker
@@ -153,20 +153,20 @@ func runCommand(cfg *config) *cli.Command {
 				Usage:       "Address to answer DNS on, UDP and TCP",
 				Value:       defaultDNSAddr,
 				Destination: &cfg.DNSAddr,
-				Sources:     cli.EnvVars("DNS_LISTEN"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_LISTEN", "DNS_LISTEN"),
 			},
 			&cli.StringFlag{
 				Name:        "http",
 				Usage:       "Address to serve /metrics, /health and /ready on; empty disables it",
 				Value:       defaultHTTPAddr,
 				Destination: &cfg.HTTPAddr,
-				Sources:     cli.EnvVars("DNS_HTTP"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_HTTP", "DNS_HTTP"),
 			},
 			&cli.StringSliceFlag{
 				Name:        "forward",
 				Usage:       "Upstream(s) for names we do not serve; empty refuses them instead",
 				Destination: &cfg.Forward,
-				Sources:     cli.EnvVars("DNS_FORWARD"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_FORWARD", "DNS_FORWARD"),
 			},
 
 			&cli.UintFlag{
@@ -174,59 +174,59 @@ func runCommand(cfg *config) *cli.Command {
 				Usage:       "Seconds a record is served for; 0-" + strconv.Itoa(maxTTL),
 				Value:       defaultTTL,
 				Destination: &cfg.TTL,
-				Sources:     cli.EnvVars("DNS_TTL"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_TTL", "DNS_TTL"),
 			},
 			&cli.DurationFlag{
 				Name:        "debounce-window",
 				Usage:       "How long a key must be quiet before the last of its burst is handed on",
 				Value:       defaultDebounceWindow,
 				Destination: &cfg.DebounceWindow,
-				Sources:     cli.EnvVars("DNS_DEBOUNCE_WINDOW"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_DEBOUNCE_WINDOW", "DNS_DEBOUNCE_WINDOW"),
 			},
 			&cli.IntFlag{
 				Name:        "workers",
 				Usage:       "Incus reads in flight at once",
 				Value:       defaultWorkers,
 				Destination: &cfg.Workers,
-				Sources:     cli.EnvVars("DNS_WORKERS"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_WORKERS", "DNS_WORKERS"),
 			},
 			&cli.DurationFlag{
 				Name:        "read-timeout",
 				Usage:       "Budget for one read of the daemon",
 				Value:       defaultReadTimeout,
 				Destination: &cfg.ReadTimeout,
-				Sources:     cli.EnvVars("DNS_READ_TIMEOUT"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_READ_TIMEOUT", "DNS_READ_TIMEOUT"),
 			},
 			&cli.DurationFlag{
 				Name:        "sweep-project-delay",
 				Usage:       "Gap between one project of a round and the next",
 				Value:       defaultProjectDelay,
 				Destination: &cfg.ProjectDelay,
-				Sources:     cli.EnvVars("DNS_SWEEP_PROJECT_DELAY"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_SWEEP_PROJECT_DELAY", "DNS_SWEEP_PROJECT_DELAY"),
 			},
 			&cli.DurationFlag{
 				Name:        "sweep-read-delay",
 				Usage:       "Gap between the reads inside one project",
 				Value:       defaultReadDelay,
 				Destination: &cfg.ReadDelay,
-				Sources:     cli.EnvVars("DNS_SWEEP_READ_DELAY"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_SWEEP_READ_DELAY", "DNS_SWEEP_READ_DELAY"),
 			},
 			&cli.BoolFlag{
 				Name:        "echo-subnet",
 				Usage:       "Echo the RFC 7871 client subnet back on replies",
 				Destination: &cfg.EchoSubnet,
-				Sources:     cli.EnvVars("DNS_ECHO_SUBNET"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_ECHO_SUBNET", "DNS_ECHO_SUBNET"),
 			},
 			&cli.BoolFlag{
 				Name:        "metrics",
 				Usage:       "Record the engine's counters and gauges; off leaves them registered at zero",
 				Destination: &cfg.Metrics,
-				Sources:     cli.EnvVars("DNS_METRICS"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_METRICS", "DNS_METRICS"),
 			},
 			&cli.StringSliceFlag{
 				Name:    "allow-transfer",
 				Usage:   "CIDR(s) that may ask for a zone transfer; empty allows nobody",
-				Sources: cli.EnvVars("DNS_ALLOW_TRANSFER"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_ALLOW_TRANSFER", "DNS_ALLOW_TRANSFER"),
 				Action: func(ctx context.Context, c *cli.Command, s []string) error {
 					allow, err := prefixes(s)
 					if err != nil {
@@ -242,7 +242,7 @@ func runCommand(cfg *config) *cli.Command {
 				Name:        "exclude",
 				Usage:       "Chain position(s) to leave out; only the optional ones, and an unknown name is an error",
 				Destination: &cfg.Exclude,
-				Sources:     cli.EnvVars("DNS_EXCLUDE"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_EXCLUDE", "DNS_EXCLUDE"),
 			},
 
 			&cli.StringFlag{
@@ -250,14 +250,14 @@ func runCommand(cfg *config) *cli.Command {
 				Usage: "Level the chain's log positions print at, and the process's own level: " +
 					"TRACE, DEBUG, INFO, WARN, ERROR. Empty leaves every position out and the process at INFO",
 				Destination: &cfg.Log,
-				Sources:     cli.EnvVars("DNS_LOG"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_LOG", "DNS_LOG"),
 			},
 
 			&cli.BoolFlag{
 				Name:        "pprof",
 				Usage:       "Serve /debug/pprof on the --http address; for profiling, never for a deployment",
 				Destination: &cfg.Pprof,
-				Sources:     cli.EnvVars("DNS_PPROF"),
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_PPROF", "DNS_PPROF"),
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {

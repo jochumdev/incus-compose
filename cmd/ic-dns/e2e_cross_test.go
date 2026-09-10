@@ -11,7 +11,7 @@ import (
 	"github.com/lxc/incus-compose/internal/testlib"
 )
 
-// TestCrossProject stands up three compose files - ic-dns in one project, two
+// TestE2ECrossProject stands up three compose files - ic-dns in one project, two
 // workload projects in others - and asserts the visibility rule across them.
 //
 // Only this catches a bridge two projects reference failing to collapse to one
@@ -24,7 +24,7 @@ import (
 //	beta-db                      beta-net
 //
 // No t.Parallel(): the fixtures pin subnets, so suites deploy one at a time.
-func TestCrossProject(t *testing.T) {
+func TestE2ECrossProject(t *testing.T) {
 	testlib.SkipE2E(t)
 
 	su := newE2ESuite(t)

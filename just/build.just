@@ -27,6 +27,9 @@ build: _build-deps
     just run healthd down --force 1>/dev/null 2>&1 || true
     just run --trace healthd up
 
+    just run dns down --force 1>/dev/null 2>&1 || true
+    just run --trace dns up
+
 # Usage: just run -f test/fixtures/simple/compose.yaml config
 run *args:
     @go run -ldflags "-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v}" ./cmd/incus-compose {{ args }}
