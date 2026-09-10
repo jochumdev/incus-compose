@@ -215,10 +215,13 @@ func newUpCommand() *cli.Command {
 				runOptions = append(runOptions, client.OptionExternalHealthd())
 			}
 
+			recreate := cmd.Bool("recreate")
+
 			scale := parseScale(cmd.StringSlice("scale"))
 			args := filterResourcesArgs{
 				OnlyServices:     cmd.Args().Slice(),
 				WithDependencies: !cmd.Bool("no-deps"),
+				Reverse:          recreate,
 			}
 
 			// "missing" and the legacy "policy" are the default, as is anything unknown.
@@ -249,7 +252,6 @@ func newUpCommand() *cli.Command {
 			}
 
 			// A rebuilt image only reaches an instance created from it again.
-			recreate := cmd.Bool("recreate")
 			downServices, downNoDeps := cmd.Args().Slice(), cmd.Bool("no-deps")
 			if !recreate && buildMode == client.BuildForce {
 				downServices = builtServices(p, args)

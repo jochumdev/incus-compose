@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
 
+	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -112,6 +113,16 @@ func newHealthdDownCommand() *cli.Command {
 					}
 				}
 			}
+
+			// We stop all resources, just ignore that warning but let progress know them (so add before - LIFO - progress runs before).
+			c.IgnoreError(client.ActionStop, client.ErrNotEnsured)
+			c.IgnoreError(client.ActionStop, client.ErrNotRunning)
+			c.IgnoreError(client.ActionEnsure, client.ErrNotFound)
+			c.IgnoreError(client.ActionDelete, client.ErrNotEnsured)
+			c.IgnoreError(client.ActionDelete, client.ErrNotFound)
+
+			// Replicas of a service share one volume, so all but the last delete says this.
+			c.IgnoreError(client.ActionDelete, client.ErrVolumeInUse)
 
 			if !cmd.Root().Bool("debug") {
 				progress := newProgressRenderer(cmd.Root().Writer, noColor, isatty.IsTerminal(os.Stdout.Fd()))
