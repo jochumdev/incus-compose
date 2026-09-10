@@ -1,7 +1,8 @@
 name: alpha
 
-x-incus:
-  "user.label.dns.scope": "${SUITE_SCOPE}"
+x-incus-compose:
+  dns:
+    scope: "${SUITE_SCOPE}"
 
 # One half of the cross-project visibility fixture. beta/ is its mirror.
 #

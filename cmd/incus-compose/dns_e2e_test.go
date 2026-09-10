@@ -180,7 +180,7 @@ services:
 
 	c := projectClient(ctx, t, pn)
 
-	assert.Equal(t, project.DefaultDNSZone, projectDNSZone(t, c))
+	assert.Equal(t, pn+"."+project.DefaultDNSZoneSuffix, projectDNSZone(t, c))
 
 	dnsName := dnsInstanceName(c.IncusProject(), false)
 	exists, err := c.InstanceExists(dnsName)
@@ -194,5 +194,5 @@ services:
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, inst.Config["oci.dns.nameservers"], "instance must have oci.dns.nameservers set")
-	assert.Equal(t, project.DefaultDNSZone, inst.Config["oci.dns.search"], "instance must have oci.dns.search set to default zone")
+	assert.Equal(t, pn+"."+project.DefaultDNSZoneSuffix, inst.Config["oci.dns.search"], "instance must have oci.dns.search set to default zone")
 }

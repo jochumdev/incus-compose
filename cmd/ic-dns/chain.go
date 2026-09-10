@@ -211,7 +211,8 @@ func serves(logger *slog.Logger, cfg config) func(*incusapi.Project) bool {
 	}
 
 	return func(p *incusapi.Project) bool {
-		serve := p.Config[cfg.ProjectMarker] == cfg.ProjectMarkerValue
+		val := p.Config[cfg.ProjectMarker]
+		serve := val == cfg.ProjectMarkerValue || slices.Contains(strings.Split(cfg.ProjectMarkerValue, ","), val)
 		if !serve {
 			logger.Debug("Not serving project", "project", p.Name)
 		} else {

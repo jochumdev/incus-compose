@@ -86,7 +86,7 @@ func start(ctx context.Context, p *project.Project, c *client.Client, args start
 				if pErr == nil && pConfig[shared.DNSZoneKey] != "" {
 					zone = pConfig[shared.DNSZoneKey]
 				} else {
-					zone = project.DefaultDNSZone
+					zone = p.Name + "." + project.DefaultDNSZoneSuffix
 				}
 			}
 

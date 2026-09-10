@@ -250,10 +250,10 @@ func TestDNSSettings(t *testing.T) {
 
 		settings := dnsSettings(params, "https://10.0.0.1:8443", false)
 
-		assert.Equal(t, "alpha,beta", settings[envDNSProjects])
-		assert.Equal(t, "alpha,beta", settings["environment.DNS_PROJECTS"])
-		assert.Equal(t, "true", settings[envDNSRestricted])
-		assert.Equal(t, "true", settings["environment.DNS_RESTRICTED"])
+		assert.Equal(t, shared.DNSScopeKey+"=alpha,beta", settings[envDNSProjectMarker])
+		assert.Equal(t, shared.DNSScopeKey+"=alpha,beta", settings["environment.DNS_PROJECT_MARKER"])
+		assert.Empty(t, settings[envDNSProjects])
+		assert.Empty(t, settings[envDNSRestricted])
 	})
 }
 

@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	defaultDNSCPU         = "200ms/100ms"
-	defaultDNSMemoryLimit = "64MiB"
+	defaultDNSCPU         = "400ms/100ms"
+	defaultDNSMemoryLimit = "100MiB"
 )
 
 const (
@@ -152,8 +152,11 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 		if params.scope == shared.DNSScopeProject {
 			set(envDNSRestricted, "environment.DNS_RESTRICTED", "true")
 		} else if params.scope != "" {
-			set(envDNSProjects, "environment.DNS_PROJECTS", params.scope)
-			set(envDNSRestricted, "environment.DNS_RESTRICTED", "true")
+			marker := params.projectMarker
+			if marker == "" {
+				marker = shared.DNSScopeKey + "=" + params.scope
+			}
+			set(envDNSProjectMarker, "environment.DNS_PROJECT_MARKER", marker)
 		}
 	}
 
@@ -370,17 +373,8 @@ func dnsGetResources(c *client.Client, params dnsParams) (*client.Instance, []cl
 		}
 
 		var restrictedProjects []string
-		if !params.global {
-			if params.scope == shared.DNSScopeProject {
-				restrictedProjects = []string{c.IncusProject()}
-			} else {
-				for _, p := range strings.Split(params.scope, ",") {
-					p = strings.TrimSpace(p)
-					if p != "" {
-						restrictedProjects = append(restrictedProjects, p)
-					}
-				}
-			}
+		if !params.global && params.scope == shared.DNSScopeProject {
+			restrictedProjects = []string{c.IncusProject()}
 		}
 
 		token, err := dnsCreateToken(ctx, c, params.global, restrictedProjects)

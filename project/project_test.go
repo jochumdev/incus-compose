@@ -713,16 +713,16 @@ func TestHealthdConfigExtractsXIncusCompose(t *testing.T) {
 	}, config.XIncus)
 }
 
-func TestHealthdConfigRejectsABadScope(t *testing.T) {
+func TestHealthdConfigAcceptsCustomScope(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	compose := "x-incus-compose:\n  healthd:\n    scope: worldwide\nservices:\n  web:\n    image: docker.io/alpine:edge\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(compose), 0o600))
 
-	_, err := New().Load(t.Context(), LoadWorkingDir(dir))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "x-incus-compose.healthd.scope")
+	p, err := New().Load(t.Context(), LoadWorkingDir(dir))
+	require.NoError(t, err)
+	assert.Equal(t, "worldwide", p.ClientConfig.Healthd.Scope)
 }
 
 func TestHealthdConfigEmptyWithoutExtension(t *testing.T) {
@@ -805,6 +805,7 @@ services:
 		{
 			name: "scope project",
 			yaml: `
+name: myproject
 x-incus-compose:
   dns:
     scope: project
@@ -814,12 +815,13 @@ services:
 `,
 			expected: XICDNS{
 				Scope: shared.DNSScopeProject,
-				Zone:  DefaultDNSZone,
+				Zone:  "myproject.incus",
 			},
 		},
 		{
 			name: "scope multiple projects",
 			yaml: `
+name: myproject
 x-incus-compose:
   dns:
     scope: alpha,beta
@@ -829,7 +831,7 @@ services:
 `,
 			expected: XICDNS{
 				Scope: "alpha,beta",
-				Zone:  DefaultDNSZone,
+				Zone:  "myproject.incus",
 			},
 		},
 		{
@@ -875,5 +877,6 @@ func TestDNSConfigEmptyWithoutExtension(t *testing.T) {
 	assert.Empty(t, proj.ClientConfig.DNS.IPv6Address)
 	assert.False(t, proj.ClientConfig.DNS.NoMetrics)
 	assert.Empty(t, proj.ClientConfig.DNS.Scope)
-	assert.Equal(t, DefaultDNSZone, proj.ClientConfig.DNS.Zone)
+	assert.Equal(t, proj.Name+"."+
+		DefaultDNSZoneSuffix, proj.ClientConfig.DNS.Zone)
 }

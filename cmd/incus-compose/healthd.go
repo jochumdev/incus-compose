@@ -72,6 +72,7 @@ type healthdParams struct {
 
 	// global shares one daemon in globalHealthdProject instead of one per project.
 	global bool
+	scope  string
 
 	// trace turns on the daemon's per-event logging.
 	trace bool
@@ -197,18 +198,18 @@ func healthdFloorLimits(carried map[string]string) {
 	}
 }
 
-// healthdCreateToken creates the sidecar's trust token. The shared daemon must
-// reach projects that do not exist yet, so only a per-project one is restricted.
-func healthdCreateToken(ctx context.Context, c *client.Client, global bool) (string, error) {
+// healthdCreateToken creates the sidecar's trust token. Daemons watching multiple
+// projects must reach projects that do not exist yet, so only a per-project one is restricted.
+func healthdCreateToken(ctx context.Context, c *client.Client, restricted bool) (string, error) {
 	req := incusApi.CertificatesPost{
 		CertificatePut: incusApi.CertificatePut{
-			Name: healthdCertName(c.IncusProject(), global),
+			Name: healthdCertName(c.IncusProject(), !restricted),
 			Type: "client",
 		},
 		Token: true,
 	}
 
-	if !global {
+	if restricted {
 		req.Restricted = true
 		req.Projects = []string{c.IncusProject()}
 	}
@@ -418,7 +419,8 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 			incusURL = u.String()
 		}
 
-		token, err := healthdCreateToken(ctx, c, params.global)
+		restricted := !params.global && params.scope == shared.HealthScopeProject
+		token, err := healthdCreateToken(ctx, c, restricted)
 		if err != nil {
 			c.LogWarn("Failed to get a token", "error", err)
 			token = ""
@@ -431,8 +433,11 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 			// No list, so projects that do not exist yet are picked up too.
 			inst.Config.Extensions["environment.INCUS_COMPOSE_HEALTHD_PROJECT_MARKER"] =
 				shared.HealthScopeKey + "=" + shared.HealthScopeGlobal
-		} else {
+		} else if params.scope == shared.HealthScopeProject {
 			inst.Config.Extensions["environment.INCUS_COMPOSE_HEALTHD_PROJECTS"] = c.IncusProject()
+		} else if params.scope != "" {
+			inst.Config.Extensions["environment.INCUS_COMPOSE_HEALTHD_PROJECT_MARKER"] =
+				shared.HealthScopeKey + "=" + params.scope
 		}
 
 		inst.Config.Files = append(inst.Config.Files, client.InstanceFile{

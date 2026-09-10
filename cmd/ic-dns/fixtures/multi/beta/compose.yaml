@@ -1,7 +1,8 @@
 name: beta
 
-x-incus:
-  "user.label.dns.scope": "${SUITE_SCOPE}"
+x-incus-compose:
+  dns:
+    scope: "${SUITE_SCOPE}"
 
 # The mirror of alpha/. See that file for what this fixture is for.
 #

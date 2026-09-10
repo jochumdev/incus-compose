@@ -37,25 +37,26 @@ func dnsProject(ctx context.Context, cmd *cli.Command) (*project.Project, error)
 }
 
 // matchDNSScope reports whether daemonScope matches the target project.
-func matchDNSScope(daemonScope, daemonProject, targetProject string) bool {
-	if daemonScope == "" {
+func matchDNSScope(daemonScope, daemonProject, targetScope, targetProject string) bool {
+	if daemonScope == "" || targetScope == "" {
 		return false
 	}
 
-	switch daemonScope {
-	case shared.DNSScopeGlobal:
+	if daemonScope == shared.DNSScopeProject {
+		return targetScope == shared.DNSScopeProject && daemonProject == targetProject
+	}
+
+	if daemonScope == targetScope {
 		return true
-	case shared.DNSScopeProject:
-		return daemonProject == targetProject
-	default:
-		for _, p := range strings.Split(daemonScope, ",") {
-			if strings.TrimSpace(p) == targetProject {
-				return true
-			}
-		}
-
-		return false
 	}
+
+	for _, s := range strings.Split(daemonScope, ",") {
+		if strings.TrimSpace(s) == targetScope {
+			return true
+		}
+	}
+
+	return false
 }
 
 // findDNS returns the name and project of the matching ic-dns daemon.
@@ -63,6 +64,16 @@ func findDNS(ctx context.Context, c *client.Client) (string, string, error) {
 	conn, err := c.Connection()
 	if err != nil {
 		return "", "", err
+	}
+
+	targetConfig, err := c.Global().ProjectConfig(c.IncusProject())
+	if err != nil {
+		return "", "", err
+	}
+
+	targetScope := targetConfig[shared.DNSScopeKey]
+	if targetScope == "" {
+		targetScope = shared.DNSScopeGlobal
 	}
 
 	// 1. Check current project.
@@ -77,7 +88,7 @@ func findDNS(ctx context.Context, c *client.Client) (string, string, error) {
 			scope = inst.Config[shared.DNSScopeKey]
 		}
 
-		if matchDNSScope(scope, c.IncusProject(), c.IncusProject()) {
+		if matchDNSScope(scope, c.IncusProject(), targetScope, c.IncusProject()) {
 			return inst.Name, c.IncusProject(), nil
 		}
 	}
@@ -93,7 +104,7 @@ func findDNS(ctx context.Context, c *client.Client) (string, string, error) {
 					scope = inst.Config[shared.DNSScopeKey]
 				}
 
-				if matchDNSScope(scope, sysProj, c.IncusProject()) {
+				if matchDNSScope(scope, sysProj, targetScope, c.IncusProject()) {
 					return inst.Name, sysProj, nil
 				}
 			}
@@ -113,7 +124,7 @@ func findDNS(ctx context.Context, c *client.Client) (string, string, error) {
 				scope = inst.Config[shared.DNSScopeKey]
 			}
 
-			if matchDNSScope(scope, inst.Project, c.IncusProject()) {
+			if matchDNSScope(scope, inst.Project, targetScope, c.IncusProject()) {
 				return inst.Name, inst.Project, nil
 			}
 		}

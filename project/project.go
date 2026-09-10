@@ -25,7 +25,6 @@ import (
 	"github.com/dominikbraun/graph"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/shared"
 )
 
 // ErrNoComposeFile says there was no compose file to load, so a caller that can
@@ -205,8 +204,8 @@ type XICDNS struct {
 	Zone        string `mapstructure:"zone"`
 }
 
-// DefaultDNSZone is the default DNS zone used when none is specified.
-const DefaultDNSZone = "incus"
+// DefaultDNSZoneSuffix is the default TLD suffix used when no zone is specified.
+const DefaultDNSZoneSuffix = "incus"
 
 // New creates a new Project.
 func New() *Project {
@@ -271,14 +270,6 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			return nil, err
 		}
 		if ok {
-			switch ext.Healthd.Scope {
-			case "", shared.HealthScopeProject, shared.HealthScopeGlobal:
-			default:
-				return nil, fmt.Errorf(
-					"x-incus-compose.healthd.scope: %q must be %q or %q",
-					ext.Healthd.Scope, shared.HealthScopeProject, shared.HealthScopeGlobal)
-			}
-
 			p.ClientConfig.Healthd.Incus = ext.Healthd.Incus
 			p.ClientConfig.Healthd.Network = ext.Healthd.Network
 			p.ClientConfig.Healthd.External = ext.Healthd.External
@@ -297,7 +288,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.DNS.Scope = ext.DNS.Scope
 			p.ClientConfig.DNS.Zone = ext.DNS.Zone
 			if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
-				p.ClientConfig.DNS.Zone = DefaultDNSZone
+				p.ClientConfig.DNS.Zone = p.Name + "." + DefaultDNSZoneSuffix
 			}
 
 			for k, v := range ext.Healthd.XIncus {
@@ -323,7 +314,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 	maps.Copy(p.ClientConfig.XIncus, options.ProjectMarks)
 
 	if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
-		p.ClientConfig.DNS.Zone = DefaultDNSZone
+		p.ClientConfig.DNS.Zone = p.Name + "." + DefaultDNSZoneSuffix
 	}
 
 	return p, nil

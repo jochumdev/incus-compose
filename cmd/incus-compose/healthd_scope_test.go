@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/shared"
 )
@@ -48,19 +47,19 @@ func TestResolveHealthdScope(t *testing.T) {
 			want:          shared.HealthScopeGlobal,
 		},
 		{
-			name:          "a bad value on the project is an error",
+			name:          "custom scope on the project",
 			projectConfig: map[string]string{shared.HealthScopeKey: "worldwide"},
-			wantErr:       `the Incus project's user.healthcheck.scope is "worldwide"`,
+			want:          "worldwide",
 		},
 		{
-			name:    "a bad value on the cli is an error",
-			cli:     "worldwide",
-			wantErr: `--healthd-scope is "worldwide"`,
+			name: "custom scope on the cli",
+			cli:  "worldwide",
+			want: "worldwide",
 		},
 		{
-			name:    "a bad value in the compose file is an error",
+			name:    "custom scope in the compose file",
 			compose: "worldwide",
-			wantErr: `x-incus-compose.healthd.scope is "worldwide"`,
+			want:    "worldwide",
 		},
 	}
 
@@ -68,14 +67,7 @@ func TestResolveHealthdScope(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := resolveHealthdScope(tt.projectConfig, tt.cli, tt.compose)
-			if tt.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-				return
-			}
-
-			require.NoError(t, err)
+			got := resolveHealthdScope(tt.projectConfig, tt.cli, tt.compose)
 			assert.Equal(t, tt.want, got)
 		})
 	}

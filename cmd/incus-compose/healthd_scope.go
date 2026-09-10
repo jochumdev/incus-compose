@@ -10,7 +10,7 @@ import (
 
 // resolveHealthdScope returns the scope for the project, first match wins, so a
 // project keeps the scope it carries until that key itself is changed.
-func resolveHealthdScope(projectConfig map[string]string, cliScope, composeScope string) (string, error) {
+func resolveHealthdScope(projectConfig map[string]string, cliScope, composeScope string) string {
 	sources := []struct {
 		where string
 		value string
@@ -21,17 +21,14 @@ func resolveHealthdScope(projectConfig map[string]string, cliScope, composeScope
 	}
 
 	for _, source := range sources {
-		switch source.value {
-		case "":
-		case shared.HealthScopeProject, shared.HealthScopeGlobal:
-			return source.value, nil
-		default:
-			return "", fmt.Errorf("%s is %q, must be %q or %q",
-				source.where, source.value, shared.HealthScopeProject, shared.HealthScopeGlobal)
+		if source.value == "" {
+			continue
 		}
+
+		return source.value
 	}
 
-	return shared.HealthScopeGlobal, nil
+	return shared.HealthScopeGlobal
 }
 
 // healthdClient returns the scope p carries and the client of the project its

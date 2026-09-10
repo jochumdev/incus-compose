@@ -1,8 +1,8 @@
 name: shop
 
-x-incus:
-  "user.label.dns.scope": "project"
-  "user.label.dns.zone": "$PROJECT_ZONE:-shop.incus}"
+x-incus-compose:
+  dns:
+    scope: project
 
 x-container-template: &template
   image: ghcr.io/lxc/incus-compose/debug:latest

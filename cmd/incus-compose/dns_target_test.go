@@ -18,27 +18,31 @@ func TestMatchDNSScope(t *testing.T) {
 		name          string
 		daemonScope   string
 		daemonProject string
+		targetScope   string
 		targetProject string
 		want          bool
 	}{
 		{
-			name:          "scope=global in default matches shop",
+			name:          "scope=global matches target scope=global",
 			daemonScope:   shared.DNSScopeGlobal,
 			daemonProject: "default",
+			targetScope:   shared.DNSScopeGlobal,
 			targetProject: "shop",
 			want:          true,
 		},
 		{
-			name:          "scope=global matches any project",
+			name:          "scope=global does not match custom target scope",
 			daemonScope:   shared.DNSScopeGlobal,
 			daemonProject: "system",
+			targetScope:   "custom",
 			targetProject: "blog",
-			want:          true,
+			want:          false,
 		},
 		{
-			name:          "scope=project matches same project",
+			name:          "scope=project matches same project with scope=project",
 			daemonScope:   shared.DNSScopeProject,
 			daemonProject: "shop",
+			targetScope:   shared.DNSScopeProject,
 			targetProject: "shop",
 			want:          true,
 		},
@@ -46,41 +50,47 @@ func TestMatchDNSScope(t *testing.T) {
 			name:          "scope=project does NOT match different project",
 			daemonScope:   shared.DNSScopeProject,
 			daemonProject: "shop",
+			targetScope:   shared.DNSScopeProject,
 			targetProject: "blog",
 			want:          false,
 		},
 		{
-			name:          "scope=alpha,beta matches alpha",
+			name:          "scope=alpha,beta matches target scope alpha",
 			daemonScope:   "alpha,beta",
 			daemonProject: "infra",
-			targetProject: "alpha",
+			targetScope:   "alpha",
+			targetProject: "shop",
 			want:          true,
 		},
 		{
-			name:          "scope=alpha,beta matches beta",
+			name:          "scope=alpha,beta matches target scope beta",
 			daemonScope:   "alpha,beta",
 			daemonProject: "infra",
-			targetProject: "beta",
+			targetScope:   "beta",
+			targetProject: "shop",
 			want:          true,
 		},
 		{
-			name:          "scope=alpha,beta does NOT match gamma",
+			name:          "scope=alpha,beta does NOT match target scope gamma",
 			daemonScope:   "alpha,beta",
 			daemonProject: "infra",
-			targetProject: "gamma",
+			targetScope:   "gamma",
+			targetProject: "shop",
 			want:          false,
 		},
 		{
 			name:          "scope=alpha, beta with whitespace matches beta",
 			daemonScope:   "alpha, beta",
 			daemonProject: "infra",
-			targetProject: "beta",
+			targetScope:   "beta",
+			targetProject: "shop",
 			want:          true,
 		},
 		{
 			name:          "empty scope matches nothing",
 			daemonScope:   "",
 			daemonProject: "shop",
+			targetScope:   "shop",
 			targetProject: "shop",
 			want:          false,
 		},
@@ -90,7 +100,7 @@ func TestMatchDNSScope(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := matchDNSScope(tt.daemonScope, tt.daemonProject, tt.targetProject)
+			got := matchDNSScope(tt.daemonScope, tt.daemonProject, tt.targetScope, tt.targetProject)
 			assert.Equal(t, tt.want, got)
 		})
 	}

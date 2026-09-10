@@ -343,7 +343,7 @@ func newUpCommand() *cli.Command {
 					if pErr == nil && pConfig[shared.DNSZoneKey] != "" {
 						zone = pConfig[shared.DNSZoneKey]
 					} else {
-						zone = project.DefaultDNSZone
+						zone = p.Name + "." + project.DefaultDNSZoneSuffix
 					}
 				}
 				err = c.Global().UpdateProjectConfig(p.Name, map[string]string{shared.DNSZoneKey: zone})
