@@ -40,7 +40,7 @@ type downArgs struct {
 func down(ctx context.Context, p *project.Project, c *client.Client, args downArgs) error {
 	noColor := noColor(ctx)
 
-	// We start all resources, just ignore that warning but let progress know them (so add before - LIFO - progress runs before).
+	// We stop all resources, just ignore that warning but let progress know them (so add before - LIFO - progress runs before).
 	c.IgnoreError(client.ActionStop, client.ErrNotEnsured)
 	c.IgnoreError(client.ActionStop, client.ErrNotRunning)
 	c.IgnoreError(client.ActionEnsure, client.ErrNotFound)
