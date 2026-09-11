@@ -143,12 +143,12 @@ services:
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
-	hc := projectClient(ctx, t, systemProject)
 
-	conn, err := hc.Connection()
+	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, hc.IncusProject(), globalHealthdName, nil)
+	// The shared daemon asked for a project's network, so it lives in it.
+	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), globalHealthdName, nil)
 	require.NoError(t, err)
 	assert.Equal(t, plannedNetworkNames(ctx, t, pn, compose), []string{inst.Devices["eth0"]["network"]})
 

@@ -117,6 +117,14 @@ func (c *Client) RegisterDNSWatcher() error {
 		case KindNetwork:
 			net, ok := r.(*Network)
 			if ok && action == ActionEnsure {
+				if net.Config.Type != "bridge" {
+					return nil
+				}
+				st := net.State()
+				if st != nil && st.IncusNetwork != nil && st.IncusNetwork.Type == "ovn" {
+					return nil
+				}
+
 				networks[net.IncusName()] = net
 				c.LogDebug("DNSWatcher network", "network", net.Name())
 			}
@@ -179,6 +187,14 @@ func (c *Client) RegisterDNSWatcher() error {
 
 			var errs error
 			for _, network := range networks {
+				if network.Config.Type != "bridge" {
+					continue
+				}
+				st := network.State()
+				if st != nil && st.IncusNetwork != nil && st.IncusNetwork.Type != "bridge" {
+					continue
+				}
+
 				servicesIPs := map[string][]string{}
 				for instIncusName, iIPs := range instanceIPs {
 					sName := instances[instIncusName].ServiceName()

@@ -49,6 +49,9 @@ type Client struct {
 	// Resource storage
 	resources ResourceStore
 
+	// Project configuration
+	projectConfig map[string]string
+
 	// clonesMu guards clones.
 	clonesMu sync.Mutex
 
@@ -70,20 +73,21 @@ type Client struct {
 	hookDone func(err error) error
 }
 
-func (c *GlobalClient) newProjectClient(name, incusName string, created bool) (*Client, error) {
+func (c *GlobalClient) newProjectClient(name, incusName string, created bool, projectConfig map[string]string) (*Client, error) {
 	config := c.config
 	config.DescriptionFormat = fmt.Sprintf(config.DescriptionFormat, name) + ":%s"
 
 	cp := &Client{
-		ctx:          c.ctx,
-		globalClient: c,
-		config:       config,
-		project:      name,
-		incusProject: incusName,
-		created:      created,
-		incus:        c.incus,
-		imageCache:   c.imageCache,
-		logger:       c.logger.With("project", name),
+		ctx:           c.ctx,
+		globalClient:  c,
+		config:        config,
+		project:       name,
+		incusProject:  incusName,
+		created:       created,
+		projectConfig: projectConfig,
+		incus:         c.incus,
+		imageCache:    c.imageCache,
+		logger:        c.logger.With("project", name),
 
 		hookBefore: c.hookBefore,
 		hookAfter:  c.hookAfter,
@@ -130,15 +134,16 @@ func (c *Client) Clone() *Client {
 	c.healthdMu.Unlock()
 
 	clone := &Client{
-		ctx:          c.ctx,
-		globalClient: c.globalClient,
-		config:       c.config,
-		project:      c.project,
-		incusProject: c.incusProject,
-		created:      c.created,
-		incus:        c.incus,
-		imageCache:   c.imageCache,
-		logger:       c.logger,
+		ctx:           c.ctx,
+		globalClient:  c.globalClient,
+		config:        c.config,
+		project:       c.project,
+		incusProject:  c.incusProject,
+		created:       c.created,
+		incus:         c.incus,
+		imageCache:    c.imageCache,
+		logger:        c.logger,
+		projectConfig: c.projectConfig,
 
 		hookBefore: c.hookBefore,
 		hookAfter:  c.hookAfter,
@@ -158,6 +163,11 @@ func (c *Client) Clone() *Client {
 	c.clonesMu.Unlock()
 
 	return clone
+}
+
+// FeaturesNetworks reports whether the project has features.networks enabled.
+func (c *Client) FeaturesNetworks() bool {
+	return c.projectConfig["features.networks"] == "true"
 }
 
 // rangeResources runs f over this client's resources and every clone's.
@@ -481,6 +491,9 @@ func (c *Client) healthdTarget() (*iclient.Connection, string, string, error) {
 	conn, project := c.incus, c.incusProject
 	if cfg[shared.HealthScopeKey] == shared.HealthScopeGlobal {
 		conn, project = c.globalClient.incus, c.config.SystemProject
+		if daemonProject := cfg[shared.HealthProjectKey]; daemonProject != "" {
+			project = daemonProject
+		}
 	}
 
 	instances, err := conn.GetInstances(c.ctx, project, nil)

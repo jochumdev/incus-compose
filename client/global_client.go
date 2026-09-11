@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
 
@@ -525,22 +526,23 @@ func (c *GlobalClient) CliConfig() *iclient.Config {
 func (c *GlobalClient) getProject(name string) (*Client, error) {
 	incusName := SanitizeProjectName(name)
 
-	_, _, err := c.incus.GetProject(c.ctx, incusName)
+	project, _, err := c.incus.GetProject(c.ctx, incusName)
 	if err != nil {
 		return nil, err
 	}
 
 	c.logger.DebugContext(c.ctx, "Got project", "name", name, "incus_name", incusName)
-	return c.newProjectClient(name, incusName, false)
+	return c.newProjectClient(name, incusName, false, project.Config)
 }
 
 // EnsureProjectOption is a functional option for configuring project creation.
 type EnsureProjectOption func(*ensureProjectOptions)
 
 type ensureProjectOptions struct {
-	create      bool
-	config      map[string]string
-	skipHealthd bool
+	create        bool
+	config        map[string]string
+	skipHealthd   bool
+	networkDriver string
 }
 
 // EnsureProjectWithCreate enables project creation if the project doesn't exist.
@@ -563,6 +565,49 @@ func EnsureProjectWithSkipHealthd() EnsureProjectOption {
 	return func(opts *ensureProjectOptions) {
 		opts.skipHealthd = true
 	}
+}
+
+// EnsureProjectWithNetworkDriver sets the network driver mode for project creation.
+func EnsureProjectWithNetworkDriver(driver string) EnsureProjectOption {
+	return func(opts *ensureProjectOptions) {
+		opts.networkDriver = driver
+	}
+}
+
+// DetectOVN reports whether the server supports OVN networks.
+func (c *GlobalClient) DetectOVN() (bool, error) {
+	// Cheap check: scan all network names for any active OVN network.
+	names, err := c.incus.GetNetworkNamesAllProjects(c.ctx)
+	if err == nil {
+		for _, name := range names {
+			net, _, getErr := c.incus.GetNetwork(c.ctx, "", name)
+			if getErr == nil && net.Type == "ovn" && net.Status == "Created" {
+				return true, nil
+			}
+		}
+	}
+
+	// Fallback probe: create a throwaway type=ovn, network=none network in default.
+	probeName := fmt.Sprintf("ic-probe-%x", time.Now().UnixNano())
+	createErr := c.incus.CreateNetwork(c.ctx, "default", incusApi.NetworksPost{
+		Name: probeName,
+		Type: "ovn",
+		NetworkPut: incusApi.NetworkPut{
+			Config: map[string]string{
+				"network": "none",
+			},
+		},
+	})
+	if createErr != nil {
+		return false, nil //nolint:nilerr // creation failure means the server does not support OVN
+	}
+
+	deleteErr := c.incus.DeleteNetwork(c.ctx, "default", probeName)
+	if deleteErr != nil {
+		c.LogWarn("Failed to delete OVN probe network", "network", probeName, "error", deleteErr)
+	}
+
+	return true, nil
 }
 
 // ProjectConfig returns the Incus project's config, empty if it does not exist.
@@ -706,7 +751,7 @@ func (c *GlobalClient) createProject(name string, config map[string]string) (*Cl
 	}
 
 	// c.logger.DebugContext(c.Ctx, "Created project", "name", name, "incus_name", incusName)
-	return c.newProjectClient(name, incusName, true)
+	return c.newProjectClient(name, incusName, true, projectConfig)
 }
 
 // EnsureProject ensures a project exists and returns a Client for it.
@@ -732,7 +777,8 @@ func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (
 	p, err := c.getProject(name)
 	if err == nil {
 		// Same reason as Instance.addMissingConfig.
-		if err := c.AddMissingProjectConfig(name, options.config); err != nil {
+		err = c.AddMissingProjectConfig(name, options.config)
+		if err != nil {
 			return nil, err
 		}
 
@@ -741,6 +787,40 @@ func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (
 
 	if !options.create {
 		return nil, ErrNotFound.WithKindName(KindProject, name).Wrap(err)
+	}
+
+	if options.config == nil {
+		options.config = map[string]string{}
+	}
+
+	_, hasFeaturesNetworks := options.config["features.networks"]
+	if !hasFeaturesNetworks {
+		driver := options.networkDriver
+		if driver == "" {
+			driver = "auto"
+		}
+
+		switch driver {
+		case "bridge":
+			// Leave features.networks off for bridge mode.
+		case "ovn":
+			supported, err := c.DetectOVN()
+			if err != nil {
+				return nil, fmt.Errorf("detecting OVN support: %w", err)
+			}
+			if !supported {
+				return nil, fmt.Errorf("server does not support OVN networks")
+			}
+			options.config["features.networks"] = "true"
+		case "auto":
+			supported, _ := c.DetectOVN()
+			if supported {
+				options.config["features.networks"] = "true"
+				c.LogInfo(fmt.Sprintf("project %q: OVN networking enabled (server supports OVN)", name))
+			} else {
+				c.LogInfo(fmt.Sprintf("project %q: bridge networking (OVN not available on this server)", name))
+			}
+		}
 	}
 
 	p, createErr := c.createProject(name, options.config)

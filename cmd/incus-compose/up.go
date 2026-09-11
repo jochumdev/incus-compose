@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"os"
 	"os/signal"
@@ -138,6 +139,22 @@ func newUpCommand() *cli.Command {
 				Usage:   "Don't start or configure DNS for the project",
 				Sources: cli.EnvVars("INCUS_COMPOSE_DISABLE_DNS"),
 			},
+			&cli.StringFlag{
+				Name:    "network-driver",
+				Usage:   `Network driver to use: "auto" (default), "ovn", or "bridge"`,
+				Sources: cli.EnvVars("INCUS_COMPOSE_NETWORK_DRIVER"),
+				Validator: func(v string) error {
+					if v == "" {
+						return nil
+					}
+					switch v {
+					case "auto", "ovn", "bridge":
+						return nil
+					default:
+						return fmt.Errorf("invalid network-driver %q: must be auto, ovn, or bridge", v)
+					}
+				},
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			noColor := noColor(ctx)
@@ -171,10 +188,17 @@ func newUpCommand() *cli.Command {
 				p.ClientConfig.Healthd.External = true
 			}
 
+			driver, err := networkDriver(globalClient, cmd, p)
+			if err != nil {
+				globalClient.LogError("Configuring the network driver", "error", err)
+				return errLogged.Wrap(err)
+			}
+
 			c, err := globalClient.EnsureProject(
 				p.Name,
 				client.EnsureProjectWithCreate(),
 				client.EnsureProjectWithConfig(p.ClientConfig.XIncus),
+				client.EnsureProjectWithNetworkDriver(driver),
 			)
 			if err != nil {
 				globalClient.LogError("Getting the incus project", "error", err)

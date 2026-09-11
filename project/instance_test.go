@@ -1368,6 +1368,34 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		assert.Equal(t, "none", devices[0].Config.Extensions["ipv4.gateway"])
 	})
 
+	t.Run("ovn network driver and parent", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{
+			"ovn-backend": {
+				Driver: "ovn",
+				Extensions: types.Extensions{
+					"x-incus-compose": map[string]any{
+						"parent": "incusbr0",
+					},
+				},
+			},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"ovn-backend": {},
+		}}
+
+		devices, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		require.Len(t, resources, 1)
+
+		netRes, ok := resources[0].(*client.Network)
+		require.True(t, ok)
+		assert.Equal(t, "ovn", netRes.Config.Type)
+		assert.Equal(t, "incusbr0", netRes.Config.Extensions["network"])
+	})
+
 	t.Run("gateway true still requires an address", func(t *testing.T) {
 		t.Parallel()
 

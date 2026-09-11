@@ -39,6 +39,17 @@ func TestIncusNetworkRequests(t *testing.T) {
 		require.Equal(t, []string{"/1.0/networks?project=myproject"}, seen.uris())
 	})
 
+	t.Run("GetNetworkNamesAllProjects", func(t *testing.T) {
+		t.Parallel()
+
+		conn, seen := recordingServer(t, `["/1.0/networks/br0","/1.0/networks/ovn-net"]`)
+
+		names, err := conn.GetNetworkNamesAllProjects(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []string{"br0", "ovn-net"}, names)
+		require.Equal(t, []string{"/1.0/networks?all-projects=true"}, seen.uris())
+	})
+
 	t.Run("GetNetworks", func(t *testing.T) {
 		t.Parallel()
 

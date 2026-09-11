@@ -175,6 +175,20 @@ func TestDNSmasqRecords(t *testing.T) {
 	}
 }
 
+func TestDNSWatcher_SkipsOVNNetwork(t *testing.T) {
+	t.Parallel()
+	c := NewOfflineClient(t.Context(), "dnswatcher-test")
+	err := c.RegisterDNSWatcher()
+	require.NoError(t, err)
+
+	r, err := c.Resource(KindNetwork, "ovn-net", &NetworkConfig{Type: "ovn"})
+	require.NoError(t, err)
+
+	net, ok := r.(*Network)
+	require.True(t, ok)
+	require.Equal(t, "ovn", net.Config.Type)
+}
+
 // ----------------------------------------------------------------------------
 // candidateNames Unit Tests (offline, no Incus required)
 // ----------------------------------------------------------------------------
@@ -240,6 +254,42 @@ func TestNetworkResource_ReturnsSameInstance(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Same(t, r1, r2)
+}
+
+func TestNetworkResource_DefaultType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults to bridge when features.networks is not set", func(t *testing.T) {
+		t.Parallel()
+		c := NewOfflineClient(t.Context(), "bridge-test")
+		r, err := c.Resource(KindNetwork, "test-net", &NetworkConfig{})
+		require.NoError(t, err)
+		net, ok := r.(*Network)
+		require.True(t, ok)
+		require.Equal(t, "bridge", net.Config.Type)
+	})
+
+	t.Run("defaults to ovn when features.networks is true", func(t *testing.T) {
+		t.Parallel()
+		c := NewOfflineClient(t.Context(), "ovn-test")
+		c.projectConfig = map[string]string{"features.networks": "true"}
+		r, err := c.Resource(KindNetwork, "test-net", &NetworkConfig{})
+		require.NoError(t, err)
+		net, ok := r.(*Network)
+		require.True(t, ok)
+		require.Equal(t, "ovn", net.Config.Type)
+	})
+
+	t.Run("explicit type overrides default", func(t *testing.T) {
+		t.Parallel()
+		c := NewOfflineClient(t.Context(), "explicit-test")
+		c.projectConfig = map[string]string{"features.networks": "true"}
+		r, err := c.Resource(KindNetwork, "test-net", &NetworkConfig{Type: "bridge"})
+		require.NoError(t, err)
+		net, ok := r.(*Network)
+		require.True(t, ok)
+		require.Equal(t, "bridge", net.Config.Type)
+	})
 }
 
 func TestNetworkResource_DifferentNamesAreDifferent(t *testing.T) {

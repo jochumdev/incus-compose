@@ -415,7 +415,9 @@ func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
+	// The DNS records this test reads are dnsmasq's, which only exists on a
+	// bridge network.
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--network-driver", "bridge")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -428,7 +430,7 @@ func TestUpDownscaleRemovesInstancesAndDNS(t *testing.T) {
 	before := dnsServiceIPs(t, c, networks, "web")
 	require.NotEmpty(t, before, "web should have DNS records for 3 replicas")
 
-	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--scale=web=1")
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--scale=web=1", "--network-driver", "bridge")
 	require.NoError(t, err)
 
 	survivor, err := c.InstanceExists("web-1")
@@ -466,10 +468,12 @@ func TestDNSCnameAliasAcrossProjects(t *testing.T) {
 	testlib.CleanupCompose(t, "dns", "-f", composeDNS, "down", "--project")
 	testlib.CleanupCompose(t, "dns2", "-f", composeDNS2, "down", "--project")
 
-	_, err := testlib.RunCompose(ctx, t, "dns", "", nil, "-f", composeDNS, "up", "--detach")
+	// dnsmasq cnames are bridge-only, and dns2's network is an external bridge
+	// in the default project.
+	_, err := testlib.RunCompose(ctx, t, "dns", "", nil, "-f", composeDNS, "up", "--detach", "--network-driver", "bridge")
 	require.NoError(t, err)
 
-	_, err = testlib.RunCompose(ctx, t, "dns2", "", nil, "-f", composeDNS2, "up", "--detach")
+	_, err = testlib.RunCompose(ctx, t, "dns2", "", nil, "-f", composeDNS2, "up", "--detach", "--network-driver", "bridge")
 	require.NoError(t, err)
 
 	// Matches dns2's hardcoded x-incus-compose.network: dns-default.

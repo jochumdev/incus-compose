@@ -93,7 +93,11 @@ func newNetwork(c *Client, name string, configGetter Config) (*Network, error) {
 	config = cConfig
 
 	if config.Type == "" {
-		config.Type = "bridge"
+		if c.FeaturesNetworks() {
+			config.Type = "ovn"
+		} else {
+			config.Type = "bridge"
+		}
 	}
 
 	network := &Network{
@@ -244,13 +248,25 @@ func (r *Network) Ensure(ctx context.Context, opts ...Option) error {
 	return err
 }
 
+func (r *Network) incusProject() string {
+	if r.client.FeaturesNetworks() {
+		return r.client.incusProject
+	}
+
+	return incusApi.ProjectDefaultName
+}
+
 func (r *Network) get(ctx context.Context) error {
 	conn, err := r.client.GlobalConnection()
 	if err != nil {
 		return err
 	}
 
-	network, eTag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
+	proj := r.incusProject()
+	network, eTag, err := conn.GetNetwork(ctx, proj, r.incusName)
+	if err != nil && r.Config.External && proj != incusApi.ProjectDefaultName {
+		network, eTag, err = conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
+	}
 	if err != nil {
 		r.clearState()
 		return ErrNotFound.Wrap(err)
@@ -267,6 +283,33 @@ func (r *Network) create(ctx context.Context) error {
 		return fmt.Errorf("preparing network config for %q: %w", r.Name(), err)
 	}
 
+	conn, err := r.client.GlobalConnection()
+	if err != nil {
+		return err
+	}
+
+	if r.Config.Type == "ovn" {
+		if config == nil {
+			config = map[string]string{}
+		}
+		if config["network"] == "" {
+			// If the user did not explicitly set an uplink network via x-incus-compose.parent,
+			// look for an uplink network in the default project with OVN ranges configured.
+			defaultNets, netErr := conn.GetNetworks(ctx, incusApi.ProjectDefaultName)
+			if netErr == nil {
+				var eligible []string
+				for _, n := range defaultNets {
+					if (n.Type == "bridge" || n.Type == "physical") && (n.Config["ipv4.ovn.ranges"] != "" || n.Config["ipv6.ovn.ranges"] != "") {
+						eligible = append(eligible, n.Name)
+					}
+				}
+				if len(eligible) == 1 {
+					config["network"] = eligible[0]
+				}
+			}
+		}
+	}
+
 	// Use client's configured description format for consistency with other resources.
 	req := incusApi.NetworksPost{
 		Name: r.incusName,
@@ -277,12 +320,9 @@ func (r *Network) create(ctx context.Context) error {
 		},
 	}
 
-	conn, err := r.client.GlobalConnection()
+	proj := r.incusProject()
+	err = conn.CreateNetwork(ctx, proj, req)
 	if err != nil {
-		return err
-	}
-
-	if err := conn.CreateNetwork(ctx, incusApi.ProjectDefaultName, req); err != nil {
 		return fmt.Errorf("creating network %q: %w", r.Name(), err)
 	}
 
@@ -293,7 +333,7 @@ func (r *Network) create(ctx context.Context) error {
 	defer cancel()
 	interval := 100 * time.Millisecond
 	for {
-		nw, eTag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
+		nw, eTag, err := conn.GetNetwork(ctx, proj, r.incusName)
 		if err == nil {
 			if nw.Status == incusApi.NetworkStatusCreated || nw.Status == "Created" {
 				r.state.Store(&NetworkState{IncusNetwork: nw, ETag: eTag})
@@ -373,7 +413,8 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, ActionDelete, r, options, nil)
 	}
 
-	if err := r.get(ctx); err != nil {
+	err := r.get(ctx)
+	if err != nil {
 		// Already gone server side
 		r.client.resources.Remove(r)
 		return r.client.hookAfter(ctx, ActionDelete, r, options, ErrNotFound.Wrap(err))
@@ -384,7 +425,7 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	err = conn.DeleteNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
+	err = conn.DeleteNetwork(ctx, r.incusProject(), r.incusName)
 	r.clearState()
 
 	r.client.resources.Remove(r)
@@ -406,7 +447,7 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 		return err
 	}
 
-	net, etag, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, r.incusName)
+	net, etag, err := conn.GetNetwork(ctx, r.incusProject(), r.incusName)
 	if err != nil {
 		return fmt.Errorf("reading network %q: %w", r.Name(), err)
 	}
@@ -493,7 +534,8 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 		put.Config["raw.dnsmasq"] = raw
 	}
 
-	if err := conn.UpdateNetwork(ctx, incusApi.ProjectDefaultName, r.incusName, put, etag); err != nil {
+	err = conn.UpdateNetwork(ctx, r.incusProject(), r.incusName, put, etag)
+	if err != nil {
 		return fmt.Errorf("updating dnsmasq records for network %q: %w", r.Name(), err)
 	}
 

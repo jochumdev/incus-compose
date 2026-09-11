@@ -12,3 +12,5 @@ networks:
     external: true
     x-incus-compose:
       network: incusbr0
+x-incus:
+  features.networks: "false"

@@ -15,6 +15,12 @@ form.
 
 ### Added
 
+- Support for OVN networks as the default network driver for newly created projects
+  when Incus supports OVN. Includes `--network-driver` / `INCUS_COMPOSE_NETWORK_DRIVER`
+  flag on `up`, top-level `x-incus-compose.network-driver` compose option (`auto`,
+  `ovn`, `bridge`), and `x-incus-compose.parent` network extension to configure uplink
+  networks. Existing projects and servers without OVN continue to use bridge networks.
+  (by @jochumdev)
 - `ic-dns`: A new split-horizon authoritative DNS daemon for Incus instances,
   built on the new `ievent` event framework and CoreDNS. Resolves instance names
   dynamically within per-project or shared zones (`.incus`), serving records

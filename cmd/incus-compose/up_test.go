@@ -159,3 +159,29 @@ func TestPulledImageChanged(t *testing.T) {
 		})
 	}
 }
+
+func TestUpCommand_NetworkDriverFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := newUpCommand()
+	var netDriverFlag *cli.StringFlag
+	for _, f := range cmd.Flags {
+		sf, ok := f.(*cli.StringFlag)
+		if ok && sf.Name == "network-driver" {
+			netDriverFlag = sf
+			break
+		}
+	}
+
+	require.NotNil(t, netDriverFlag, "network-driver flag must be defined on up command")
+	assert.Equal(t, []string{"INCUS_COMPOSE_NETWORK_DRIVER"}, netDriverFlag.Sources.EnvKeys())
+
+	// Test validator
+	require.NotNil(t, netDriverFlag.Validator)
+	assert.NoError(t, netDriverFlag.Validator(""))
+	assert.NoError(t, netDriverFlag.Validator("auto"))
+	assert.NoError(t, netDriverFlag.Validator("ovn"))
+	assert.NoError(t, netDriverFlag.Validator("bridge"))
+	assert.Error(t, netDriverFlag.Validator("invalid"))
+	assert.Error(t, netDriverFlag.Validator("macvlan"))
+}

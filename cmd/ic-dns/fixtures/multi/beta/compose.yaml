@@ -1,5 +1,9 @@
 name: beta
 
+# Attaches to dns's bridge, which lives in the default namespace.
+x-incus:
+  features.networks: "false"
+
 x-incus-compose:
   dns:
     scope: "${SUITE_SCOPE}"

@@ -95,7 +95,9 @@ func TestE2ENATProxyWithPortAndStaticIP(t *testing.T) {
 	ctx := t.Context()
 	pn := t.Name()
 
-	c := projectClient(ctx, t, pn, client.EnsureProjectWithCreate())
+	// Created ahead of `up` to query the result; a NAT port needs bridge, so
+	// the project must not be created under features.networks.
+	c := projectClient(ctx, t, pn, client.EnsureProjectWithCreate(), client.EnsureProjectWithNetworkDriver("bridge"))
 	conn, err := c.Connection()
 	require.NoError(t, err)
 

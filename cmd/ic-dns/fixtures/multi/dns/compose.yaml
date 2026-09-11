@@ -1,5 +1,10 @@
 name: dns
 
+# Alpha and beta attach to a bridge this project owns, so it has to live in
+# the default namespace both can see: no features.networks.
+x-incus:
+  features.networks: "false"
+
 x-incus-compose:
   dns:
     scope: "${SUITE_SCOPE}"

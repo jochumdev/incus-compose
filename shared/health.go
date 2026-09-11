@@ -27,6 +27,10 @@ const (
 
 	// HealthScopeKey names the daemon watching a project. Missing means neither.
 	HealthScopeKey = HealthKeyPrefix + "scope"
+
+	// HealthProjectKey names the Incus project the shared daemon runs in, which
+	// is not the system project when it attaches to another project's network.
+	HealthProjectKey = HealthKeyPrefix + "project"
 )
 
 // Values of HealthScopeKey.

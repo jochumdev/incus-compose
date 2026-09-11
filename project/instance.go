@@ -1307,6 +1307,14 @@ func networkExtensions(networkDef types.NetworkConfig) (map[string]string, error
 		}
 	}
 
+	var xic struct {
+		Parent string `mapstructure:"parent"`
+	}
+	ok, err = networkDef.Extensions.Get("x-incus-compose", &xic)
+	if err == nil && ok && xic.Parent != "" {
+		result["network"] = xic.Parent
+	}
+
 	return result, nil
 }
 

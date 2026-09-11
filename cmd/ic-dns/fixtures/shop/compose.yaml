@@ -1,6 +1,9 @@
 name: shop
 
 x-incus-compose:
+  # The stack dials its pinned network gateway as the Incus endpoint, which
+  # only a bridge binds on the host.
+  network-driver: bridge
   dns:
     scope: project
 

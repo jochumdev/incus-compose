@@ -156,6 +156,10 @@ type Project struct {
 
 	ClientConfig XICProject `json:"-" yaml:"-"`
 
+	// NeedsBridge is set by Load when a published port asks for NAT, which
+	// Incus refuses in a project that has the networks feature.
+	NeedsBridge bool `json:"-" yaml:"-"`
+
 	// InstanceMarks is stamped on every instance; see LoadInstanceMarks.
 	InstanceMarks map[string]string `json:"-" yaml:"-"`
 }
@@ -166,6 +170,9 @@ type XICProject struct {
 	Healthd XICHealthd
 	DNS     XICDNS
 	XIncus  map[string]string
+
+	// NetworkDriver is x-incus-compose.network-driver: auto | ovn | bridge.
+	NetworkDriver string
 
 	// SleepImage is the image `run` takes its blocking helper from. Empty means the
 	// one this build ships; `run --init` overrides both.
@@ -236,6 +243,22 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 
 	p.Project = cp
 
+	for _, svc := range p.Services {
+		for _, port := range svc.Ports {
+			if port.Extensions == nil {
+				continue
+			}
+
+			var ext struct {
+				Nat bool `mapstructure:"nat"`
+			}
+			ok, err := port.Extensions.Get("x-incus-compose", &ext)
+			if err == nil && ok && ext.Nat {
+				p.NeedsBridge = true
+			}
+		}
+	}
+
 	if p.Extensions != nil {
 		var ext struct {
 			Backup client.BackupConfig `mapstructure:"backup"`
@@ -264,12 +287,22 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 				Scope       string `mapstructure:"scope"`
 				Zone        string `mapstructure:"zone"`
 			} `mapstructure:"dns"`
+
+			NetworkDriver string `mapstructure:"network-driver"`
 		}
 		ok, err := p.Extensions.Get("x-incus-compose", &ext)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
+			p.ClientConfig.NetworkDriver = ext.NetworkDriver
+			if p.ClientConfig.NetworkDriver != "" &&
+				p.ClientConfig.NetworkDriver != "auto" &&
+				p.ClientConfig.NetworkDriver != "ovn" &&
+				p.ClientConfig.NetworkDriver != "bridge" {
+				return nil, fmt.Errorf("invalid network-driver %q: must be auto, ovn, or bridge", ext.NetworkDriver)
+			}
+
 			p.ClientConfig.Healthd.Incus = ext.Healthd.Incus
 			p.ClientConfig.Healthd.Network = ext.Healthd.Network
 			p.ClientConfig.Healthd.External = ext.Healthd.External

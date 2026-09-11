@@ -1,3 +1,8 @@
+# An external network lives in the default project, so this project stays out
+# of features.networks to reach it.
+x-incus:
+  features.networks: "false"
+
 services:
   web:
     image: docker.io/alpine:edge

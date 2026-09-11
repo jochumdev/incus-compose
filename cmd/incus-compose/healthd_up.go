@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -96,6 +97,7 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 
 	// hc owns the sidecar, which for global scope is not this project.
 	hc := c
+	daemonProject := c.IncusProject()
 
 	if params.global {
 		// Before the marking below, or both daemons watch this project at once.
@@ -114,8 +116,13 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 			}
 		}
 
+		daemonProject = systemProject
+		if project, rest, ok := strings.Cut(params.network, ":"); ok && project != "" && rest != "" && !strings.Contains(rest, ":") {
+			daemonProject = project
+		}
+
 		hc, err = c.Global().EnsureProject(
-			systemProject,
+			daemonProject,
 			client.EnsureProjectWithCreate(),
 			client.EnsureProjectWithConfig(map[string]string{managedKey: "true"}),
 		)
@@ -123,6 +130,8 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 			c.LogError("Getting the healthd project", "error", err)
 			return errLogged.Wrap(err)
 		}
+
+		daemonProject = hc.IncusProject()
 
 		// Open before any stack action, as Client.Open documents.
 		if err := hc.Open(); err != nil {
@@ -133,7 +142,11 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 	}
 
 	// After the teardown, so nothing watches the project in between.
-	err = c.Global().AddMissingProjectConfig(p.Name, map[string]string{shared.HealthScopeKey: scope})
+	scopeConfig := map[string]string{shared.HealthScopeKey: scope}
+	if params.global {
+		scopeConfig[shared.HealthProjectKey] = daemonProject
+	}
+	err = c.Global().AddMissingProjectConfig(p.Name, scopeConfig)
 	if err != nil {
 		c.LogError("Marking the project's healthd scope", "error", err)
 		return errLogged.Wrap(err)
@@ -193,8 +206,13 @@ func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdU
 		stackWorkers: args.Workers,
 	}
 
+	hcProject := systemProject
+	if project, rest, ok := strings.Cut(args.Network, ":"); ok && project != "" && rest != "" && !strings.Contains(rest, ":") {
+		hcProject = project
+	}
+
 	hc, err := gc.EnsureProject(
-		systemProject,
+		hcProject,
 		client.EnsureProjectWithCreate(),
 		client.EnsureProjectWithConfig(map[string]string{managedKey: "true"}),
 	)

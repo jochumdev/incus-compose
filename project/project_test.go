@@ -880,3 +880,96 @@ func TestDNSConfigEmptyWithoutExtension(t *testing.T) {
 	assert.Equal(t, proj.Name+"."+
 		DefaultDNSZoneSuffix, proj.ClientConfig.DNS.Zone)
 }
+
+func TestNetworkDriverConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		yaml     string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "empty_defaults_to_empty",
+			yaml:     "services:\n  web:\n    image: test\n",
+			expected: "",
+		},
+		{
+			name:     "auto_driver",
+			yaml:     "x-incus-compose:\n  network-driver: auto\nservices:\n  web:\n    image: test\n",
+			expected: "auto",
+		},
+		{
+			name:     "ovn_driver",
+			yaml:     "x-incus-compose:\n  network-driver: ovn\nservices:\n  web:\n    image: test\n",
+			expected: "ovn",
+		},
+		{
+			name:     "bridge_driver",
+			yaml:     "x-incus-compose:\n  network-driver: bridge\nservices:\n  web:\n    image: test\n",
+			expected: "bridge",
+		},
+		{
+			name:    "invalid_driver",
+			yaml:    "x-incus-compose:\n  network-driver: invalid\nservices:\n  web:\n    image: test\n",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(tt.yaml), 0o600)
+			require.NoError(t, err)
+
+			proj, err := New().Load(t.Context(), LoadWorkingDir(dir))
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, proj.ClientConfig.NetworkDriver)
+		})
+	}
+}
+
+func TestNeedsBridgeFromNATPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{
+			name: "no ports",
+			yaml: "services:\n  web:\n    image: test\n",
+		},
+		{
+			name: "plain port",
+			yaml: "services:\n  web:\n    image: test\n    ports:\n      - \"8080:80\"\n",
+		},
+		{
+			name: "nat port",
+			yaml: "services:\n  web:\n    image: test\n    ports:\n      - published: \"8080\"\n        target: \"80\"\n        x-incus-compose:\n          nat: true\n",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(tt.yaml), 0o600)
+			require.NoError(t, err)
+
+			proj, err := New().Load(t.Context(), LoadWorkingDir(dir))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, proj.NeedsBridge)
+		})
+	}
+}

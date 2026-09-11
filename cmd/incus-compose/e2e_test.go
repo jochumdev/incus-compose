@@ -375,10 +375,16 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 
 	c := projectClient(ctx, t, pn)
 
+	// An isolated project owns its networks; otherwise they live in default.
+	netProject := incusApi.ProjectDefaultName
+	if c.FeaturesNetworks() {
+		netProject = c.IncusProject()
+	}
+
 	for _, name := range networks {
 		conn, err := c.Connection()
 		require.NoError(t, err)
-		_, _, err = conn.GetNetwork(ctx, incusApi.ProjectDefaultName, name)
+		_, _, err = conn.GetNetwork(ctx, netProject, name)
 		require.NoError(t, err, "for network %q", name)
 	}
 
@@ -389,7 +395,7 @@ func TestE2EDownProjectDeletesNetworks(t *testing.T) {
 	for _, name := range networks {
 		conn, err := c.Connection()
 		require.NoError(t, err)
-		_, _, err = conn.GetNetwork(ctx, incusApi.ProjectDefaultName, name)
+		_, _, err = conn.GetNetwork(ctx, netProject, name)
 		require.Error(t, err, "for network %q", name)
 	}
 }
