@@ -9,7 +9,6 @@ import (
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/cmd/ic-healthd/checker"
-	"github.com/lxc/incus-compose/ievent/debounce"
 	"github.com/lxc/incus-compose/ievent/enricher"
 	"github.com/lxc/incus-compose/ievent/http"
 	"github.com/lxc/incus-compose/ievent/iutil"
@@ -25,8 +24,7 @@ type runner interface {
 	Run(ctx context.Context) error
 }
 
-// chain is the compiled-in list, in the order events travel it. debounce sits
-// before the enricher so a burst costs one read instead of one per event.
+// chain is the compiled-in list, in the order events travel it.
 func chain(logger *slog.Logger, cfg *config) ([]iutil.Plugin, []runner) {
 	plugins := []iutil.Plugin{}
 
@@ -40,7 +38,6 @@ func chain(logger *slog.Logger, cfg *config) ([]iutil.Plugin, []runner) {
 		add(log.New(logger, log.At("arrival"), log.Level("TRACE")))
 	}
 
-	add(debounce.New(logger))
 	add(enricher.New(logger,
 		enricher.Project(serves(logger, cfg)),
 		enricher.Metrics(cfg.Metrics),
