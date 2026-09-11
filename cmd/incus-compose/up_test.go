@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -184,4 +185,39 @@ func TestUpCommand_NetworkDriverFlag(t *testing.T) {
 	assert.NoError(t, netDriverFlag.Validator("bridge"))
 	assert.Error(t, netDriverFlag.Validator("invalid"))
 	assert.Error(t, netDriverFlag.Validator("macvlan"))
+}
+
+func TestUpCommand_NetworkUplinkFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := newUpCommand()
+	var netUplinkFlag *cli.StringFlag
+	for _, f := range cmd.Flags {
+		sf, ok := f.(*cli.StringFlag)
+		if ok && sf.Name == "network-uplink" {
+			netUplinkFlag = sf
+			break
+		}
+	}
+
+	require.NotNil(t, netUplinkFlag, "network-uplink flag must be defined on up command")
+	assert.Equal(t, []string{"INCUS_COMPOSE_NETWORK_UPLINK"}, netUplinkFlag.Sources.EnvKeys())
+}
+
+func TestBuildLoadOptions_NetworkOptions(t *testing.T) {
+	t.Parallel()
+
+	cmd := newUpCommand()
+	var capturedOpts []project.LoadOption
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		capturedOpts = buildLoadOptions(c)
+		return nil
+	}
+
+	err := cmd.Run(t.Context(), []string{"up", "--network-driver=ovn", "--network-uplink=incusbr0"})
+	require.NoError(t, err)
+
+	loadOpts := project.NewLoadOptions(capturedOpts...)
+	assert.Equal(t, "ovn", loadOpts.NetworkDriver)
+	assert.Equal(t, "incusbr0", loadOpts.NetworkUplink)
 }

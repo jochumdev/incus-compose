@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -22,6 +23,7 @@ import (
 	// Set the AUTOMEMLIMIT environment variable to a ratio in (0.0, 1.0], or "off".
 	_ "github.com/KimMachineGun/automemlimit"
 
+	"github.com/lxc/incus-compose/iclient"
 	ievlog "github.com/lxc/incus-compose/ievent/log"
 	"github.com/lxc/incus-compose/ievent/source"
 	"github.com/lxc/incus-compose/incustrust"
@@ -355,7 +357,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg config) error {
 
 	logger.Info("chain", "plugins", names)
 
-	conn, err := incustrust.Connect(ctx, incustrust.Config{
+	trust := incustrust.Config{
 		Name:       certName,
 		UserAgent:  certName + "/" + version,
 		URL:        cfg.IncusURL,
@@ -368,9 +370,28 @@ func run(ctx context.Context, logger *slog.Logger, cfg config) error {
 		Projects:   cfg.Projects,
 		Remote:     cfg.Remote,
 		UseRemote:  cfg.UseRemote,
-	})
-	if err != nil {
-		return fmt.Errorf("connecting to Incus: %w", err)
+	}
+
+	var conn *iclient.Connection
+	for {
+		conn, err = incustrust.Connect(ctx, trust)
+		if err == nil {
+			logger.Info("Connected to Incus")
+
+			break
+		}
+
+		if errors.Is(err, incustrust.ErrNoCredentials) {
+			return err
+		}
+
+		logger.Error("connecting to Incus", "err", err)
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("connecting to Incus: %w", err)
+		case <-time.After(time.Second):
+		}
 	}
 
 	// Wiring only: nothing is dialed and no goroutine starts, so a configuration

@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"time"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
 
@@ -199,7 +202,225 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 	}
 	stack.AddOrdered(order, myPResources)
 
-	return dnsEnsure(ctx, hc, stack, params)
+	var resolverNet *client.Network
+	var projectNets []*client.Network
+
+	if params.global {
+		resolverNet, projectNets, err = setupDNSACLs(ctx, c, p, myPResources, hc)
+		if err != nil {
+			c.LogError("Wiring the shared DNS network", "error", err)
+			return errLogged.Wrap(err)
+		}
+	}
+
+	err = dnsEnsure(ctx, hc, stack, params)
+	if err != nil {
+		return err
+	}
+
+	// After the project networks, so their subnets can be read for the ACL.
+	if resolverNet != nil && len(projectNets) > 0 {
+		err = setupResolverACL(ctx, p, resolverNet, myPResources)
+		if err != nil {
+			c.LogError("Wiring the shared DNS network", "error", err)
+			return errLogged.Wrap(err)
+		}
+
+		err = client.RunAction(ctx, resolverNet, client.ActionEnsure, client.OptionCreate())
+		if err == nil {
+			for _, net := range projectNets {
+				peer := fmt.Sprintf("%s-%s-dns", p.Name, net.IncusName())
+				hadPeer := slices.ContainsFunc(net.Config.Peers, func(p incusApi.NetworkPeersPost) bool { return p.Name == peer })
+				if !hadPeer {
+					net.Config.Peers = append(net.Config.Peers, incusApi.NetworkPeersPost{
+						Name:          peer,
+						TargetProject: hc.IncusProject(),
+						TargetNetwork: globalDNSNetwork,
+					})
+				}
+
+				err = client.RunAction(ctx, net, client.ActionEnsure, client.OptionCreate())
+				if !hadPeer {
+					net.Config.Peers = slices.DeleteFunc(net.Config.Peers, func(p incusApi.NetworkPeersPost) bool { return p.Name == peer })
+				}
+				if err != nil {
+					break
+				}
+			}
+		}
+
+		if err != nil {
+			c.LogError("Wiring the shared DNS network", "error", err)
+			return errLogged.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+// setupDNSACLs prepares the mutual peering between each project OVN network and
+// the shared resolver's network. The resolver side is created first,
+// then the project side, ensuring Incus pairs them immediately with no races.
+func setupDNSACLs(ctx context.Context, c *client.Client, p *project.Project, resources map[string][]client.Resource, resolver *client.Client) (*client.Network, []*client.Network, error) {
+	resolverRes, err := resolver.Resource(client.KindNetwork, globalDNSNetwork, &client.NetworkConfig{OverrideName: globalDNSNetwork})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resolverNet, ok := resolverRes.(*client.Network)
+	if !ok {
+		return nil, nil, client.ErrUnknown.WithResource(resolverRes)
+	}
+
+	seen := map[string]bool{}
+	projectNets := []*client.Network{}
+
+	for _, list := range resources {
+		for _, r := range list {
+			net, ok := r.(*client.Network)
+			if !ok || seen[net.IncusName()] {
+				continue
+			}
+
+			// Only OVN networks peer; a bridge is reachable through the host.
+			if net.Type(ctx) != "ovn" {
+				continue
+			}
+
+			seen[net.IncusName()] = true
+			projectNets = append(projectNets, net)
+
+			peer := fmt.Sprintf("%s-%s-dns", p.Name, net.IncusName())
+			if !slices.ContainsFunc(resolverNet.Config.Peers, func(p incusApi.NetworkPeersPost) bool { return p.Name == peer }) {
+				resolverNet.Config.Peers = append(resolverNet.Config.Peers, incusApi.NetworkPeersPost{
+					Name:          peer,
+					TargetProject: c.IncusProject(),
+					TargetNetwork: net.IncusName(),
+				})
+			}
+		}
+	}
+
+	return resolverNet, projectNets, nil
+}
+
+// setupResolverACL scopes the resolver network to DNS, by CIDR: a peer selector
+// would stop the ACL from ever being detached once a project's network is gone.
+// It needs the project networks ensured first, to read their subnets.
+func setupResolverACL(ctx context.Context, p *project.Project, resolverNet *client.Network, resources map[string][]client.Resource) error {
+	seen := map[string]bool{}
+	ingress := []incusApi.NetworkACLRule{}
+
+	for _, list := range resources {
+		for _, r := range list {
+			net, ok := r.(*client.Network)
+			if !ok || seen[net.IncusName()] || net.Config.Type != "ovn" {
+				continue
+			}
+
+			seen[net.IncusName()] = true
+
+			subnets, err := net.Subnets(ctx)
+			if err != nil {
+				return err
+			}
+
+			for _, subnet := range subnets {
+				for _, proto := range []string{"tcp", "udp"} {
+					ingress = append(ingress, incusApi.NetworkACLRule{
+						Action:          "allow",
+						State:           "enabled",
+						Protocol:        proto,
+						DestinationPort: "53",
+						Source:          subnet,
+					})
+				}
+			}
+		}
+	}
+
+	if len(ingress) == 0 {
+		return nil
+	}
+
+	resolverNet.Config.ACL = &incusApi.NetworkACLsPost{
+		NetworkACLPost: incusApi.NetworkACLPost{Name: fmt.Sprintf("%s-dns", p.Name)},
+		NetworkACLPut:  incusApi.NetworkACLPut{Ingress: ingress},
+	}
+
+	return nil
+}
+
+// removeDNSACLs removes the resolver-side peer and ACL a project added, so its
+// networks can be deleted. A no-op unless the project uses the shared dns.
+func removeDNSACLs(ctx context.Context, c *client.Client, p *project.Project) error {
+	projectConfig, err := c.Global().ProjectConfig(p.Name)
+	if err != nil {
+		return err
+	}
+
+	if resolveDNSScope(projectConfig, "", p.ClientConfig.DNS.Scope) != shared.DNSScopeGlobal {
+		return nil
+	}
+
+	sysClient, err := c.Global().EnsureProject(systemProject)
+	if err != nil {
+		return err
+	}
+
+	err = sysClient.Open()
+	if err != nil {
+		return err
+	}
+	defer sysClient.WarnError(sysClient.Done, "Failure during Client.Done()")
+
+	resolverRes, err := sysClient.Resource(client.KindNetwork, globalDNSNetwork, &client.NetworkConfig{OverrideName: globalDNSNetwork})
+	if err != nil {
+		return err
+	}
+
+	resolverNet, ok := resolverRes.(*client.Network)
+	if !ok {
+		return client.ErrUnknown.WithResource(resolverRes)
+	}
+
+	// Fetch, so the detach has state to work from.
+	err = client.RunAction(ctx, resolverNet, client.ActionEnsure)
+	if err != nil {
+		return err
+	}
+
+	pResources, err := p.Resources(c)
+	if err != nil {
+		return err
+	}
+
+	// The ACL references the peer, and the peer is mutual, so the order is:
+	// ACL, project-side peer, resolver-side peer.
+	errs := resolverNet.RemoveACL(ctx, fmt.Sprintf("%s-dns", p.Name))
+
+	seen := map[string]bool{}
+
+	for _, list := range pResources {
+		for _, r := range list {
+			net, ok := r.(*client.Network)
+			if !ok || seen[net.IncusName()] {
+				continue
+			}
+
+			if net.Type(ctx) != "ovn" {
+				continue
+			}
+
+			seen[net.IncusName()] = true
+
+			peer := fmt.Sprintf("%s-%s-dns", p.Name, net.IncusName())
+			errs = errors.Join(errs, net.RemovePeer(ctx, peer))
+			errs = errors.Join(errs, resolverNet.RemovePeer(ctx, peer))
+		}
+	}
+
+	return errs
 }
 
 // dnsUpGlobal brings the shared daemon up with no compose project to read.

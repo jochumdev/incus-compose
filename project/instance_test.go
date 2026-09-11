@@ -1396,6 +1396,128 @@ func TestInstanceNetworkDevices(t *testing.T) {
 		assert.Equal(t, "incusbr0", netRes.Config.Extensions["network"])
 	})
 
+	t.Run("ovn network driver and uplink", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{Networks: types.Networks{
+			"ovn-uplink-net": {
+				Driver: "ovn",
+				Extensions: types.Extensions{
+					"x-incus-compose": map[string]any{
+						"uplink": "my-uplink",
+					},
+				},
+			},
+		}}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"ovn-uplink-net": {},
+		}}
+
+		devices, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		require.Len(t, resources, 1)
+
+		netRes, ok := resources[0].(*client.Network)
+		require.True(t, ok)
+		assert.Equal(t, "ovn", netRes.Config.Type)
+		assert.Equal(t, "my-uplink", netRes.Config.Extensions["network"])
+	})
+
+	t.Run("ovn network driver and top-level uplink", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{
+			Networks: types.Networks{
+				"ovn-top-uplink-net": {
+					Driver: "ovn",
+				},
+			},
+			Extensions: types.Extensions{
+				"x-incus-compose": map[string]any{
+					"network": map[string]any{
+						"uplink": "top-uplink",
+					},
+				},
+			},
+		}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"ovn-top-uplink-net": {},
+		}}
+
+		devices, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		require.Len(t, resources, 1)
+
+		netRes, ok := resources[0].(*client.Network)
+		require.True(t, ok)
+		assert.Equal(t, "ovn", netRes.Config.Type)
+		assert.Equal(t, "top-uplink", netRes.Config.Extensions["network"])
+	})
+
+	t.Run("bridge network driver ignores top-level uplink", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{
+			Networks: types.Networks{
+				"bridge-top-uplink-net": {
+					Driver: "bridge",
+				},
+			},
+			Extensions: types.Extensions{
+				"x-incus-compose": map[string]any{
+					"network": map[string]any{
+						"uplink": "top-uplink",
+					},
+				},
+			},
+		}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"bridge-top-uplink-net": {},
+		}}
+
+		devices, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		require.Len(t, resources, 1)
+
+		netRes, ok := resources[0].(*client.Network)
+		require.True(t, ok)
+		assert.Equal(t, "bridge", netRes.Config.Type)
+		assert.NotContains(t, netRes.Config.Extensions, "network")
+	})
+
+	t.Run("bridge network driver ignores xic uplink", func(t *testing.T) {
+		t.Parallel()
+
+		p := &types.Project{
+			Networks: types.Networks{
+				"bridge-xic-uplink-net": {
+					Driver: "bridge",
+					Extensions: types.Extensions{
+						"x-incus-compose": map[string]any{
+							"uplink": "my-uplink",
+						},
+					},
+				},
+			},
+		}
+		service := types.ServiceConfig{Name: "web", Networks: map[string]*types.ServiceNetworkConfig{
+			"bridge-xic-uplink-net": {},
+		}}
+
+		devices, resources, err := instanceNetworkDevices(c, p, service, "")
+		require.NoError(t, err)
+		require.Len(t, devices, 1)
+		require.Len(t, resources, 1)
+
+		netRes, ok := resources[0].(*client.Network)
+		require.True(t, ok)
+		assert.Equal(t, "bridge", netRes.Config.Type)
+		assert.NotContains(t, netRes.Config.Extensions, "network")
+	})
+
 	t.Run("gateway true still requires an address", func(t *testing.T) {
 		t.Parallel()
 

@@ -15,12 +15,22 @@ form.
 
 ### Added
 
-- Support for OVN networks as the default network driver for newly created projects
-  when Incus supports OVN. Includes `--network-driver` / `INCUS_COMPOSE_NETWORK_DRIVER`
-  flag on `up`, top-level `x-incus-compose.network-driver` compose option (`auto`,
-  `ovn`, `bridge`), and `x-incus-compose.parent` network extension to configure uplink
-  networks. Existing projects and servers without OVN continue to use bridge networks.
-  (by @jochumdev)
+- Support for OVN networks as the default network driver for newly created
+  projects when Incus supports OVN. Includes `--network-driver` /
+  `INCUS_COMPOSE_NETWORK_DRIVER` and `--network-uplink` /
+  `INCUS_COMPOSE_NETWORK_UPLINK` flags on `up`, top-level
+  `x-incus-compose.network.driver` (`auto`, `ovn`, `bridge`) and
+  `x-incus-compose.network.uplink` compose options (with backward-compatible
+  support for `x-incus-compose.network-driver`), and per-network
+  `x-incus-compose.uplink` (or `parent`) extension to configure uplink networks.
+  Existing projects and servers without OVN continue to use bridge networks. (by
+  @jochumdev)
+- Service-name DNS resolution now works on OVN networks. incus-compose peers
+  each project network to the shared `ic-dns` and scopes it with a hidden
+  network ACL, so a service name like `database` resolves with no compose
+  change. OVN networks also get a default ACL posture matching docker compose:
+  instances on the same network reach each other, nothing else may initiate in,
+  outbound is allowed. (by @jochumdev)
 - `ic-dns`: A new split-horizon authoritative DNS daemon for Incus instances,
   built on the new `ievent` event framework and CoreDNS. Resolves instance names
   dynamically within per-project or shared zones (`.incus`), serving records

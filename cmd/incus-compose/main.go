@@ -123,6 +123,16 @@ func buildLoadOptions(cmd *cli.Command) []project.LoadOption {
 		loadOpts = append(loadOpts, project.LoadOsEnv())
 	}
 
+	driver := cmd.String("network-driver")
+	if driver != "" {
+		loadOpts = append(loadOpts, project.LoadNetworkDriver(driver))
+	}
+
+	uplink := cmd.String("network-uplink")
+	if uplink != "" {
+		loadOpts = append(loadOpts, project.LoadNetworkUplink(uplink))
+	}
+
 	return loadOpts
 }
 

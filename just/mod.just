@@ -83,14 +83,18 @@ boundary:
         fi
     }
 
-    # Gated on the tree, not on the package: within an ievent/ that is here, a
+    # Gated on the tree, not on the package: within a tree that is here, a
     # moved ecs_view still has to resolve.
-    if [ -d ./ievent ]; then
+    if [ -d ./cmd/ic-dns/dns/ecs_view ]; then
+        check ./cmd/ic-dns/dns/ecs_view \
+            '^github.com/lxc/incus(-compose/(client|iclient|shared|incustrust|internal/testlib|ievent))?(/|$)' \
+            'Incus, iclient or the rest of ievent'
+    elif [ -d ./ievent/dns/ecs_view ]; then
         check ./ievent/dns/ecs_view \
             '^github.com/lxc/incus(-compose/(client|iclient|shared|incustrust|internal/testlib|ievent))?(/|$)' \
             'Incus, iclient or the rest of ievent'
     else
-        echo "==> ievent/ is not on this branch, skipping its rule"
+        echo "==> ecs_view is not on this branch, skipping its rule"
     fi
 
     for dir in ./client/... ./iclient/... ./shared/... ./incustrust/... ./internal/testlib/...; do

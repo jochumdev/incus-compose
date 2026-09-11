@@ -29,6 +29,10 @@ func KeepTestData() bool {
 func CleanupCompose(t *testing.T, project string, args ...string) {
 	t.Helper()
 
+	if KeepTestData() {
+		return
+	}
+
 	t.Cleanup(func() {
 		_, err := RunCompose(context.Background(), t, project, "", nil, args...)
 		if err != nil {

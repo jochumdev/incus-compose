@@ -82,7 +82,7 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		instanceName = oneOff.Name
 	}
 
-	devices, networks, err := instanceNetworkDevices(c, p, service, instanceName)
+	devices, networks, err := instanceNetworkDevices(c, p, service, instanceName, options)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
@@ -424,10 +424,27 @@ func instanceImage(c *client.Client, service types.ServiceConfig) (client.Resour
 
 // instanceNetworkDevices builds the NIC devices (eth0, eth1, ...) for a service's
 // networks along with the network resources they reference.
-func instanceNetworkDevices(c *client.Client, p *types.Project, service types.ServiceConfig, instanceName string) ([]client.InstanceDevice, []client.Resource, error) {
+func instanceNetworkDevices(c *client.Client, p *types.Project, service types.ServiceConfig, instanceName string, opts ...*ResourcesOptions) ([]client.InstanceDevice, []client.Resource, error) {
 	var errs error
 	devices := []client.InstanceDevice{}
 	resources := []client.Resource{}
+
+	var uplink string
+	if len(opts) > 0 && opts[0] != nil && opts[0].uplink != "" {
+		uplink = opts[0].uplink
+	} else if p != nil && p.Extensions != nil {
+		// Parse x-incus-compose.network.uplink
+		xic, ok := p.Extensions["x-incus-compose"].(map[string]any)
+		if ok {
+			netConf, ok := xic["network"].(map[string]any)
+			if ok {
+				u, ok := netConf["uplink"].(string)
+				if ok {
+					uplink = u
+				}
+			}
+		}
+	}
 
 	ethIdx := 0
 	for name, sNet := range service.Networks {
@@ -444,8 +461,18 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 				continue
 			}
 			netConfig.Extensions = exts
+			if netConfig.Extensions == nil {
+				netConfig.Extensions = map[string]string{}
+			}
 			if networkDef.Driver != "" {
 				netConfig.Type = networkDef.Driver
+			}
+			isOVN := netConfig.Type == "ovn" || (netConfig.Type == "" && c.FeaturesNetworks())
+			if isOVN && netConfig.Extensions["network"] == "" && uplink != "" {
+				netConfig.Extensions["network"] = uplink
+			}
+			if !isOVN {
+				delete(netConfig.Extensions, "network")
 			}
 			// compose-go always fills Name in, with the key for an external network
 			// and {project}_{key} otherwise; anything else is a `name:` the user
@@ -1309,10 +1336,15 @@ func networkExtensions(networkDef types.NetworkConfig) (map[string]string, error
 
 	var xic struct {
 		Parent string `mapstructure:"parent"`
+		Uplink string `mapstructure:"uplink"`
 	}
 	ok, err = networkDef.Extensions.Get("x-incus-compose", &xic)
-	if err == nil && ok && xic.Parent != "" {
-		result["network"] = xic.Parent
+	if err == nil && ok {
+		if xic.Parent != "" {
+			result["network"] = xic.Parent
+		} else if xic.Uplink != "" {
+			result["network"] = xic.Uplink
+		}
 	}
 
 	return result, nil

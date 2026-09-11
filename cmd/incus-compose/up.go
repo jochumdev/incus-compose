@@ -155,6 +155,11 @@ func newUpCommand() *cli.Command {
 					}
 				},
 			},
+			&cli.StringFlag{
+				Name:    "network-uplink",
+				Usage:   `Uplink network for OVN networks (e.g. "incusbr0")`,
+				Sources: cli.EnvVars("INCUS_COMPOSE_NETWORK_UPLINK"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			noColor := noColor(ctx)
@@ -188,17 +193,11 @@ func newUpCommand() *cli.Command {
 				p.ClientConfig.Healthd.External = true
 			}
 
-			driver, err := networkDriver(globalClient, cmd, p)
-			if err != nil {
-				globalClient.LogError("Configuring the network driver", "error", err)
-				return errLogged.Wrap(err)
-			}
-
 			c, err := globalClient.EnsureProject(
 				p.Name,
 				client.EnsureProjectWithCreate(),
 				client.EnsureProjectWithConfig(p.ClientConfig.XIncus),
-				client.EnsureProjectWithNetworkDriver(driver),
+				client.EnsureProjectWithNetworkDriver(p.ClientConfig.Network.Driver),
 			)
 			if err != nil {
 				globalClient.LogError("Getting the incus project", "error", err)

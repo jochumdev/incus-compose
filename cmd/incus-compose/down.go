@@ -134,6 +134,17 @@ func down(ctx context.Context, p *project.Project, c *client.Client, args downAr
 		c.LogWarn("Stopping resources", "error", errStop)
 	}
 
+	// Before the networks go: the resolver's peer and ACL reference them, so
+	// they have to be removed first or the delete fails with "in use".
+	networksGo := args.Project || (len(args.Services) == 0 && !args.NoNetworks)
+	if networksGo && !p.ClientConfig.DNS.Disabled {
+		err := removeDNSACLs(ctx, c, p)
+		if err != nil {
+			c.LogError("Removing the shared DNS wiring", "error", err)
+			return errLogged.Wrap(err)
+		}
+	}
+
 	errDel := stack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, runOpts...)
 	if errDel != nil {
 		c.LogWarn("Deleting resources", "error", errDel)

@@ -164,6 +164,9 @@ type GlobalClient struct {
 	// Cache for ConnectionIP()
 	connectionIPs []net.IP
 
+	// networkTypes caches each network's Incus type, keyed by project/name.
+	networkTypes sync.Map
+
 	// hookBefore is called hookBefore any action.
 	hookBefore func(ctx context.Context, action Action, r Resource, args Options, err error) error
 
@@ -574,6 +577,31 @@ func EnsureProjectWithNetworkDriver(driver string) EnsureProjectOption {
 	}
 }
 
+// NetworkType returns a network's Incus type, reading it once and caching it.
+func (c *GlobalClient) NetworkType(ctx context.Context, project string, name string) (string, error) {
+	key := project + "/" + name
+
+	if v, ok := c.networkTypes.Load(key); ok {
+		if typ, ok := v.(string); ok {
+			return typ, nil
+		}
+	}
+
+	network, _, err := c.incus.GetNetwork(ctx, project, name)
+	if err != nil {
+		notFound := incusApi.StatusErrorCheck(err, http.StatusNotFound)
+		if notFound {
+			return "", ErrNotFound.WithText("network " + name).Wrap(err)
+		}
+
+		return "", err
+	}
+
+	c.networkTypes.Store(key, network.Type)
+
+	return network.Type, nil
+}
+
 // DetectOVN reports whether the server supports OVN networks.
 func (c *GlobalClient) DetectOVN() (bool, error) {
 	// Cheap check: scan all network names for any active OVN network.
@@ -816,9 +844,6 @@ func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (
 			supported, _ := c.DetectOVN()
 			if supported {
 				options.config["features.networks"] = "true"
-				c.LogInfo(fmt.Sprintf("project %q: OVN networking enabled (server supports OVN)", name))
-			} else {
-				c.LogInfo(fmt.Sprintf("project %q: bridge networking (OVN not available on this server)", name))
 			}
 		}
 	}

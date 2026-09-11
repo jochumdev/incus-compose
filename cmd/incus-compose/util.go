@@ -37,39 +37,6 @@ func runIncus(ctx context.Context, stdout, stderr io.Writer, env []string, args 
 	return nil
 }
 
-// networkDriver resolves the driver a project gets: the flag (or its
-// environment), then the compose extension, then auto. A project that publishes
-// a NAT port cannot live under features.networks, so it is pushed to bridge.
-func networkDriver(gc *client.GlobalClient, cmd *cli.Command, p *project.Project) (string, error) {
-	driver := p.ClientConfig.NetworkDriver
-	if cmd.IsSet("network-driver") {
-		driver = cmd.String("network-driver")
-	}
-	if driver == "" {
-		driver = "auto"
-	}
-
-	switch driver {
-	case "auto", "ovn", "bridge":
-	default:
-		return "", fmt.Errorf("invalid network-driver %q: must be auto, ovn, or bridge", driver)
-	}
-
-	if p.NeedsBridge {
-		if driver == "ovn" {
-			return "", fmt.Errorf("network-driver %q cannot be used: a published port asks for NAT, which needs a bridge network", driver)
-		}
-
-		if driver != "bridge" {
-			gc.LogInfo(fmt.Sprintf("project %q: bridge networking (NAT port publishing is not available on OVN)", p.Name))
-		}
-
-		driver = "bridge"
-	}
-
-	return driver, nil
-}
-
 // loadProject loads the compose project and gets its per-project Incus client,
 // which the caller has to Open() unless it only reads. The Incus project has to
 // exist unless the caller passes client.EnsureProjectWithCreate(), which makes
@@ -91,13 +58,10 @@ func loadProject(ctx context.Context, cmd *cli.Command, opts ...client.EnsurePro
 		return nil, nil, errLogged.Wrap(err)
 	}
 
-	opts = append(opts, client.EnsureProjectWithConfig(p.ClientConfig.XIncus))
-	driver, err := networkDriver(globalClient, cmd, p)
-	if err != nil {
-		globalClient.LogError("Configuring the network driver", "error", err)
-		return nil, nil, errLogged.Wrap(err)
-	}
-	opts = append(opts, client.EnsureProjectWithNetworkDriver(driver))
+	opts = append(opts,
+		client.EnsureProjectWithConfig(p.ClientConfig.XIncus),
+		client.EnsureProjectWithNetworkDriver(p.ClientConfig.Network.Driver),
+	)
 
 	c, err := globalClient.EnsureProject(p.Name, opts...)
 	if err != nil {

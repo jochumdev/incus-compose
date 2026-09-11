@@ -17,7 +17,7 @@ INCUS_REPO="stable" # stable, lts-6.0, lts-7.0, daily
 FORCE="false"
 STORAGE_POOL="default"
 HOST_STORAGE_POOL=""
-BRIDGE="incusbr0"
+BRIDGE=""
 LISTEN=""
 OVN="false"
 APT_CACHER="${APT_CACHER_NG:-}"
@@ -57,7 +57,7 @@ OPTIONS:
 -p POOL         Storage pool to create (default: ${STORAGE_POOL})
 -s POOL         Storage pool on the host to put the container itself on
                 (default: whatever the host's default profile uses)
--b BRIDGE       Bridge to create (default: ${BRIDGE})
+-b BRIDGE       Custom unmanaged bridge attached to eth0 (default: incusbr0, managed)
 -a ADDRESS      apt-cacher-ng to pull packages through, as HOST, HOST:PORT or
                 a full URL (default: ${APT_CACHER:-<none>}, env: APT_CACHER_NG,
                 assumed port: ${APT_CACHER_PORT})
@@ -220,6 +220,11 @@ echo "    Repository URL: ${REPO_URL}"
 echo "    Client certificate: ${CLIENT_CERT}"
 echo "    Storage pool: ${STORAGE_POOL}"
 echo "    Host storage pool: ${HOST_STORAGE_POOL:-<host default>}"
+if [[ -n "${BRIDGE}" ]]; then
+    echo "    Bridge: ${BRIDGE} (unmanaged)"
+else
+    echo "    Bridge: incusbr0 (managed)"
+fi
 echo "    apt-cacher-ng: ${APT_PROXY:-<none>}"
 DB_POOL_LABEL="<none>"
 if [[ -n "${DB_ON_POOL}" ]]; then
@@ -359,6 +364,58 @@ CONFIGURE_SCRIPT=$(
 #!/bin/bash
 set -euo pipefail
 
+BRIDGE="__BRIDGE__"
+STORAGE_POOL="__STORAGE_POOL__"
+
+if [[ -n "${BRIDGE}" ]]; then
+    echo "Configuring unmanaged bridge ${BRIDGE}..."
+    orig_mac=$(cat /sys/class/net/eth0/address)
+
+    cat > "/etc/systemd/network/10-${BRIDGE}.netdev" <<NETDEV_EOF
+[NetDev]
+Name=${BRIDGE}
+Kind=bridge
+MACAddress=${orig_mac}
+NETDEV_EOF
+
+    cat > /etc/systemd/network/eth0.network <<ETH_EOF
+[Match]
+Name=eth0
+
+[Network]
+Bridge=${BRIDGE}
+ETH_EOF
+
+    cat > "/etc/systemd/network/20-${BRIDGE}.network" <<BR_EOF
+[Match]
+Name=${BRIDGE}
+
+[Network]
+DHCP=true
+
+[DHCPv4]
+UseDomains=true
+UseMTU=true
+
+[DHCP]
+ClientIdentifier=mac
+BR_EOF
+
+    systemctl restart systemd-networkd 2>/dev/null || networkctl reload 2>/dev/null || true
+
+    ip link add name "${BRIDGE}" type bridge 2>/dev/null || true
+    ip link set dev "${BRIDGE}" address "${orig_mac}" 2>/dev/null || true
+    ip link set dev eth0 master "${BRIDGE}" 2>/dev/null || true
+    ip link set dev "${BRIDGE}" up 2>/dev/null || true
+
+    for i in {1..30}; do
+        if ip -4 addr show dev "${BRIDGE}" 2>/dev/null | grep -q inet; then
+            break
+        fi
+        sleep 1
+    done
+fi
+
 echo "Starting Incus daemon..."
 systemctl enable --now incus.socket || true
 
@@ -377,11 +434,12 @@ else
 fi
 
 echo "Initializing Incus..."
-cat <<PRESEED_EOF | incus admin init --preseed
+if [[ -n "${BRIDGE}" ]]; then
+    cat <<PRESEED_EOF | incus admin init --preseed
 config:
   core.https_address: "[::]:8443"
 networks:
-- name: __BRIDGE__
+- name: incusbr0
   type: bridge
   config:
     ipv4.address: 10.183.0.1/23
@@ -389,25 +447,56 @@ networks:
     ipv4.dhcp.ranges: 10.183.0.65-10.183.0.254
     ipv4.ovn.ranges: 10.183.1.1-10.183.1.254
 storage_pools:
-- name: __STORAGE_POOL__
+- name: ${STORAGE_POOL}
   driver: dir
 profiles:
 - name: default
   devices:
     root:
       path: /
-      pool: default
+      pool: ${STORAGE_POOL}
       type: disk
     eth0:
       name: eth0
-      network: __BRIDGE__
+      nictype: bridged
+      parent: ${BRIDGE}
       type: nic
 PRESEED_EOF
+else
+    cat <<PRESEED_EOF | incus admin init --preseed
+config:
+  core.https_address: "[::]:8443"
+networks:
+- name: incusbr0
+  type: bridge
+  config:
+    ipv4.address: 10.183.0.1/23
+    ipv6.address: none
+    ipv4.dhcp.ranges: 10.183.0.65-10.183.0.254
+    ipv4.ovn.ranges: 10.183.1.1-10.183.1.254
+storage_pools:
+- name: ${STORAGE_POOL}
+  driver: dir
+profiles:
+- name: default
+  devices:
+    root:
+      path: /
+      pool: ${STORAGE_POOL}
+      type: disk
+    eth0:
+      name: eth0
+      network: incusbr0
+      type: nic
+PRESEED_EOF
+fi
 
 EOF
 )
 
-CONFIGURE_SCRIPT="$(echo "${CONFIGURE_SCRIPT}" | sed -e 's/__STORAGE_POOL__/'"${STORAGE_POOL}"'/g' -e 's/__BRIDGE__/'"${BRIDGE}"'/g')"
+CONFIGURE_SCRIPT="$(echo "${CONFIGURE_SCRIPT}" | sed \
+    -e 's|__STORAGE_POOL__|'"${STORAGE_POOL}"'|g' \
+    -e 's|__BRIDGE__|'"${BRIDGE}"'|g')"
 
 # Stream the configure script as well (no temp files)
 echo "${CONFIGURE_SCRIPT}" | incus exec "${CONTAINER_NAME}" -- bash -s
