@@ -113,6 +113,32 @@ func sidecarIncusURL(c *client.Client, incusOverride *url.URL, network *client.N
 		}
 	}
 
+	// The sidecar resolves names in its own container, where the daemon's own
+	// hostname is the container itself: a named remote lands on loopback there.
+	// Resolve it here, where the name still means what it does to us.
+	if host := u.Hostname(); net.ParseIP(host) == nil {
+		ips, err := net.DefaultResolver.LookupHost(context.Background(), host)
+		if err != nil {
+			return nil, fmt.Errorf("resolving the Incus endpoint %q: %w", u.Host, err)
+		}
+
+		resolved := ""
+		for _, ip := range ips {
+			parsed := net.ParseIP(ip)
+			if parsed != nil && parsed.To4() != nil {
+				resolved = ip
+
+				break
+			}
+		}
+
+		if resolved == "" {
+			return nil, fmt.Errorf("the Incus endpoint %q has no IPv4 address the %s container can dial", u.Host, sidecarName)
+		}
+
+		u.Host = net.JoinHostPort(resolved, u.Port())
+	}
+
 	if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
 		return nil, fmt.Errorf(
 			"the Incus endpoint %q is a loopback address the %s container cannot reach; "+
