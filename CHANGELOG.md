@@ -63,6 +63,11 @@ form.
 
 ### Fixed
 
+- Image builds now clean up their temporary rootfs tar archives in `/tmp` when
+  the build finishes or fails. Previously, the deletion call on close was
+  commented out, leaving multi-megabyte `incus-compose-rootfs-*.tar` files
+  behind in the system temporary directory after every build. (by @jochumdev)
+
 - `up --recreate <service>` now brings back reverse dependencies that were torn
   down during the recreate down phase. Previously, `up --recreate` on a service
   without `--no-deps` tore down services that depended on it, but the subsequent

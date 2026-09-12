@@ -325,3 +325,19 @@ func TestBuildArgs_Docker(t *testing.T) {
 	require.Contains(t, args, "--pull")
 	require.NotContains(t, args, "--no-cache")
 }
+
+func TestTempFile_Close(t *testing.T) {
+	t.Parallel()
+
+	f, err := os.CreateTemp("", "incus-compose-test-*.tar")
+	require.NoError(t, err)
+
+	path := f.Name()
+	tf := &tempFile{File: f, path: path}
+
+	require.FileExists(t, path)
+
+	err = tf.Close()
+	require.NoError(t, err)
+	require.NoFileExists(t, path)
+}

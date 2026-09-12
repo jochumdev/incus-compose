@@ -242,6 +242,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 	rootfsPath := rootfsTmp.Name()
 	err = rootfsTmp.Close()
 	if err != nil {
+		_ = os.Remove(rootfsPath)
 		return nil, nil, nil, err
 	}
 
@@ -390,6 +391,7 @@ func buildRootfs(ctx context.Context, c *Client, builder string, cfg *BuildConfi
 
 	f, err := os.Open(rootfsPath)
 	if err != nil {
+		_ = os.Remove(rootfsPath)
 		return nil, nil, nil, fmt.Errorf("opening rootfs: %w", err)
 	}
 	return &tempFile{File: f, path: rootfsPath}, configJSON, config, nil
@@ -559,7 +561,7 @@ type tempFile struct {
 // Close closes the file and removes it from disk.
 func (t *tempFile) Close() error {
 	err := t.File.Close()
-	// _ = os.Remove(t.path)
+	_ = os.Remove(t.path)
 	return err
 }
 
