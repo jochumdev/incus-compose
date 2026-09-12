@@ -14,6 +14,7 @@ env:
   GOTOOLCHAIN: "go1.27.0+auto"
   REPORTS_DIR: reports
   PROJECT_ROOT: ${{ github.workspace }}
+  INCUS_COMPOSE_NETWORK_UPLINK: "incusbr0"
 
 jobs:
   test-e2e:
@@ -25,7 +26,6 @@ jobs:
             remote: ict-stable
           - name: custom
             remote: ict-custom
-            uplink: incusbr0
           # - name: lts
           #   remote: ict-lts
           - name: daily
@@ -45,7 +45,6 @@ jobs:
       INCUS_COMPOSE_UP_DEPENDENCY_TIMEOUT: "5m"
       INCUS_COMPOSE_UP_TIMEOUT: "5m"
       INCUS_COMPOSE_DOWN_TIMEOUT: "2m"
-      INCUS_COMPOSE_NETWORK_UPLINK: ${{ matrix.uplink || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -134,7 +133,6 @@ jobs:
           - name: Leafwiki
             args: "-run TestExample/leafwiki"
             remote: ict-custom
-            uplink: incusbr0
           # - name: Immich
           #   args: "-run TestExample/immich -timeout 20m"
           #   remote: ict-lts
@@ -154,7 +152,6 @@ jobs:
       INCUS_COMPOSE_IMAGE_CACHE: incus-compose-tests-cache
       NO_COLOR: 1
       INCUS_COMPOSE_TEST_EXAMPLES: 1
-      INCUS_COMPOSE_NETWORK_UPLINK: ${{ matrix.uplink || '' }}
     steps:
       - uses: actions/checkout@v7
         with:

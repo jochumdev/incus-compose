@@ -64,9 +64,9 @@ purge-networks:
     remote="${INCUS_REMOTE:-local}"
 
     # ic-ovn-seed is seeded by setup-nested-incus.sh for OVN capability
-    # detection, so it is meant to sit there with no users.
-    keep="ic-ovn-seed"
-    networks=$(incus network list "${remote}:" -f json | jq -r --arg keep "${keep}" '.[] | select(.used_by | length == 0) | select(.managed == true) | select(.name != $keep) | .name')
+    # detection, and incusbr0 is the host's managed bridge/uplink, so both
+    # are meant to sit there even with no users.
+    networks=$(incus network list "${remote}:" -f json | jq -r '.[] | select(.used_by | length == 0) | select(.managed == true) | select(.name != "ic-ovn-seed" and .name != "incusbr0") | .name')
 
     if [[ -z "${networks}" ]]; then
         echo "No dangling networks found."
