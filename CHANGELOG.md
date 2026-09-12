@@ -59,6 +59,23 @@ form.
   is unchanged - the same flags, environment variables and status writes, and
   `healthd reload` still forces a full resync. (by @jochumdev)
 
+## [Unreleased-main]
+
+### Fixed
+
+- `up --recreate <service>` now brings back reverse dependencies that were torn
+  down during the recreate down phase. Previously, `up --recreate` on a service
+  without `--no-deps` tore down services that depended on it, but the subsequent
+  ensure phase only scheduled the named service and its forward dependencies,
+  leaving dependent instances missing. (by @jochumdev, #192)
+
+- Healthd teardown now executes all cleanup stages (stop, delete, and
+  certificate revocation) even if an earlier stage fails, and `healthd down`
+  ignores expected benign errors for resources that are not running, not
+  ensured, not found, or still in use by other replicas. Previously, an error
+  during the stop phase aborted teardown immediately, leaving healthd containers
+  or certificates behind. (by @jochumdev, #195)
+
 ## [v1.3.3] - 2026-09-07
 
 ### Fixed
