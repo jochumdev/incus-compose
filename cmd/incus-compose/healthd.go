@@ -427,7 +427,7 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 		}
 
 		inst.Config.Files = append(inst.Config.Files, client.InstanceFile{
-			Target:  "/run/secrets/token",
+			Target:  "/secrets/token",
 			Content: client.NewReaderFromBytes([]byte(token)),
 			Mode:    0o600,
 			DirMode: 0o700,
