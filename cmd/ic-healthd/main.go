@@ -90,7 +90,7 @@ func runCommand(cfg *config) *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:        "secrets-dir",
-				Usage:       "Tmpfs directory holding the one-time trust token",
+				Usage:       "Directory holding the one-time trust token",
 				Value:       defaultSecretsDir,
 				Destination: &cfg.SecretsDir,
 				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_SECRETS_DIR"),

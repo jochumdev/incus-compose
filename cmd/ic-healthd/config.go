@@ -12,7 +12,7 @@ import (
 const (
 	// defaultDataDir holds the enrolled certificate.
 	defaultDataDir    = "/var/lib/ic-healthd"
-	defaultSecretsDir = "/run/secrets"
+	defaultSecretsDir = "/secrets"
 
 	defaultHTTPAddr = ":9153"
 
