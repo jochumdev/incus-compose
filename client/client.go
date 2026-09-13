@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/lxc/incus/v7/shared/util"
@@ -539,4 +540,9 @@ func (c *Client) ResolveImageFingerprint(fingerprint string) string {
 
 	c.LogWarn("failed to resolve image", "fingerprint", fingerprint)
 	return fingerprint
+}
+
+// Lock acquires an advisory lock on the shared LocksVolume in SystemProject.
+func (c *Client) Lock(ctx context.Context, name string, stale time.Duration) (func(), error) {
+	return c.globalClient.Lock(ctx, name, stale)
 }

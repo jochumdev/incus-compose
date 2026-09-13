@@ -79,6 +79,9 @@ type ClientConfig struct {
 
 	// SystemProject is the project holding the instances the library runs.
 	SystemProject string
+
+	// LocksVolume is the storage volume holding advisory locks in SystemProject.
+	LocksVolume string
 }
 
 // ClientOption is a functional option for configuring the Client.
@@ -136,6 +139,11 @@ func ClientSystemProject(n string) ClientOption {
 	return func(c *ClientConfig) { c.SystemProject = n }
 }
 
+// ClientLocksVolume sets the storage volume name holding advisory locks in SystemProject.
+func ClientLocksVolume(n string) ClientOption {
+	return func(c *ClientConfig) { c.LocksVolume = n }
+}
+
 // GlobalClient provides a high-level interface to Incus operations.
 type GlobalClient struct {
 	ctx    context.Context
@@ -189,6 +197,7 @@ func New(ctx context.Context, opts ...ClientOption) *GlobalClient {
 		NetworkPrefix:      "ic-",
 		DescriptionFormat:  DefaultSystemProject + ": %s",
 		SystemProject:      DefaultSystemProject,
+		LocksVolume:        DefaultLocksVolume,
 		Stdout:             os.Stdout,
 		Stderr:             NewSwapWriter(os.Stderr),
 	}
@@ -1159,4 +1168,54 @@ func (c *GlobalClient) HasExtension(ext string) bool {
 	defer c.mu.Unlock()
 
 	return slices.Contains(c.apiExtensions, ext)
+}
+
+// Lock acquires an advisory lock by name on the configured LocksVolume in SystemProject.
+// It blocks until the lock is acquired or ctx is canceled.
+// The returned release function releases the lock and closes the underlying connection.
+func (c *GlobalClient) Lock(ctx context.Context, name string, stale time.Duration) (func(), error) {
+	if !c.IsConnected() {
+		return nil, ErrDisconnected
+	}
+
+	sysClient, err := c.EnsureProject(c.config.SystemProject, EnsureProjectWithCreate())
+	if err != nil {
+		return nil, fmt.Errorf("ensuring system project %q for lock: %w", c.config.SystemProject, err)
+	}
+
+	volName := c.config.LocksVolume
+	if volName == "" {
+		volName = DefaultLocksVolume
+	}
+
+	res, err := sysClient.Resource(KindStorageVolume, volName, &StorageVolumeConfig{})
+	if err != nil {
+		return nil, fmt.Errorf("getting locks volume %q in project %q: %w", volName, c.config.SystemProject, err)
+	}
+
+	vol, ok := res.(*StorageVolume)
+	if !ok {
+		return nil, ErrUnknownResource.WithText(volName)
+	}
+
+	err = RunAction(ctx, vol, ActionEnsure, OptionCreate())
+	if err != nil {
+		return nil, fmt.Errorf("ensuring locks volume %q in project %q: %w", volName, c.config.SystemProject, err)
+	}
+
+	sc, err := vol.SFTP(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to locks volume %q in project %q: %w", volName, c.config.SystemProject, err)
+	}
+
+	vLock, err := vol.Lock(ctx, sc, name, stale)
+	if err != nil {
+		sysClient.WarnError(sc.Close, "Failed closing SFTP connection for lock "+name)
+		return nil, fmt.Errorf("acquiring lock %q in volume %q: %w", name, volName, err)
+	}
+
+	return func() {
+		sysClient.WarnError(vLock.Unlock, "Failed releasing lock "+name)
+		sysClient.WarnError(sc.Close, "Failed closing SFTP connection for lock "+name)
+	}, nil
 }

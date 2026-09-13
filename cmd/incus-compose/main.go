@@ -31,6 +31,7 @@ import (
 const managedKey = "user.incus-compose.managed"
 
 const systemProject = "incus-compose"
+const locksVolume = "locks"
 
 type noColorKey struct{}
 
@@ -379,6 +380,7 @@ func newRootCommand() *cli.Command {
 
 			opts := []client.ClientOption{
 				client.ClientSystemProject(systemProject),
+				client.ClientLocksVolume(locksVolume),
 				client.ClientDescriptionFormat("incus-compose: %s"),
 				client.ClientLogger(logger),
 				client.ClientStdout(cmd.Writer),

@@ -492,7 +492,9 @@ func isConcurrencyConflict(err error) bool {
 	msg := strings.ToLower(err.Error())
 
 	return strings.Contains(msg, "referential integrity violation") ||
-		strings.Contains(msg, "constraint violation")
+		strings.Contains(msg, "constraint violation") ||
+		strings.Contains(msg, "failed getting acl usage") ||
+		strings.Contains(msg, "failed to load project")
 }
 
 // updateDNSAliases reads raw.dnsmasq from Incus, replaces records for

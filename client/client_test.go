@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -350,4 +351,40 @@ func TestClientProject_DeleteNonExistent_NoError(t *testing.T) {
 	require.NoError(t, err)
 
 	_ = gc.DeleteProject("never-existed-xyz987", true)
+}
+
+func TestClientLock(t *testing.T) {
+	t.Parallel()
+	skipLocal(t)
+
+	ctx := testContext(t)
+	gc, err := NewTestClient(ctx)
+	require.NoError(t, err)
+
+	testSysProject := "test-sys-" + strings.ToLower(shared.RandString(8))
+	deleteProjectOnCleanup(t, gc, testSysProject)
+
+	c, err := gc.EnsureProject(testSysProject, EnsureProjectWithCreate())
+	require.NoError(t, err)
+	c.config.SystemProject = testSysProject
+	c.config.LocksVolume = "test-locks"
+	c.globalClient.config.SystemProject = testSysProject
+	c.globalClient.config.LocksVolume = "test-locks"
+
+	release1, err := c.Lock(ctx, "test-lock", 10*time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, release1)
+
+	ctxShort, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	_, err = c.Lock(ctxShort, "test-lock", 10*time.Second)
+	require.Error(t, err)
+
+	release1()
+
+	release2, err := c.Lock(ctx, "test-lock", 10*time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, release2)
+	release2()
 }

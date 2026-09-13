@@ -32,6 +32,9 @@ const (
 // in.
 const DefaultSystemProject = "incus-client"
 
+// DefaultLocksVolume is the storage volume holding advisory locks in SystemProject.
+const DefaultLocksVolume = "locks"
+
 // Kind identifies a resource type.
 type Kind string
 

@@ -220,6 +220,13 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 
 	// After the project networks, so their subnets can be read for the ACL.
 	if resolverNet != nil && len(projectNets) > 0 {
+		release, err := c.Lock(ctx, "network/"+globalDNSNetwork, 30*time.Second)
+		if err != nil {
+			c.LogError("Locking the shared DNS network", "error", err)
+			return errLogged.Wrap(err)
+		}
+		defer release()
+
 		err = setupResolverACL(ctx, p, resolverNet, myPResources)
 		if err != nil {
 			c.LogError("Wiring the shared DNS network", "error", err)
@@ -362,6 +369,13 @@ func removeDNSACLs(ctx context.Context, c *client.Client, p *project.Project) er
 	if resolveDNSScope(projectConfig, "", p.ClientConfig.DNS.Scope) != shared.DNSScopeGlobal {
 		return nil
 	}
+
+	release, err := c.Lock(ctx, "network/"+globalDNSNetwork, 30*time.Second)
+	if err != nil {
+		c.LogError("Locking the shared DNS network", "error", err)
+		return err
+	}
+	defer release()
 
 	sysClient, err := c.Global().EnsureProject(systemProject)
 	if err != nil {
