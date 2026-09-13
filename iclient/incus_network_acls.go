@@ -15,7 +15,8 @@ import (
 const incusNetworkACLsPath = "/network-acls"
 
 // isTransientACLRace reports whether err is an upstream Incus race where
-// acl.UsedBy fails because a concurrently deleted project was not found.
+// acl.UsedBy fails because a concurrently deleted project was not found,
+// or where peer creation encounters concurrent peer collisions.
 // Remove when https://github.com/lxc/incus/issues/3983 is merged and live in the LTS release.
 func isTransientACLRace(err error) bool {
 	if err == nil {
@@ -25,7 +26,8 @@ func isTransientACLRace(err error) bool {
 	msg := err.Error()
 
 	return strings.Contains(msg, "Failed getting ACL usage") ||
-		strings.Contains(msg, "Failed to load project")
+		strings.Contains(msg, "Failed to load project") ||
+		strings.Contains(msg, "More than one matching network peer was found")
 }
 
 // retryACLOp runs an ACL operation with retries when hitting the upstream Incus
@@ -34,8 +36,9 @@ func isTransientACLRace(err error) bool {
 func retryACLOp(ctx context.Context, op func() error) error {
 	return retry.New(
 		retry.Context(ctx),
-		retry.Attempts(5),
+		retry.Attempts(8),
 		retry.Delay(100*time.Millisecond),
+		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
 		retry.LastErrorOnly(true),
 		retry.RetryIf(isTransientACLRace),
