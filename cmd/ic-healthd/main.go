@@ -27,7 +27,7 @@ import (
 
 const (
 	defaultDataDir    = "/var/lib/ic-healthd"
-	defaultSecretsDir = "/run/secrets"
+	defaultSecretsDir = "/secrets"
 )
 
 const (
