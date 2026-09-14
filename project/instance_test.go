@@ -1022,6 +1022,37 @@ func TestServiceToInstanceUser(t *testing.T) {
 	})
 }
 
+func TestServiceToInstanceWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	opts := &ResourcesOptions{}
+
+	build := func(dir string) (*client.Instance, error) {
+		c := client.NewOfflineClient(t.Context(), "test")
+		service := types.ServiceConfig{Name: "web", Image: "docker.io/nginx:alpine", WorkingDir: dir}
+		p := &types.Project{Services: types.Services{"web": service}}
+		inst, _, err := serviceToInstance(c, p, "web", opts, 1, 1)
+		return inst, err
+	}
+
+	// The instance sets oci.cwd on create, not through Extensions.
+	t.Run("set", func(t *testing.T) {
+		t.Parallel()
+		inst, err := build("/app")
+		require.NoError(t, err)
+		assert.Equal(t, "/app", inst.Config.WorkingDir)
+		assert.NotContains(t, inst.Config.Extensions, "oci.cwd")
+	})
+
+	t.Run("unset keeps the image's", func(t *testing.T) {
+		t.Parallel()
+		inst, err := build("")
+		require.NoError(t, err)
+		assert.Empty(t, inst.Config.WorkingDir)
+		assert.NotContains(t, inst.Config.Extensions, "oci.cwd")
+	})
+}
+
 func TestServiceToInstancePorts(t *testing.T) {
 	t.Parallel()
 

@@ -121,6 +121,9 @@ type InstanceConfig struct {
 	// image's own /etc/passwd and /etc/group give them. Ignored unless Owner
 	// is nil.
 	User string
+
+	// WorkingDir is the compose `working_dir:` override of the image's WORKDIR.
+	WorkingDir string
 }
 
 // GetConfig returns the configuration.
@@ -612,6 +615,10 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 	entrypoint := resolveEntrypoint(imageState.Entrypoint, r.Config.Entrypoint, r.Config.Command)
 	if entrypoint != "" {
 		config["oci.entrypoint"] = entrypoint
+	}
+
+	if r.Config.WorkingDir != "" {
+		config["oci.cwd"] = r.Config.WorkingDir
 	}
 
 	// Store UID/GID.
