@@ -151,6 +151,7 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		Entrypoint:    service.Entrypoint,
 		Command:       service.Command,
 		User:          service.User,
+		WorkingDir:    service.WorkingDir,
 	}
 
 	ir, err := c.Resource(client.KindInstance, instanceName, instCfg)

@@ -370,8 +370,8 @@ func execOneOff(ctx context.Context, c *client.Client, instance *client.Instance
 	}
 
 	// oci.cwd, oci.uid and oci.gid are the instance's, and an exec inherits
-	// none of them.
-	cwd := args.Workdir
+	// none of them. The service already carries --workdir.
+	cwd := service.WorkingDir
 	if cwd == "" {
 		cwd = image.State().Cwd
 	}

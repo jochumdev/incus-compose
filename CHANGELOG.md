@@ -33,6 +33,10 @@ form.
   during the stop phase aborted teardown immediately, leaving healthd containers
   or certificates behind. (by @jochumdev, #195)
 
+- `working_dir` on a service now sets the instance's `oci.cwd`; the image's
+  WORKDIR no longer always wins. `run` without `--workdir` starts there too. (by
+  @sandroden)
+
 ## [v1.3.3] - 2026-09-07
 
 ### Fixed
