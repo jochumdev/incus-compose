@@ -11,9 +11,21 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
-## [Unreleased]
+## [v1.3.4] - 2026-09-17
+
+### Added
+
+- Compose network `ipam.config` pools are now supported. Subnet and gateway
+  definitions automatically calculate the corresponding Incus `ipv4.address` and
+  `ipv6.address` gateway CIDRs on custom networks, with explicit `x-incus`
+  network extensions taking precedence when specified. (by @jochumdev)
 
 ### Fixed
+
+- Healthd registration token storage moved from `/run/secrets/token` to
+  `/secrets/token` for Incus 7.0.1 LTS users, where `/run` tmpfs mounts masked
+  the token file and caused certificate registration to fail. This temporary
+  workaround will be removed in v1.4.0. (by @jochumdev, #201)
 
 - Image builds now clean up their temporary rootfs tar archives in `/tmp` when
   the build finishes or fails. Previously, the deletion call on close was
