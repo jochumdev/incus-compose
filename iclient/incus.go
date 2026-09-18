@@ -3,7 +3,11 @@ package iclient
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -83,9 +87,33 @@ func NewConnection(info *ConfigRemoteInfo) (*Connection, error) {
 		return c, nil
 	}
 
+	var expectedFingerprint string
+	if info.ServerFingerprint != "" {
+		expectedFingerprint = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(info.ServerFingerprint), ":", ""))
+		var hexErr error
+		_, hexErr = hex.DecodeString(expectedFingerprint)
+		if hexErr != nil || len(expectedFingerprint) != 64 {
+			return nil, fmt.Errorf("%q: invalid server certificate fingerprint: must be 64-character SHA-256 hex string", info.Name)
+		}
+	}
+
 	tlsConfig, err := incusTLS.GetTLSConfigMem(info.ClientCert, info.ClientKey, info.ClientCA, info.ServerCert, info.InsecureSkipVerify)
 	if err != nil {
 		return nil, fmt.Errorf("%q: building the TLS config: %w", info.Name, err)
+	}
+
+	if expectedFingerprint != "" {
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("no certificate presented by server")
+			}
+			actual := fmt.Sprintf("%x", sha256.Sum256(cs.PeerCertificates[0].Raw))
+			if actual != expectedFingerprint {
+				return fmt.Errorf("server certificate fingerprint mismatch: expected %s, got %s", expectedFingerprint, actual)
+			}
+			return nil
+		}
 	}
 
 	transport.TLSClientConfig = tlsConfig

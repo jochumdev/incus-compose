@@ -32,10 +32,11 @@ type ConfigRemoteInfo struct {
 	InsecureSkipVerify bool
 
 	// TLS material, all empty for a unix-socket-only remote.
-	ServerCert string
-	ClientCert string
-	ClientKey  string
-	ClientCA   string
+	ServerCert        string
+	ServerFingerprint string
+	ClientCert        string
+	ClientKey         string
+	ClientCA          string
 }
 
 // Unix reports whether every address is the local unix socket.

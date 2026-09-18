@@ -11,6 +11,17 @@ final version), and the beta suffix gained a dot (`beta.16`) from beta.16 onward
 for correct semver ordering. Headings below preserve each release's announced
 form.
 
+## [Unreleased]
+
+### Added
+
+- Support for direct Incus connections via `--server-url` (`INCUS_SERVER_URL`),
+  `--client-cert-file` (`INCUS_CLIENT_CERT_FILE`), `--client-key-file`
+  (`INCUS_CLIENT_KEY_FILE`), and `--server-fingerprint`
+  (`INCUS_SERVER_FINGERPRINT`). An explicit `--remote` flag takes precedence
+  over manual connection settings; otherwise, manual connection takes precedence
+  over `INCUS_REMOTE` or the default Incus remote. (by @jochumdev)
+
 ## [v1.3.4] - 2026-09-17
 
 ### Added

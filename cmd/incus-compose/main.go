@@ -22,6 +22,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/cmd/incus-compose/version"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -204,6 +205,69 @@ func selfUpdateWritable() bool {
 	return dirWritable(filepath.Dir(exe))
 }
 
+func dialRemote(path string, remote string) (*iclient.Connection, error) {
+	config, err := iclient.ReadConfig(path)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := config.RemoteInfos(remote)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := iclient.NewConnection(info)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
+}
+
+func dialManual(serverURL, clientCert, clientKey, serverFingerprint string) (*iclient.Connection, error) {
+	if serverURL == "" {
+		return nil, errors.New("server URL cannot be empty")
+	}
+	if serverFingerprint == "" {
+		return nil, errors.New("server fingerprint is required")
+	}
+
+	conn, err := iclient.NewConnection(&iclient.ConfigRemoteInfo{
+		Name:              "manual",
+		Addrs:             []string{serverURL},
+		Protocol:          "incus",
+		ClientCert:        clientCert,
+		ClientKey:         clientKey,
+		ServerFingerprint: serverFingerprint,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
+}
+
+func dialManualFiles(serverURL, clientCertFile, clientKeyFile, serverFingerprint string) (*iclient.Connection, error) {
+	if clientCertFile == "" || clientKeyFile == "" {
+		return nil, errors.New("both client certificate and key files are required")
+	}
+	if serverFingerprint == "" {
+		return nil, errors.New("server fingerprint is required")
+	}
+
+	certPEM, err := os.ReadFile(filepath.Clean(clientCertFile))
+	if err != nil {
+		return nil, fmt.Errorf("reading client certificate: %w", err)
+	}
+
+	keyPEM, err := os.ReadFile(filepath.Clean(clientKeyFile))
+	if err != nil {
+		return nil, fmt.Errorf("reading client key: %w", err)
+	}
+
+	return dialManual(serverURL, string(certPEM), string(keyPEM), serverFingerprint)
+}
+
 func newRootCommand() *cli.Command {
 	commands := []*cli.Command{
 		newUpCommand(),
@@ -242,10 +306,28 @@ func newRootCommand() *cli.Command {
 		Usage: "Compose for incus",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "remote",
-				Usage:   "remote to connect to",
-				Value:   "",
-				Sources: cli.EnvVars("INCUS_REMOTE"),
+				Name:  "remote",
+				Usage: "remote to connect to [$INCUS_REMOTE]",
+			},
+			&cli.StringFlag{
+				Name:    "server-url",
+				Usage:   "Incus server HTTPS URL",
+				Sources: cli.EnvVars("INCUS_SERVER_URL"),
+			},
+			&cli.StringFlag{
+				Name:    "client-cert-file",
+				Usage:   "Path to client certificate file",
+				Sources: cli.EnvVars("INCUS_CLIENT_CERT_FILE"),
+			},
+			&cli.StringFlag{
+				Name:    "client-key-file",
+				Usage:   "Path to client key file",
+				Sources: cli.EnvVars("INCUS_CLIENT_KEY_FILE"),
+			},
+			&cli.StringFlag{
+				Name:    "server-fingerprint",
+				Usage:   "Server certificate SHA-256 fingerprint",
+				Sources: cli.EnvVars("INCUS_SERVER_FINGERPRINT"),
 			},
 			&cli.StringFlag{
 				Name:    "ansi",
@@ -354,9 +436,30 @@ func newRootCommand() *cli.Command {
 			}
 
 			// Connect to Incus server.
-			conn, err := client.DialRemote("", cmd.String("remote"))
-			if err != nil {
-				return ctx, err
+			var conn *iclient.Connection
+			var err error
+
+			serverURL := cmd.String("server-url")
+			if cmd.IsSet("remote") {
+				conn, err = dialRemote("", cmd.String("remote"))
+				if err != nil {
+					return ctx, err
+				}
+			} else if serverURL != "" {
+				conn, err = dialManualFiles(
+					serverURL,
+					cmd.String("client-cert-file"),
+					cmd.String("client-key-file"),
+					cmd.String("server-fingerprint"),
+				)
+				if err != nil {
+					return ctx, err
+				}
+			} else {
+				conn, err = dialRemote("", os.Getenv("INCUS_REMOTE"))
+				if err != nil {
+					return ctx, err
+				}
 			}
 
 			// cacheProject := cmd.String("image-cache")

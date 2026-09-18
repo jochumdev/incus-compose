@@ -279,9 +279,19 @@ func NewTestClient(ctx context.Context) (*GlobalClient, error) {
 
 	slog.DebugContext(ctx, "Connecting", "remote", remote)
 
-	conn, err := DialRemote("", remote)
+	config, err := iclient.ReadConfig("")
 	if err != nil {
-		return nil, err
+		return nil, ErrConnectionFailed.Wrap(err)
+	}
+
+	info, err := config.RemoteInfos(remote)
+	if err != nil {
+		return nil, ErrConnectionFailed.Wrap(err)
+	}
+
+	conn, err := iclient.NewConnection(info)
+	if err != nil {
+		return nil, ErrConnectionFailed.Wrap(err)
 	}
 
 	opts := []ClientOption{ClientProvideConnection(conn)}
@@ -324,27 +334,6 @@ func NewOfflineClient(ctx context.Context, projectName string) *Client {
 		incusProject: SanitizeProjectName(projectName),
 		logger:       gc.logger.With("project", projectName),
 	}
-}
-
-// DialRemote connects to a remote of the Incus CLI configuration at path.
-// An empty path is the default location, an empty remote the default remote.
-func DialRemote(path string, remote string) (*iclient.Connection, error) {
-	config, err := iclient.ReadConfig(path)
-	if err != nil {
-		return nil, ErrConnectionFailed.Wrap(err)
-	}
-
-	info, err := config.RemoteInfos(remote)
-	if err != nil {
-		return nil, ErrConnectionFailed.Wrap(err)
-	}
-
-	conn, err := iclient.NewConnection(info)
-	if err != nil {
-		return nil, ErrConnectionFailed.Wrap(err)
-	}
-
-	return conn, nil
 }
 
 // Connect establishes a connection to the Incus server.
