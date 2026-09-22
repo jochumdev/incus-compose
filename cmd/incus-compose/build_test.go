@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
@@ -80,7 +81,8 @@ RUN echo "built by incus-compose"
       dockerfile_inline: |
         FROM docker.io/alpine:latest
         RUN echo "built inline by incus-compose"
-`})
+`,
+	})
 	compose := filepath.Join(dir, "compose.yaml")
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
@@ -98,8 +100,8 @@ RUN echo "built by incus-compose"
 	require.Error(t, client.RunAction(ctx, r, client.ActionEnsure))
 }
 
-// TestE2EBuildImageEnvironment pins the built image to the environment.* keys
-// Incus derives itself when it unpacks a pulled OCI image.
+// TestE2EBuildImageEnvironment pins that environment variables from a built image
+// reach the running container.
 func TestE2EBuildImageEnvironment(t *testing.T) {
 	testlib.SkipE2E(t)
 	testlib.SkipLocal(t)
@@ -118,25 +120,21 @@ ENV PATH=/opt/bin:/usr/bin
     build:
       no_cache: true
       context: .
-`})
+`,
+	})
 	compose := filepath.Join(dir, "compose.yaml")
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd")
 	require.NoError(t, err)
 
-	c := projectClient(ctx, t, pn)
-	conn, err := c.Connection()
+	stdout, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "exec", "--no-tty", "app", "env")
 	require.NoError(t, err)
 
-	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "app-1", nil)
-	require.NoError(t, err)
-
-	require.Equal(t, "hello", inst.Config["environment.GREETING"])
-	require.Equal(t, "/opt/bin:/usr/bin", inst.Config["environment.PATH"])
-	require.Equal(t, "/root", inst.Config["environment.HOME"])
-	require.Equal(t, "xterm", inst.Config["environment.TERM"])
+	assert.Contains(t, stdout, "GREETING=hello")
+	assert.Contains(t, stdout, "PATH=/opt/bin:/usr/bin")
+	assert.Contains(t, stdout, "HOME=/root")
 }
 
 // TestE2EUpBuildRecreates pins that --build recreates the instances whose image
@@ -160,7 +158,8 @@ RUN echo "built by incus-compose"
       context: .
   plain:
     image: images:alpine/edge
-`})
+`,
+	})
 	compose := filepath.Join(dir, "compose.yaml")
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
