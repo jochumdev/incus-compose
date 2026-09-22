@@ -50,22 +50,23 @@ func dnsCertName(incusProject string, global bool) string {
 
 // dnsParams holds the image options for dns setup.
 type dnsParams struct {
-	image         string
-	pull          string
-	incus         *url.URL
-	network       string
-	ipv4Address   string
-	ipv6Address   string
-	scope         string
-	noMetrics     bool
-	listen        string
-	http          string
-	forward       []string
-	suffix        string
-	ttl           uint
-	projectMarker string
-	timeout       time.Duration
-	stackWorkers  int
+	image             string
+	pull              string
+	incus             *url.URL
+	serverFingerprint string
+	network           string
+	ipv4Address       string
+	ipv6Address       string
+	scope             string
+	noMetrics         bool
+	listen            string
+	http              string
+	forward           []string
+	suffix            string
+	ttl               uint
+	projectMarker     string
+	timeout           time.Duration
+	stackWorkers      int
 
 	global bool
 	xIncus map[string]string
@@ -84,19 +85,20 @@ var dnsDropKeys = []string{
 }
 
 const (
-	envDNSIncus         = "environment.INCUS_COMPOSE_DNS_INCUS"
-	envDNSListen        = "environment.INCUS_COMPOSE_DNS_LISTEN"
-	envDNSHTTP          = "environment.INCUS_COMPOSE_DNS_HTTP"
-	envDNSForward       = "environment.INCUS_COMPOSE_DNS_FORWARD"
-	envDNSSuffix        = "environment.INCUS_COMPOSE_DNS_SUFFIX"
-	envDNSTTL           = "environment.INCUS_COMPOSE_DNS_TTL"
-	envDNSDataDir       = "environment.INCUS_COMPOSE_DNS_DATA_DIR"
-	envDNSSecretsDir    = "environment.INCUS_COMPOSE_DNS_SECRETS_DIR"
-	envDNSMetrics       = "environment.INCUS_COMPOSE_DNS_METRICS"
-	envDNSProjectMarker = "environment.INCUS_COMPOSE_DNS_PROJECT_MARKER"
-	envDNSProjects      = "environment.INCUS_COMPOSE_DNS_PROJECTS"
-	envDNSRestricted    = "environment.INCUS_COMPOSE_DNS_RESTRICTED"
-	envDNSLog           = "environment.INCUS_COMPOSE_DNS_LOG"
+	envDNSIncus             = "environment.INCUS_COMPOSE_DNS_INCUS"
+	envDNSServerFingerprint = "environment.INCUS_COMPOSE_DNS_SERVER_FINGERPRINT"
+	envDNSListen            = "environment.INCUS_COMPOSE_DNS_LISTEN"
+	envDNSHTTP              = "environment.INCUS_COMPOSE_DNS_HTTP"
+	envDNSForward           = "environment.INCUS_COMPOSE_DNS_FORWARD"
+	envDNSSuffix            = "environment.INCUS_COMPOSE_DNS_SUFFIX"
+	envDNSTTL               = "environment.INCUS_COMPOSE_DNS_TTL"
+	envDNSDataDir           = "environment.INCUS_COMPOSE_DNS_DATA_DIR"
+	envDNSSecretsDir        = "environment.INCUS_COMPOSE_DNS_SECRETS_DIR"
+	envDNSMetrics           = "environment.INCUS_COMPOSE_DNS_METRICS"
+	envDNSProjectMarker     = "environment.INCUS_COMPOSE_DNS_PROJECT_MARKER"
+	envDNSProjects          = "environment.INCUS_COMPOSE_DNS_PROJECTS"
+	envDNSRestricted        = "environment.INCUS_COMPOSE_DNS_RESTRICTED"
+	envDNSLog               = "environment.INCUS_COMPOSE_DNS_LOG"
 )
 
 // dnsSettings layers settings over the daemon being replaced.
@@ -111,6 +113,9 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 
 	if params.incus != nil || (settings[envDNSIncus] == "" && settings["environment.DNS_INCUS"] == "") {
 		set(envDNSIncus, "environment.DNS_INCUS", incusURL)
+	}
+	if params.serverFingerprint != "" {
+		set(envDNSServerFingerprint, "environment.DNS_SERVER_FINGERPRINT", params.serverFingerprint)
 	}
 	set(envDNSDataDir, "environment.DNS_DATA_DIR", "/var/lib/dns-incus")
 	set(envDNSSecretsDir, "environment.DNS_SECRETS_DIR", "/run/secrets")
@@ -346,6 +351,18 @@ func dnsGetResources(c *client.Client, params dnsParams) (*client.Instance, []cl
 		if !options.Create {
 			return err
 		}
+
+		conn, err := c.GlobalConnection()
+		if err != nil {
+			return err
+		}
+
+		connInfo, err := conn.GetConnectionInfo(ctx)
+		if err != nil {
+			return err
+		}
+
+		params.serverFingerprint = connInfo.CertificateFingerprint
 
 		if info := inst.State().IncusInstance; info != nil {
 			_, ok := info.Config[envDNSIncus]

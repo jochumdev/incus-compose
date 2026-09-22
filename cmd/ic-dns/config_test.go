@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -57,6 +58,7 @@ func TestConfigDefaults(t *testing.T) {
 func TestConfigFromCommand(t *testing.T) {
 	cfg := parse(t,
 		"--incus", "https://10.0.0.1:8443",
+		"--server-fingerprint", "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
 		"--token", "secret",
 		"--project", "shop", "--project", "web",
 		"--forward", "10.0.0.1:53", "--forward", "10.0.0.2:53",
@@ -66,6 +68,7 @@ func TestConfigFromCommand(t *testing.T) {
 	)
 
 	assert.Equal(t, "https://10.0.0.1:8443", cfg.IncusURL)
+	assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", cfg.ServerFingerprint)
 	assert.Equal(t, "secret", cfg.Token)
 	assert.Equal(t, []string{"shop", "web"}, cfg.Projects)
 	assert.Equal(t, []string{"10.0.0.1:53", "10.0.0.2:53"}, cfg.Forward)
@@ -90,6 +93,7 @@ func TestConfigFromCommand(t *testing.T) {
 // that reads no environment variable is a flag a compose file cannot set.
 func TestConfigFromEnvironment(t *testing.T) {
 	t.Setenv("INCUS_COMPOSE_DNS_INCUS", "https://env:8443")
+	t.Setenv("INCUS_COMPOSE_DNS_SERVER_FINGERPRINT", "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90")
 	t.Setenv("INCUS_COMPOSE_DNS_LISTEN", "127.0.0.1:5353")
 	t.Setenv("INCUS_COMPOSE_DNS_WORKERS", "8")
 	t.Setenv("INCUS_COMPOSE_DNS_LOG", "DEBUG")
@@ -97,6 +101,7 @@ func TestConfigFromEnvironment(t *testing.T) {
 	cfg := parse(t)
 
 	assert.Equal(t, "https://env:8443", cfg.IncusURL)
+	assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", cfg.ServerFingerprint)
 	assert.Equal(t, "127.0.0.1:5353", cfg.DNSAddr)
 	assert.Equal(t, 8, cfg.Workers)
 	assert.Equal(t, "DEBUG", cfg.Log)
@@ -128,6 +133,19 @@ func TestConfigFromEnvironment(t *testing.T) {
 	cfg = parse(t, "--project-marker", "user.cli=fromcli")
 	assert.Equal(t, "user.cli", cfg.ProjectMarker)
 	assert.Equal(t, "fromcli", cfg.ProjectMarkerValue)
+}
+
+// TestRunRequiresServerFingerprint pins that starting without a server fingerprint fails.
+func TestRunRequiresServerFingerprint(t *testing.T) {
+	t.Parallel()
+
+	app := command()
+	app.Writer = io.Discard
+	app.ErrWriter = io.Discard
+
+	err := app.Run(t.Context(), []string{"ic-dns", "run", "--incus", "https://127.0.0.1:8443"})
+	require.Error(t, err)
+	require.EqualError(t, err, "server fingerprint is required")
 }
 
 func TestParseMarker(t *testing.T) {

@@ -160,16 +160,17 @@ func TestDNSCarriedConfig(t *testing.T) {
 	t.Parallel()
 
 	input := map[string]string{
-		"volatile.idmap.current":              "foo",
-		"image.description":                   "bar",
-		"oci.cwd":                             "/",
-		"user.image_alias":                    "old-alias",
-		"environment.INCUS_COMPOSE_DNS_TOKEN": "old-token",
-		"environment.DNS_TOKEN":               "old-token-legacy",
-		shared.HealthStoppedKey:               "false",
-		"environment.INCUS_COMPOSE_DNS_INCUS": "https://10.0.0.1:8443",
-		"custom.key":                          "custom-value",
-		"limits.memory":                       "32MiB", // below defaultDNSMemoryLimit (64MiB)
+		"volatile.idmap.current":                           "foo",
+		"image.description":                                "bar",
+		"oci.cwd":                                          "/",
+		"user.image_alias":                                 "old-alias",
+		"environment.INCUS_COMPOSE_DNS_TOKEN":              "old-token",
+		"environment.DNS_TOKEN":                            "old-token-legacy",
+		shared.HealthStoppedKey:                            "false",
+		"environment.INCUS_COMPOSE_DNS_INCUS":              "https://10.0.0.1:8443",
+		"environment.INCUS_COMPOSE_DNS_SERVER_FINGERPRINT": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+		"custom.key":                                       "custom-value",
+		"limits.memory":                                    "32MiB", // below defaultDNSMemoryLimit (64MiB)
 	}
 
 	carried := dnsCarriedConfig(input)
@@ -184,6 +185,7 @@ func TestDNSCarriedConfig(t *testing.T) {
 	assert.NotContains(t, carried, "limits.memory", "memory below floor should be cleared")
 
 	assert.Equal(t, "https://10.0.0.1:8443", carried["environment.INCUS_COMPOSE_DNS_INCUS"])
+	assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", carried["environment.INCUS_COMPOSE_DNS_SERVER_FINGERPRINT"])
 	assert.Equal(t, "custom-value", carried["custom.key"])
 }
 
@@ -194,20 +196,23 @@ func TestDNSSettings(t *testing.T) {
 		t.Parallel()
 
 		params := dnsParams{
-			global:    true,
-			listen:    ":5353",
-			http:      ":9154",
-			forward:   []string{"1.1.1.1", "8.8.8.8"},
-			suffix:    "test.incus",
-			ttl:       10,
-			noMetrics: true,
-			carry:     map[string]string{},
+			global:            true,
+			serverFingerprint: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+			listen:            ":5353",
+			http:              ":9154",
+			forward:           []string{"1.1.1.1", "8.8.8.8"},
+			suffix:            "test.incus",
+			ttl:               10,
+			noMetrics:         true,
+			carry:             map[string]string{},
 		}
 
 		settings := dnsSettings(params, "https://10.0.0.1:8443", true)
 
 		assert.Equal(t, "https://10.0.0.1:8443", settings[envDNSIncus])
 		assert.Equal(t, "https://10.0.0.1:8443", settings["environment.DNS_INCUS"])
+		assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", settings[envDNSServerFingerprint])
+		assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", settings["environment.DNS_SERVER_FINGERPRINT"])
 		assert.Equal(t, ":5353", settings[envDNSListen])
 		assert.Equal(t, ":5353", settings["environment.DNS_LISTEN"])
 		assert.Equal(t, ":9154", settings[envDNSHTTP])

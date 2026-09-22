@@ -75,6 +75,12 @@ func runCommand(cfg *config) *cli.Command {
 				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_INCUS"),
 			},
 			&cli.StringFlag{
+				Name:        "server-fingerprint",
+				Usage:       "Server certificate SHA-256 fingerprint",
+				Destination: &cfg.ServerFingerprint,
+				Sources:     cli.EnvVars("INCUS_COMPOSE_HEALTHD_SERVER_FINGERPRINT"),
+			},
+			&cli.StringFlag{
 				Name:        "token",
 				Usage:       "One-time trust token; a token file under --secrets-dir is read when this is empty",
 				Destination: &cfg.Token,
@@ -195,6 +201,10 @@ func runCommand(cfg *config) *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if !cfg.UseRemote && cfg.ServerFingerprint == "" {
+				return errors.New("server fingerprint is required")
+			}
+
 			level := slog.LevelInfo
 			if cfg.Debug {
 				level = slog.LevelDebug
@@ -233,6 +243,7 @@ func runCommand(cfg *config) *cli.Command {
 				"data_dir", cfg.DataDir,
 				"secrets_dir", cfg.SecretsDir,
 				"token", cfg.redacted().Token,
+				"server_fingerprint", cfg.ServerFingerprint,
 				"workers", cfg.Workers,
 				"restart_workers", cfg.RestartWorkers,
 				"metrics", cfg.Metrics,
@@ -370,16 +381,17 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config) error {
 // configuration that cannot authenticate is refused at once, not retried.
 func connect(ctx context.Context, logger *slog.Logger, cfg *config) (*iclient.Connection, error) {
 	trust := incustrust.Config{
-		Name:       certName,
-		UserAgent:  certName + "/" + version,
-		URL:        cfg.IncusURL,
-		ClientCert: cfg.ClientCert,
-		ClientKey:  cfg.ClientKey,
-		Token:      cfg.Token,
-		DataDir:    cfg.DataDir,
-		SecretsDir: cfg.SecretsDir,
-		Remote:     cfg.Remote,
-		UseRemote:  cfg.UseRemote,
+		Name:              certName,
+		UserAgent:         certName + "/" + version,
+		URL:               cfg.IncusURL,
+		ServerFingerprint: cfg.ServerFingerprint,
+		ClientCert:        cfg.ClientCert,
+		ClientKey:         cfg.ClientKey,
+		Token:             cfg.Token,
+		DataDir:           cfg.DataDir,
+		SecretsDir:        cfg.SecretsDir,
+		Remote:            cfg.Remote,
+		UseRemote:         cfg.UseRemote,
 	}
 
 	for {

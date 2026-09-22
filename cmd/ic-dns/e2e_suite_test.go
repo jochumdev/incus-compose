@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/internal/testlib"
 )
 
@@ -353,6 +354,20 @@ func newE2ESuite(t *testing.T) *e2eSuite {
 	remote := os.Getenv("INCUS_REMOTE")
 	if remote != "" {
 		s.export("INCUS_REMOTE", remote)
+
+		conf, err := iclient.ReadConfig("")
+		if err == nil {
+			info, err := conf.RemoteInfos(remote)
+			if err == nil {
+				conn, err := iclient.NewConnection(info)
+				if err == nil {
+					connInfo, err := conn.GetConnectionInfo(t.Context())
+					if err == nil && connInfo.CertificateFingerprint != "" {
+						s.export("DNS_SERVER_FINGERPRINT", connInfo.CertificateFingerprint)
+					}
+				}
+			}
+		}
 	}
 
 	return s

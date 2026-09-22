@@ -60,6 +60,9 @@ type Config struct {
 	// URL is the Incus endpoint. Required for everything but Remote.
 	URL string
 
+	// ServerFingerprint is the SHA-256 fingerprint of the server certificate.
+	ServerFingerprint string
+
 	// ClientCert and ClientKey name a pair to present, both or neither. Already
 	// trusted, so there is nothing to redeem and nothing to persist.
 	ClientCert string
@@ -201,7 +204,7 @@ func Enroll(ctx context.Context, cfg Config, token string) (*iclient.Connection,
 	return conn, nil
 }
 
-// dial builds the connection. The server certificate is not pinned.
+// dial builds the connection, pinned by the server certificate fingerprint if provided.
 func dial(cfg Config, certPEM, keyPEM []byte) (*iclient.Connection, error) {
 	if cfg.URL == "" {
 		return nil, errors.New("no Incus endpoint")
@@ -214,7 +217,8 @@ func dial(cfg Config, certPEM, keyPEM []byte) (*iclient.Connection, error) {
 		Protocol:           "incus",
 		ClientCert:         string(certPEM),
 		ClientKey:          string(keyPEM),
-		InsecureSkipVerify: true,
+		ServerFingerprint:  cfg.ServerFingerprint,
+		InsecureSkipVerify: cfg.ServerFingerprint == "",
 	})
 }
 

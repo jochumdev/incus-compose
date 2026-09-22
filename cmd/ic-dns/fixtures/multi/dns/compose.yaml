@@ -29,6 +29,7 @@ services:
           memory: 100M
     environment:
       DNS_INCUS: "https://${IPV4_GATEWAY}:${INCUS_PORT}"
+      DNS_SERVER_FINGERPRINT: "${DNS_SERVER_FINGERPRINT:-}"
       DNS_SECRETS_DIR: /etc/ic-dns
       DNS_DATA_DIR: "${DNS_DATA_DIR}"
       DNS_PROJECT_MARKER: "user.label.dns.scope=${SUITE_SCOPE}"

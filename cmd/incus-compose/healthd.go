@@ -61,13 +61,14 @@ func healthdCertName(incusProject string, global bool) string {
 
 // healthdParams holds the image/binary options for healthd setup.
 type healthdParams struct {
-	binary       string
-	image        string // already resolved via resolveImageVersion
-	pull         string
-	incus        *url.URL
-	network      string // Incus bridge name; empty = the scope's own default network
-	timeout      time.Duration
-	stackWorkers int // concurrency of our own resource stack, not the daemon's
+	binary            string
+	image             string // already resolved via resolveImageVersion
+	pull              string
+	incus             *url.URL
+	serverFingerprint string
+	network           string // Incus bridge name; empty = the scope's own default network
+	timeout           time.Duration
+	stackWorkers      int // concurrency of our own resource stack, not the daemon's
 
 	// global shares one daemon in globalHealthdProject instead of one per project.
 	global bool
@@ -86,11 +87,12 @@ type healthdParams struct {
 
 // The daemon's environment keys, as Incus instance config.
 const (
-	envIncus          = "environment.INCUS_COMPOSE_HEALTHD_INCUS"
-	envWorkers        = "environment.INCUS_COMPOSE_HEALTHD_WORKERS"
-	envRestartWorkers = "environment.INCUS_COMPOSE_HEALTHD_RESTART_WORKERS"
-	envDebug          = "environment.INCUS_COMPOSE_HEALTHD_DEBUG"
-	envTrace          = "environment.INCUS_COMPOSE_HEALTHD_TRACE"
+	envIncus             = "environment.INCUS_COMPOSE_HEALTHD_INCUS"
+	envServerFingerprint = "environment.INCUS_COMPOSE_HEALTHD_SERVER_FINGERPRINT"
+	envWorkers           = "environment.INCUS_COMPOSE_HEALTHD_WORKERS"
+	envRestartWorkers    = "environment.INCUS_COMPOSE_HEALTHD_RESTART_WORKERS"
+	envDebug             = "environment.INCUS_COMPOSE_HEALTHD_DEBUG"
+	envTrace             = "environment.INCUS_COMPOSE_HEALTHD_TRACE"
 )
 
 // healthdSettings builds this run's healthd settings from flags, compose configuration and defaults.
@@ -99,6 +101,9 @@ func healthdSettings(params healthdParams, incusURL string, debug bool) map[stri
 
 	if incusURL != "" {
 		settings[envIncus] = incusURL
+	}
+	if params.serverFingerprint != "" {
+		settings[envServerFingerprint] = params.serverFingerprint
 	}
 	if params.workers > 0 {
 		settings[envWorkers] = strconv.Itoa(params.workers)
@@ -307,6 +312,18 @@ func healthdGetResources(c *client.Client, params healthdParams) (*client.Instan
 			return err
 		}
 
+		conn, err := c.GlobalConnection()
+		if err != nil {
+			return err
+		}
+
+		connInfo, err := conn.GetConnectionInfo(ctx)
+		if err != nil {
+			return err
+		}
+
+		params.serverFingerprint = connInfo.CertificateFingerprint
+
 		if info := inst.State().IncusInstance; info != nil {
 			// No need to setup the instance when we already did that.
 			_, ok := info.Config["environment.INCUS_COMPOSE_HEALTHD_INCUS"]
@@ -453,6 +470,9 @@ func healthdConfigDrift(params healthdParams, config map[string]string) []string
 	if params.incus != nil {
 		want["incus"] = params.incus.String()
 	}
+	if params.serverFingerprint != "" {
+		want["server-fingerprint"] = params.serverFingerprint
+	}
 	if params.workers > 0 {
 		want["workers"] = strconv.Itoa(params.workers)
 	}
@@ -461,9 +481,10 @@ func healthdConfigDrift(params healthdParams, config map[string]string) []string
 	}
 
 	env := map[string]string{
-		"incus":           "environment.INCUS_COMPOSE_HEALTHD_INCUS",
-		"workers":         "environment.INCUS_COMPOSE_HEALTHD_WORKERS",
-		"restart-workers": "environment.INCUS_COMPOSE_HEALTHD_RESTART_WORKERS",
+		"incus":              "environment.INCUS_COMPOSE_HEALTHD_INCUS",
+		"server-fingerprint": "environment.INCUS_COMPOSE_HEALTHD_SERVER_FINGERPRINT",
+		"workers":            "environment.INCUS_COMPOSE_HEALTHD_WORKERS",
+		"restart-workers":    "environment.INCUS_COMPOSE_HEALTHD_RESTART_WORKERS",
 	}
 
 	for name, value := range want {

@@ -73,6 +73,12 @@ func runCommand(cfg *config) *cli.Command {
 				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_INCUS", "DNS_INCUS"),
 			},
 			&cli.StringFlag{
+				Name:        "server-fingerprint",
+				Usage:       "Server certificate SHA-256 fingerprint",
+				Destination: &cfg.ServerFingerprint,
+				Sources:     cli.EnvVars("INCUS_COMPOSE_DNS_SERVER_FINGERPRINT", "DNS_SERVER_FINGERPRINT"),
+			},
+			&cli.StringFlag{
 				Name:        "token",
 				Usage:       "One-time trust token; a token file under --secrets-dir is read when this is empty",
 				Destination: &cfg.Token,
@@ -326,6 +332,7 @@ func action(ctx context.Context, cmd *cli.Command, cfg *config) error {
 		"data_dir", cfg.DataDir,
 		"secrets_dir", cfg.SecretsDir,
 		"token", cfg.redacted().Token,
+		"server_fingerprint", cfg.ServerFingerprint,
 		"debounce_window", cfg.DebounceWindow,
 		"workers", cfg.Workers,
 		"read_timeout", cfg.ReadTimeout,
@@ -358,18 +365,19 @@ func run(ctx context.Context, logger *slog.Logger, cfg config) error {
 	logger.Info("chain", "plugins", names)
 
 	trust := incustrust.Config{
-		Name:       certName,
-		UserAgent:  certName + "/" + version,
-		URL:        cfg.IncusURL,
-		ClientCert: cfg.ClientCert,
-		ClientKey:  cfg.ClientKey,
-		Token:      cfg.Token,
-		DataDir:    cfg.DataDir,
-		SecretsDir: cfg.SecretsDir,
-		Restricted: cfg.Restricted,
-		Projects:   cfg.Projects,
-		Remote:     cfg.Remote,
-		UseRemote:  cfg.UseRemote,
+		Name:              certName,
+		UserAgent:         certName + "/" + version,
+		URL:               cfg.IncusURL,
+		ServerFingerprint: cfg.ServerFingerprint,
+		ClientCert:        cfg.ClientCert,
+		ClientKey:         cfg.ClientKey,
+		Token:             cfg.Token,
+		DataDir:           cfg.DataDir,
+		SecretsDir:        cfg.SecretsDir,
+		Restricted:        cfg.Restricted,
+		Projects:          cfg.Projects,
+		Remote:            cfg.Remote,
+		UseRemote:         cfg.UseRemote,
 	}
 
 	var conn *iclient.Connection

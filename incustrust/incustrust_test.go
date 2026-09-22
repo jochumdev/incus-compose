@@ -1,10 +1,16 @@
 package incustrust
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -215,4 +221,43 @@ func TestConnectIgnoresAnEmptyDataDir(t *testing.T) {
 		URL:  "https://10.0.0.1:8443",
 	})
 	require.ErrorIs(t, err, ErrNoCredentials)
+}
+
+// TestDialServerFingerprintVerification pins that dial validates the server
+// certificate against ServerFingerprint.
+func TestDialServerFingerprintVerification(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(incusApi.Response{
+			Type:       incusApi.SyncResponse,
+			StatusCode: http.StatusOK,
+			Metadata:   json.RawMessage(`{"environment":{"server_name":"test"}}`),
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	certPEM, keyPEM, err := generate("test")
+	require.NoError(t, err)
+
+	fp := fmt.Sprintf("%x", sha256.Sum256(server.Certificate().Raw))
+
+	t.Run("matching fingerprint connects successfully", func(t *testing.T) {
+		conn, err := dial(Config{Name: "test", URL: server.URL, ServerFingerprint: fp}, certPEM, keyPEM)
+		require.NoError(t, err)
+
+		got, _, err := conn.GetServer(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "test", got.Environment.ServerName)
+	})
+
+	t.Run("mismatched fingerprint fails handshake", func(t *testing.T) {
+		badFP := "0000000000000000000000000000000000000000000000000000000000000000"
+		conn, err := dial(Config{Name: "test", URL: server.URL, ServerFingerprint: badFP}, certPEM, keyPEM)
+		require.NoError(t, err)
+
+		_, _, err = conn.GetServer(t.Context())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "server certificate fingerprint mismatch")
+	})
 }

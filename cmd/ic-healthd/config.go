@@ -28,14 +28,15 @@ const (
 // and tested without a command line.
 type config struct {
 	// Incus.
-	IncusURL   string
-	Token      string
-	DataDir    string
-	SecretsDir string
-	ClientCert string
-	ClientKey  string
-	Remote     string
-	UseRemote  bool
+	IncusURL          string
+	ServerFingerprint string
+	Token             string
+	DataDir           string
+	SecretsDir        string
+	ClientCert        string
+	ClientKey         string
+	Remote            string
+	UseRemote         bool
 
 	// What to watch.
 	Projects           []string

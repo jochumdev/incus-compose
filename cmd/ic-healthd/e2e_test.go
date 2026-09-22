@@ -120,10 +120,17 @@ func healthdConfig(t *testing.T, c *client.Client, projects ...string) *config {
 		url = c.Config().URL
 	}
 
+	gConn, err := c.GlobalConnection()
+	require.NoError(t, err)
+
+	info, err := gConn.GetConnectionInfo(t.Context())
+	require.NoError(t, err)
+
 	return &config{
 		DataDir:            t.TempDir(),
 		SecretsDir:         t.TempDir(),
 		IncusURL:           url,
+		ServerFingerprint:  info.CertificateFingerprint,
 		Token:              newToken(t, c, projects...),
 		Projects:           projects,
 		ProjectMarker:      shared.HealthEnabledKey,

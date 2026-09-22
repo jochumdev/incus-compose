@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -39,15 +40,16 @@ const (
 // and tested without a command line.
 type config struct {
 	// Incus.
-	IncusURL   string
-	Token      string
-	DataDir    string
-	SecretsDir string
-	ClientCert string
-	ClientKey  string
-	Restricted bool
-	Remote     string
-	UseRemote  bool
+	IncusURL          string
+	ServerFingerprint string
+	Token             string
+	DataDir           string
+	SecretsDir        string
+	ClientCert        string
+	ClientKey         string
+	Restricted        bool
+	Remote            string
+	UseRemote         bool
 
 	// What to serve.
 	Suffix             string
@@ -103,6 +105,10 @@ func parseMarker(marker string) (key, value string) {
 
 // validate rejects what cannot work, at startup, while somebody is watching.
 func (c config) validate() error {
+	if !c.UseRemote && c.ServerFingerprint == "" {
+		return errors.New("server fingerprint is required")
+	}
+
 	if c.TTL > maxTTL {
 		return fmt.Errorf("ttl %d is out of range, the most a record may carry is %d", c.TTL, maxTTL)
 	}

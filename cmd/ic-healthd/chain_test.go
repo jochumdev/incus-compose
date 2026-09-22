@@ -55,6 +55,7 @@ func TestConfigFromCommand(t *testing.T) {
 
 	cfg := parse(t,
 		"--incus", "https://10.0.0.1:8443",
+		"--server-fingerprint", "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
 		"--token", "secret",
 		"--project", "one", "--project", "two",
 		"--project-marker", "user.mine=yes",
@@ -68,6 +69,7 @@ func TestConfigFromCommand(t *testing.T) {
 	)
 
 	require.Equal(t, "https://10.0.0.1:8443", cfg.IncusURL)
+	require.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", cfg.ServerFingerprint)
 	require.Equal(t, "secret", cfg.Token)
 	require.Equal(t, []string{"one", "two"}, cfg.Projects)
 	require.Equal(t, "user.mine", cfg.ProjectMarker)
@@ -92,6 +94,7 @@ func TestConfigFromCommand(t *testing.T) {
 
 func TestConfigFromEnvironment(t *testing.T) {
 	t.Setenv("INCUS_COMPOSE_HEALTHD_INCUS", "https://env:8443")
+	t.Setenv("INCUS_COMPOSE_HEALTHD_SERVER_FINGERPRINT", "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90")
 	t.Setenv("INCUS_COMPOSE_HEALTHD_HTTP_ADDRESS", ":9153")
 	t.Setenv("INCUS_COMPOSE_HEALTHD_WORKERS", "16")
 	t.Setenv("INCUS_COMPOSE_HEALTHD_DEBUG", "true")
@@ -99,6 +102,7 @@ func TestConfigFromEnvironment(t *testing.T) {
 	cfg := parse(t)
 
 	require.Equal(t, "https://env:8443", cfg.IncusURL)
+	require.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", cfg.ServerFingerprint)
 	require.Equal(t, ":9153", cfg.HTTPAddr)
 	require.Equal(t, 16, cfg.Workers)
 	require.True(t, cfg.Debug)
@@ -126,6 +130,19 @@ func TestConfigFromEnvironment(t *testing.T) {
 	cfg = parse(t, "--project-marker", "user.cli=fromcli")
 	require.Equal(t, "user.cli", cfg.ProjectMarker)
 	require.Equal(t, "fromcli", cfg.ProjectMarkerValue)
+}
+
+// TestRunRequiresServerFingerprint pins that starting without a server fingerprint fails.
+func TestRunRequiresServerFingerprint(t *testing.T) {
+	t.Parallel()
+
+	app := command()
+	app.Writer = io.Discard
+	app.ErrWriter = io.Discard
+
+	err := app.Run(t.Context(), []string{"ic-healthd", "run", "--incus", "https://127.0.0.1:8443"})
+	require.Error(t, err)
+	require.EqualError(t, err, "server fingerprint is required")
 }
 
 func TestConfigDefaults(t *testing.T) {
