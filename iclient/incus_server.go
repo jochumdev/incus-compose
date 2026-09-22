@@ -47,6 +47,7 @@ func (c *Connection) GetConnectionInfo(ctx context.Context) (*ConnectionInfo, er
 	}
 
 	info.Target = server.Environment.ServerName
+	info.CertificateFingerprint = server.Environment.CertificateFingerprint
 
 	if c.socketPath == "" {
 		info.Addresses = append(info.Addresses, c.baseURL)

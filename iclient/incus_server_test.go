@@ -57,13 +57,14 @@ func TestIncusHasExtension(t *testing.T) {
 func TestIncusGetConnectionInfo(t *testing.T) {
 	t.Parallel()
 
-	conn, _ := recordingServer(t, `{"environment":{"server_name":"node1","addresses":["10.0.0.5:8443",":8443"]}}`)
+	conn, _ := recordingServer(t, `{"environment":{"server_name":"node1","certificate_fingerprint":"a1b2c3d4","addresses":["10.0.0.5:8443",":8443"]}}`)
 
 	info, err := conn.GetConnectionInfo(t.Context())
 	require.NoError(t, err)
 
 	require.Equal(t, "incus", info.Protocol)
 	require.Equal(t, "node1", info.Target)
+	require.Equal(t, "a1b2c3d4", info.CertificateFingerprint)
 	require.Empty(t, info.SocketPath, "an http remote has no socket")
 
 	// A wildcard address names no host, so it is dropped.

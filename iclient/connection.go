@@ -14,6 +14,9 @@ type ConnectionInfo struct {
 	// Certificate is the server certificate pinned for this remote, if any.
 	Certificate string
 
+	// CertificateFingerprint is the SHA-256 fingerprint of the server certificate.
+	CertificateFingerprint string
+
 	Protocol string
 	URL      string
 
