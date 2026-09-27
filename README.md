@@ -114,11 +114,16 @@ curl -sSfL https://raw.githubusercontent.com/lxc/incus-compose/main/install.sh |
 ```
 
 Or grab a prebuilt archive from the
-[Releases Page](https://github.com/lxc/incus-compose/releases). On Arch Linux,
-install
+[Releases Page](https://github.com/lxc/incus-compose/releases).
+
+On Arch Linux, install
 [incus-compose-bin](https://aur.archlinux.org/packages/incus-compose-bin) (or
 [incus-compose-git](https://aur.archlinux.org/packages/incus-compose-git) for
-builds from `main`) from the AUR - maintained by @neitsab and @jochumdev.
+builds from `main`) from the AUR.
+
+On Mac you may use `brew install tallica/tap/incus-compose` see:
+https://discuss.linuxcontainers.org/t/lazyincus-a-lazydocker-style-terminal-ui-for-incus/27283
+.
 
 Then point it at your existing `compose.yaml`:
 
@@ -186,7 +191,7 @@ Fixes and new features are greatly appreciated. Make sure to read our
 incus-compose wouldn't be what it is without the people who tested it, filed
 reports, and pushed on ideas along the way: @alien43, @Sagi, @neitsab,
 @pyrodogg, @kgoetz, @edorgeville, @bburky, @blurry, @stgraber, @ishaan-jindal,
-@code-by-tanveer, and @Tofil.
+@code-by-tanveer, @tallica, and @Tofil.
 
 It also stands on a few libraries that make maintaining it far easier:
 
