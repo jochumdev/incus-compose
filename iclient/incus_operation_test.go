@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -413,4 +414,108 @@ func TestIncusOperationsAgainstRealIncus(t *testing.T) {
 	for _, op := range operations {
 		require.NotEmpty(t, op.ID)
 	}
+}
+
+// stallingServer holds its first stalls event-socket requests open without
+// answering them, then serves as newOperationServer does. forbidden, when set,
+// refuses every event socket instead.
+func stallingServer(t *testing.T, stalls int, forbidden bool) (*Connection, *recorder) {
+	t.Helper()
+
+	seen := &recorder{}
+	upgrader := websocket.Upgrader{}
+
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.add(r)
+
+		if strings.HasSuffix(r.URL.Path, "/events") {
+			if forbidden {
+				w.WriteHeader(http.StatusForbidden)
+
+				return
+			}
+
+			mu.Lock()
+			stall := stalls > 0
+			stalls--
+			mu.Unlock()
+
+			if stall {
+				<-r.Context().Done()
+
+				return
+			}
+
+			socket, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+
+			defer func() { _ = socket.Close() }()
+
+			<-r.Context().Done()
+
+			return
+		}
+
+		metadata, _ := json.Marshal(running("op-1"))
+		_, _ = io.WriteString(w,
+			`{"type":"async","status_code":100,"operation":"/1.0/operations/op-1","metadata":`+string(metadata)+`}`)
+	}))
+
+	t.Cleanup(server.Close)
+
+	conn, err := NewConnection(&ConfigRemoteInfo{
+		Name:  "stalling",
+		Addrs: []string{server.URL},
+	})
+	require.NoError(t, err)
+
+	conn.eventUpgrade = 200 * time.Millisecond
+
+	return conn, seen
+}
+
+func requestsTo(seen *recorder, suffix string) int {
+	count := 0
+
+	for _, req := range seen.all() {
+		if strings.HasSuffix(req.url.Path, suffix) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// TestIncusAsyncOperationRetriesASlowEventSocket: the listener opens before the
+// request goes out, so a server too slow to accept it has been sent nothing yet
+// and the listener is simply opened again.
+func TestIncusAsyncOperationRetriesASlowEventSocket(t *testing.T) {
+	t.Parallel()
+
+	conn, seen := stallingServer(t, 1, false)
+
+	updates, err := conn.DeleteInstance(t.Context(), "myproject", "web-1")
+	require.NoError(t, err, "a slow handshake must not fail the operation")
+	require.NotNil(t, updates)
+
+	require.Equal(t, 2, requestsTo(seen, "/events"), "the stalled listener is opened again")
+	require.Equal(t, 1, requestsTo(seen, "/instances/web-1"), "the request goes out once, after the listener")
+}
+
+// TestIncusAsyncOperationDoesNotRetryARefusedEventSocket: a server that answers
+// with a refusal will answer the same way again.
+func TestIncusAsyncOperationDoesNotRetryARefusedEventSocket(t *testing.T) {
+	t.Parallel()
+
+	conn, seen := stallingServer(t, 0, true)
+
+	_, err := conn.DeleteInstance(t.Context(), "myproject", "web-1")
+	require.ErrorContains(t, err, "opening the event socket")
+
+	require.Equal(t, 1, requestsTo(seen, "/events"), "a refusal is an answer, so it is not retried")
+	require.Equal(t, 0, requestsTo(seen, "/instances/web-1"), "nothing is sent without a listener")
 }

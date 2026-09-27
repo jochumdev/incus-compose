@@ -53,6 +53,9 @@ type Connection struct {
 	// eventSilence is how long an event socket may say nothing before it counts
 	// as dead. A test shortens it, having no half hour to wait.
 	eventSilence time.Duration
+
+	// eventUpgrade is how long the server has to accept an event socket.
+	eventUpgrade time.Duration
 }
 
 // NewConnection dials an Incus daemon, over its unix socket or over TLS.
@@ -76,6 +79,7 @@ func NewConnection(info *ConfigRemoteInfo) (*Connection, error) {
 		serverCert:   info.ServerCert,
 		events:       &incusEvents{},
 		eventSilence: incusEventSilence,
+		eventUpgrade: incusTLSHandshakeTimeout,
 	}
 
 	// Only the first address is tried, where upstream probes the whole rolling list.

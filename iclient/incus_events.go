@@ -107,7 +107,7 @@ func (c *Connection) listenEvents(ctx context.Context, types []string, query url
 		NetDialContext:   transport.DialContext,
 		TLSClientConfig:  transport.TLSClientConfig,
 		Proxy:            transport.Proxy,
-		HandshakeTimeout: incusTLSHandshakeTimeout,
+		HandshakeTimeout: c.eventUpgrade,
 	}
 
 	socket, resp, err := dialer.DialContext(ctx, uri, nil)

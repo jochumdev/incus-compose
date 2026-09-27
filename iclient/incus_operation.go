@@ -3,8 +3,10 @@ package iclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -18,8 +20,8 @@ const incusOperationsPath = "/operations"
 // incusOperationBuffer holds updates for a caller that is between reads.
 const incusOperationBuffer = 8
 
-// incusOperationRetry is how long an operation whose event socket died keeps
-// trying to reach the server before it gives up on it.
+// incusOperationRetry is how long an operation keeps trying to open or regain
+// its event socket before it gives up on the server.
 const incusOperationRetry = 30 * time.Second
 
 // incusOperationRetryDelay is the pause between those attempts.
@@ -62,7 +64,7 @@ func (c *Connection) asyncUpload(ctx context.Context, project string, path strin
 func (c *Connection) async(ctx context.Context, project string, what string, send func(context.Context) (*api.Response, error)) (<-chan api.Operation, error) {
 	listenCtx, cancel := context.WithCancel(ctx)
 
-	events, err := c.ListenEvents(listenCtx, project, []string{api.EventTypeOperation})
+	events, err := c.listenOperationEvents(listenCtx, project)
 	if err != nil {
 		cancel()
 
@@ -92,6 +94,36 @@ func (c *Connection) async(ctx context.Context, project string, what string, sen
 	}
 
 	return c.followOperation(listenCtx, cancel, project, events, started), nil
+}
+
+// listenOperationEvents opens the operation listener, trying again while the
+// server is too slow to accept it. Nothing has been sent yet, so a retry cannot
+// run anything twice.
+func (c *Connection) listenOperationEvents(ctx context.Context, project string) (<-chan api.Event, error) {
+	deadline := time.Now().Add(incusOperationRetry)
+
+	for {
+		events, err := c.ListenEvents(ctx, project, []string{api.EventTypeOperation})
+		if err == nil {
+			return events, nil
+		}
+
+		// Only a timeout is worth another try, a server that answered will answer the same again.
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() {
+			return nil, err
+		}
+
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return nil, err
+		}
+
+		select {
+		case <-time.After(incusOperationRetryDelay):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
 }
 
 // followOperation feeds the caller's channel: the operation as it stands, then
