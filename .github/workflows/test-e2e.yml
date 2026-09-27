@@ -22,10 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # - name: stable
-          #   remote: ict-stable
-          # - name: custom
-          #   remote: ict-custom
+          - name: stable
+            remote: ict-stable
+          - name: custom
+            remote: ict-custom
           # - name: lts
           #   remote: ict-lts
           - name: daily
@@ -136,13 +136,13 @@ jobs:
         include:
           - name: Hugo
             args: "-run TestExample/hugo"
-            remote: ict-daily
+            remote: ict-stable
           - name: Leafwiki
             args: "-run TestExample/leafwiki"
+            remote: ict-custom
+          - name: Immich
+            args: "-run TestExample/immich -timeout 20m"
             remote: ict-daily
-          # - name: Immich
-          #   args: "-run TestExample/immich -timeout 20m"
-          #   remote: ict-daily
           # - name: ManyDependencies
           #   args: "-run TestExample/many-dependencies"
           #   remote: ict-daily
