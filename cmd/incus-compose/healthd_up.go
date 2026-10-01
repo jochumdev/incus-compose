@@ -19,17 +19,18 @@ import (
 
 // healthdUpArgs holds the healthdUp() options, mirroring the `healthd up` command's flags.
 type healthdUpArgs struct {
-	Binary  string
-	Image   string // raw --image flag value; resolved via resolveImageVersion inside healthdUp.
-	Incus   string // raw --incus/--healthd-incus override; empty keeps the project default.
-	Network string // raw --network/--healthd-network override; empty keeps the project default.
-	Scope   string // raw --scope/--healthd-scope override; loses to a scope the project carries.
-	Pull    string
-	Timeout time.Duration
-	Workers int
-	Debug   bool
-	Trace   bool
-	Writer  io.Writer
+	Binary    string
+	Image     string // raw --image flag value; resolved via resolveImageVersion inside healthdUp.
+	Incus     string // raw --incus/--healthd-incus override; empty keeps the project default.
+	Network   string // raw --network/--healthd-network override; empty keeps the project default.
+	Scope     string // raw --scope/--healthd-scope override; loses to a scope the project carries.
+	Pull      string
+	Timeout   time.Duration
+	Workers   int
+	Debug     bool
+	Trace     bool
+	NoMetrics bool
+	Writer    io.Writer
 }
 
 // healthdUp points the project at a healthd, shared or its own.
@@ -80,6 +81,7 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 		stackWorkers:   args.Workers,
 		workers:        p.ClientConfig.Healthd.Workers,
 		restartWorkers: p.ClientConfig.Healthd.RestartWorkers,
+		noMetrics:      args.NoMetrics,
 		xIncus:         p.ClientConfig.Healthd.XIncus,
 	}
 
@@ -214,6 +216,7 @@ func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdU
 		network:      args.Network,
 		timeout:      args.Timeout,
 		stackWorkers: args.Workers,
+		noMetrics:    args.NoMetrics,
 	}
 
 	hcProject := globalProject
@@ -421,6 +424,11 @@ func newHealthdUpCommand() *cli.Command {
 				Value:   10 * time.Second,
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_TIMEOUT"),
 			},
+			&cli.BoolFlag{
+				Name:    "no-metrics",
+				Usage:   "Disable metrics reporting",
+				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_NO_METRICS"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			globalClient, err := clientFromContext(ctx)
@@ -438,17 +446,18 @@ func newHealthdUpCommand() *cli.Command {
 			}
 
 			upArgs := healthdUpArgs{
-				Binary:  cmd.String("binary"),
-				Image:   healthdImage(),
-				Incus:   cmd.String("incus"),
-				Network: cmd.String("network"),
-				Scope:   cmd.String("scope"),
-				Pull:    cmd.String("pull"),
-				Timeout: cmd.Duration("timeout"),
-				Workers: cmd.Root().Int("workers"),
-				Debug:   cmd.Root().Bool("debug"),
-				Trace:   cmd.Root().Bool("trace"),
-				Writer:  cmd.Root().Writer,
+				Binary:    cmd.String("binary"),
+				Image:     healthdImage(),
+				Incus:     cmd.String("incus"),
+				Network:   cmd.String("network"),
+				Scope:     cmd.String("scope"),
+				Pull:      cmd.String("pull"),
+				Timeout:   cmd.Duration("timeout"),
+				Workers:   cmd.Root().Int("workers"),
+				Debug:     cmd.Root().Bool("debug"),
+				Trace:     cmd.Root().Bool("trace"),
+				NoMetrics: cmd.Bool("no-metrics"),
+				Writer:    cmd.Root().Writer,
 			}
 
 			// No compose file to read, so there is no project to mark and

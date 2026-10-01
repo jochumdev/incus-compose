@@ -80,6 +80,7 @@ type healthdParams struct {
 	// workers and restartWorkers size the daemon's pools; 0 keeps its defaults.
 	workers        int
 	restartWorkers int
+	noMetrics      bool
 
 	// xIncus is Incus instance config for the sidecar, e.g. limits.*.
 	xIncus map[string]string
@@ -93,6 +94,7 @@ const (
 	envRestartWorkers    = "environment.INCUS_COMPOSE_HEALTHD_RESTART_WORKERS"
 	envDebug             = "environment.INCUS_COMPOSE_HEALTHD_DEBUG"
 	envTrace             = "environment.INCUS_COMPOSE_HEALTHD_TRACE"
+	envHealthdMetrics    = "environment.INCUS_COMPOSE_HEALTHD_METRICS"
 )
 
 // healthdSettings builds this run's healthd settings from flags, compose configuration and defaults.
@@ -116,6 +118,11 @@ func healthdSettings(params healthdParams, incusURL string, debug bool) map[stri
 	}
 	if params.trace {
 		settings[envTrace] = "true"
+	}
+	if params.noMetrics {
+		settings[envHealthdMetrics] = "false"
+	} else {
+		settings[envHealthdMetrics] = "true"
 	}
 
 	maps.Copy(settings, params.xIncus)

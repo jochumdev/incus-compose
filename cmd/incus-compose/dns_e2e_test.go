@@ -73,12 +73,22 @@ services:
 	assert.Contains(t, statusOut, "IPv6:")
 	assert.NotContains(t, statusOut, "Metrics:")
 
+	metricsOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "dns", "status", "--metrics")
+	require.NoError(t, err)
+	assert.Contains(t, metricsOut, "Status: ready")
+	assert.Contains(t, metricsOut, "Metrics:")
+
 	jsonOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "dns", "status", "--format", "json")
 	require.NoError(t, err)
 	assert.Contains(t, jsonOut, `"status": "ready"`)
 	assert.Contains(t, jsonOut, `"ipv4":`)
 	assert.Contains(t, jsonOut, `"ipv6":`)
 	assert.NotContains(t, jsonOut, `"metrics":`)
+
+	jsonMetricsOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "dns", "status", "--metrics", "--format", "json")
+	require.NoError(t, err)
+	assert.Contains(t, jsonMetricsOut, `"status": "ready"`)
+	assert.Contains(t, jsonMetricsOut, `"metrics":`)
 }
 
 func TestE2EDNSUpNoDNSFlag(t *testing.T) {

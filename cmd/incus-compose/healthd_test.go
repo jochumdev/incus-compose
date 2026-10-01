@@ -228,3 +228,43 @@ func TestSidecarEnsureNetwork_GlobalDHCPRanges(t *testing.T) {
 		require.NotEmpty(t, cfg["ipv6.dhcp.ranges"])
 	}
 }
+
+func TestHealthdSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default metrics and flags", func(t *testing.T) {
+		t.Parallel()
+
+		params := healthdParams{
+			serverFingerprint: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+			workers:           4,
+			restartWorkers:    1,
+			trace:             true,
+			xIncus:            map[string]string{"limits.cpu": "2"},
+		}
+
+		settings := healthdSettings(params, "https://10.0.0.1:8443", true)
+
+		assert.Equal(t, "https://10.0.0.1:8443", settings[envIncus])
+		assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", settings[envServerFingerprint])
+		assert.Equal(t, "4", settings[envWorkers])
+		assert.Equal(t, "1", settings[envRestartWorkers])
+		assert.Equal(t, "true", settings[envDebug])
+		assert.Equal(t, "true", settings[envTrace])
+		assert.Equal(t, "true", settings[envHealthdMetrics])
+		assert.Equal(t, "2", settings["limits.cpu"])
+	})
+
+	t.Run("no metrics flag disables metrics", func(t *testing.T) {
+		t.Parallel()
+
+		params := healthdParams{
+			noMetrics: true,
+		}
+
+		settings := healthdSettings(params, "https://10.0.0.1:8443", false)
+
+		assert.Equal(t, "false", settings[envHealthdMetrics])
+		assert.Empty(t, settings[envDebug])
+	})
+}

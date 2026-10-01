@@ -108,45 +108,42 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 	settings := map[string]string{}
 	maps.Copy(settings, params.carry)
 
-	set := func(k1, k2, v string) {
-		settings[k1] = v
-		settings[k2] = v
-	}
-
-	if params.incus != nil || (settings[envDNSIncus] == "" && settings["environment.DNS_INCUS"] == "") {
-		set(envDNSIncus, "environment.DNS_INCUS", incusURL)
+	if params.incus != nil || settings[envDNSIncus] == "" {
+		settings[envDNSIncus] = incusURL
 	}
 	if params.serverFingerprint != "" {
-		set(envDNSServerFingerprint, "environment.DNS_SERVER_FINGERPRINT", params.serverFingerprint)
+		settings[envDNSServerFingerprint] = params.serverFingerprint
 	}
-	set(envDNSDataDir, "environment.DNS_DATA_DIR", "/var/lib/dns-incus")
-	set(envDNSSecretsDir, "environment.DNS_SECRETS_DIR", "/run/secrets")
+	settings[envDNSDataDir] = "/var/lib/dns-incus"
+	settings[envDNSSecretsDir] = "/run/secrets"
 
 	httpAddr := ":9153"
 	if params.http != "" {
 		httpAddr = params.http
 	}
-	set(envDNSHTTP, "environment.DNS_HTTP", httpAddr)
+	settings[envDNSHTTP] = httpAddr
 
 	if params.listen != "" {
-		set(envDNSListen, "environment.DNS_LISTEN", params.listen)
+		settings[envDNSListen] = params.listen
 	}
 	if len(params.forward) > 0 {
 		fw := strings.Join(params.forward, ",")
-		set(envDNSForward, "environment.DNS_FORWARD", fw)
+		settings[envDNSForward] = fw
 	}
 	if params.suffix != "" {
-		set(envDNSSuffix, "environment.DNS_SUFFIX", params.suffix)
+		settings[envDNSSuffix] = params.suffix
 	}
 	if params.ttl > 0 {
 		ttlStr := strconv.Itoa(int(params.ttl))
-		set(envDNSTTL, "environment.DNS_TTL", ttlStr)
+		settings[envDNSTTL] = ttlStr
 	}
 	if params.noMetrics {
-		set(envDNSMetrics, "environment.DNS_METRICS", "false")
+		settings[envDNSMetrics] = "false"
+	} else {
+		settings[envDNSMetrics] = "true"
 	}
 	if debug {
-		set(envDNSLog, "environment.DNS_LOG", "DEBUG")
+		settings[envDNSLog] = "DEBUG"
 	}
 
 	if params.global {
@@ -154,16 +151,16 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 		if marker == "" {
 			marker = shared.DNSScopeKey + "=" + shared.DNSScopeGlobal
 		}
-		set(envDNSProjectMarker, "environment.DNS_PROJECT_MARKER", marker)
+		settings[envDNSProjectMarker] = marker
 	} else {
 		if params.scope == shared.DNSScopeProject {
-			set(envDNSRestricted, "environment.DNS_RESTRICTED", "true")
+			settings[envDNSRestricted] = "true"
 		} else if params.scope != "" {
 			marker := params.projectMarker
 			if marker == "" {
 				marker = shared.DNSScopeKey + "=" + params.scope
 			}
-			set(envDNSProjectMarker, "environment.DNS_PROJECT_MARKER", marker)
+			settings[envDNSProjectMarker] = marker
 		}
 	}
 
@@ -405,7 +402,6 @@ func dnsGetResources(c *client.Client, params dnsParams) (*client.Instance, []cl
 		maps.Copy(inst.Config.Extensions, dnsSettings(params, incusURL, c.IsDebugging()))
 		if token != "" {
 			inst.Config.Extensions["environment.INCUS_COMPOSE_DNS_TOKEN"] = token
-			inst.Config.Extensions["environment.DNS_TOKEN"] = token
 		}
 
 		inst.Config.Files = append(inst.Config.Files, client.InstanceFile{

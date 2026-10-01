@@ -212,23 +212,14 @@ func TestDNSSettings(t *testing.T) {
 		settings := dnsSettings(params, "https://10.0.0.1:8443", true)
 
 		assert.Equal(t, "https://10.0.0.1:8443", settings[envDNSIncus])
-		assert.Equal(t, "https://10.0.0.1:8443", settings["environment.DNS_INCUS"])
 		assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", settings[envDNSServerFingerprint])
-		assert.Equal(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", settings["environment.DNS_SERVER_FINGERPRINT"])
 		assert.Equal(t, ":5353", settings[envDNSListen])
-		assert.Equal(t, ":5353", settings["environment.DNS_LISTEN"])
 		assert.Equal(t, ":9154", settings[envDNSHTTP])
-		assert.Equal(t, ":9154", settings["environment.DNS_HTTP"])
 		assert.Equal(t, "1.1.1.1,8.8.8.8", settings[envDNSForward])
-		assert.Equal(t, "1.1.1.1,8.8.8.8", settings["environment.DNS_FORWARD"])
 		assert.Equal(t, "test.incus", settings[envDNSSuffix])
-		assert.Equal(t, "test.incus", settings["environment.DNS_SUFFIX"])
 		assert.Equal(t, "10", settings[envDNSTTL])
-		assert.Equal(t, "10", settings["environment.DNS_TTL"])
 		assert.Equal(t, "false", settings[envDNSMetrics])
-		assert.Equal(t, "false", settings["environment.DNS_METRICS"])
 		assert.Equal(t, "DEBUG", settings[envDNSLog])
-		assert.Equal(t, "DEBUG", settings["environment.DNS_LOG"])
 		assert.Equal(t, shared.DNSScopeKey+"="+shared.DNSScopeGlobal, settings[envDNSProjectMarker])
 	})
 
@@ -243,8 +234,8 @@ func TestDNSSettings(t *testing.T) {
 		settings := dnsSettings(params, "https://10.0.0.1:8443", false)
 
 		assert.Equal(t, "true", settings[envDNSRestricted])
-		assert.Equal(t, "true", settings["environment.DNS_RESTRICTED"])
 		assert.Equal(t, ":9153", settings[envDNSHTTP])
+		assert.Equal(t, "true", settings[envDNSMetrics])
 	})
 
 	t.Run("multi-project scope settings", func(t *testing.T) {
@@ -258,7 +249,6 @@ func TestDNSSettings(t *testing.T) {
 		settings := dnsSettings(params, "https://10.0.0.1:8443", false)
 
 		assert.Equal(t, shared.DNSScopeKey+"=alpha,beta", settings[envDNSProjectMarker])
-		assert.Equal(t, shared.DNSScopeKey+"=alpha,beta", settings["environment.DNS_PROJECT_MARKER"])
 		assert.Empty(t, settings[envDNSProjects])
 		assert.Empty(t, settings[envDNSRestricted])
 	})
