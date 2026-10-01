@@ -2,9 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/lxc/incus-compose/client"
 )
@@ -280,4 +289,241 @@ func upgradeGlobalProject(ctx context.Context, gc *client.GlobalClient, network 
 	gc.InvalidateNetworkType(globalProject, globalHealthdNetwork)
 
 	return upgradeGlobalProject(ctx, gc, network)
+}
+
+// sidecarHTTPResponse holds the HTTP response for an endpoint queried via port-forward.
+type sidecarHTTPResponse struct {
+	Endpoint   string
+	StatusCode int
+	Body       string
+}
+
+// sidecarQueryEndpoints tunnels to targetPort on instanceName via incus port-forward
+// and queries the specified HTTP endpoints in order, returning their status codes and bodies.
+func sidecarQueryEndpoints(ctx context.Context, instanceName, project string, targetPort int, endpoints []string) ([]sidecarHTTPResponse, error) {
+	if len(endpoints) == 0 {
+		return nil, nil
+	}
+
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("allocating local port: %w", err)
+	}
+
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = listener.Close()
+		return nil, errors.New("listener is not TCP")
+	}
+
+	localPort := strconv.Itoa(tcpAddr.Port)
+	err = listener.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	path, err := exec.LookPath("incus")
+	if err != nil {
+		return nil, errors.New("'incus' not found in PATH")
+	}
+
+	fCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	fCmd := exec.CommandContext(fCtx, path, "port-forward", instanceName, strconv.Itoa(targetPort), localPort, "--project", project) //nolint:gosec
+	fCmd.Env = append(os.Environ(), "INCUS_PROJECT="+project)
+
+	err = fCmd.Start()
+	if err != nil {
+		return nil, fmt.Errorf("starting port-forward: %w", err)
+	}
+	defer func() {
+		cancel()
+		_ = fCmd.Wait()
+	}()
+
+	dialer := &net.Dialer{Timeout: 50 * time.Millisecond}
+	ready := false
+	for range 50 {
+		conn, dialErr := dialer.DialContext(ctx, "tcp", "127.0.0.1:"+localPort)
+		if dialErr == nil {
+			_ = conn.Close()
+			ready = true
+			break
+		}
+
+		if fCmd.ProcessState != nil && fCmd.ProcessState.Exited() {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	if !ready {
+		return nil, errors.New("port-forward failed to open port")
+	}
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	responses := make([]sidecarHTTPResponse, 0, len(endpoints))
+
+	for _, ep := range endpoints {
+		p := ep
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:"+localPort+p, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request for %s: %w", ep, err)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("querying %s: %w", ep, err)
+		}
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("reading response for %s: %w", ep, err)
+		}
+
+		responses = append(responses, sidecarHTTPResponse{
+			Endpoint:   ep,
+			StatusCode: resp.StatusCode,
+			Body:       string(bodyBytes),
+		})
+	}
+
+	return responses, nil
+}
+
+// sidecarStatusReport holds the status and endpoints for a sidecar.
+type sidecarStatusReport struct {
+	Status  string `json:"status"`
+	IPv4    string `json:"ipv4"`
+	IPv6    string `json:"ipv6"`
+	Metrics string `json:"metrics,omitempty"`
+}
+
+// sidecarIPAddresses extracts global IPv4 and IPv6 addresses from state, falling back to configured devices.
+func sidecarIPAddresses(state *client.InstanceState) (string, string) {
+	var ipv4s, ipv6s []string
+	if state.IncusInstanceState != nil {
+		for _, nw := range state.IncusInstanceState.Network {
+			if nw.Type == "loopback" {
+				continue
+			}
+
+			for _, a := range nw.Addresses {
+				if a.Scope != "global" || a.Address == "" {
+					continue
+				}
+
+				switch a.Family {
+				case "inet":
+					ipv4s = append(ipv4s, a.Address)
+				case "inet6":
+					ipv6s = append(ipv6s, a.Address)
+				}
+			}
+		}
+	}
+
+	if len(ipv4s) == 0 && state.IncusInstance != nil {
+		for _, dev := range state.IncusInstance.Devices {
+			if dev["type"] == "nic" || dev["network"] != "" {
+				if addr := dev["ipv4.address"]; addr != "" && addr != "none" {
+					ip, _, _ := strings.Cut(addr, "/")
+					ipv4s = append(ipv4s, ip)
+				}
+
+				if addr := dev["ipv6.address"]; addr != "" && addr != "none" {
+					ip, _, _ := strings.Cut(addr, "/")
+					ipv6s = append(ipv6s, ip)
+				}
+			}
+		}
+	}
+
+	return strings.Join(ipv4s, ", "), strings.Join(ipv6s, ", ")
+}
+
+// fetchSidecarStatus queries /ready (and optionally /metrics) on the sidecar via port-forward.
+func fetchSidecarStatus(ctx context.Context, instanceName, project string, httpPort int, includeMetrics bool) (string, string) {
+	status := "unready"
+	var metricsBody string
+
+	endpoints := []string{"/ready"}
+	if includeMetrics {
+		endpoints = append(endpoints, "/metrics")
+	}
+
+	resps, err := sidecarQueryEndpoints(ctx, instanceName, project, httpPort, endpoints)
+	if err == nil && len(resps) >= 1 {
+		readyResp := resps[0]
+		readyBody := strings.TrimSpace(readyResp.Body)
+		if readyBody != "" {
+			status = readyBody
+		} else if readyResp.StatusCode == http.StatusOK {
+			status = "ready"
+		}
+
+		if includeMetrics && len(resps) == 2 {
+			metricsResp := resps[1]
+			if metricsResp.StatusCode == http.StatusOK {
+				metricsBody = metricsResp.Body
+			}
+		}
+	}
+
+	return status, metricsBody
+}
+
+// renderSidecarStatus renders sidecar status in text or json format to w.
+func renderSidecarStatus(w io.Writer, format, status, ipv4, ipv6, metricsBody string) error {
+	switch format {
+	case "json":
+		report := sidecarStatusReport{
+			Status:  status,
+			IPv4:    ipv4,
+			IPv6:    ipv6,
+			Metrics: metricsBody,
+		}
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(report)
+
+	case "text":
+		_, _ = fmt.Fprintf(w, "Status: %s\n", status)
+		if ipv4 != "" {
+			_, _ = fmt.Fprintf(w, "IPv4: %s\n", ipv4)
+		} else {
+			_, _ = fmt.Fprintln(w, "IPv4:")
+		}
+
+		if ipv6 != "" {
+			_, _ = fmt.Fprintf(w, "IPv6: %s\n", ipv6)
+		} else {
+			_, _ = fmt.Fprintln(w, "IPv6:")
+		}
+
+		if metricsBody != "" {
+			_, _ = fmt.Fprintln(w, "Metrics:")
+			_, _ = fmt.Fprint(w, metricsBody)
+			if !strings.HasSuffix(metricsBody, "\n") {
+				_, _ = fmt.Fprintln(w)
+			}
+		}
+
+		return nil
+
+	default:
+		return fmt.Errorf("invalid format: %s (must be text or json)", format)
+	}
 }

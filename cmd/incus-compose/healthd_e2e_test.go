@@ -91,6 +91,30 @@ func TestE2EHealthdGlobalScope(t *testing.T) {
 	assert.Equal(t, globalHealthdNetwork, inst.Devices["eth0"]["network"])
 
 	waitHealthy(t, c, "web-1")
+
+	statusOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "healthd", "status")
+	require.NoError(t, err)
+	assert.Contains(t, statusOut, "Status: ready")
+	assert.Contains(t, statusOut, "IPv4:")
+	assert.Contains(t, statusOut, "IPv6:")
+	assert.NotContains(t, statusOut, "Metrics:")
+
+	metricsOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "healthd", "status", "--metrics")
+	require.NoError(t, err)
+	assert.Contains(t, metricsOut, "Status: ready")
+	assert.Contains(t, metricsOut, "Metrics:")
+
+	jsonOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "healthd", "status", "--format", "json")
+	require.NoError(t, err)
+	assert.Contains(t, jsonOut, `"status": "ready"`)
+	assert.Contains(t, jsonOut, `"ipv4":`)
+	assert.Contains(t, jsonOut, `"ipv6":`)
+	assert.NotContains(t, jsonOut, `"metrics":`)
+
+	jsonMetricsOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", healthdScopeCompose(t), "healthd", "status", "--metrics", "--format", "json")
+	require.NoError(t, err)
+	assert.Contains(t, jsonMetricsOut, `"status": "ready"`)
+	assert.Contains(t, jsonMetricsOut, `"metrics":`)
 }
 
 // TestE2EHealthdGlobalComposeNetwork attaches the shared daemon to a network

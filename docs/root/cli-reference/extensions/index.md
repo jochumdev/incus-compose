@@ -23,6 +23,7 @@ does the job better than the counterpart does.
 | [`port-forward`](#port-forward) | Forward a local TCP port into an instance           |
 | [`incus`](#incus)               | Run an `incus` command in the project context       |
 | [`healthd`](#healthd)           | Manage the ic-healthd sidecar                       |
+| [`dns`](#dns)                   | Manage the ic-dns sidecar                           |
 | [`self-update`](#self-update)   | Update incus-compose to the latest release          |
 
 ## list
@@ -109,7 +110,7 @@ incus-compose healthd <subcommand>
 | `logs [--follow]` | Stream the ic-healthd container log                       |
 | `reload`          | Send SIGHUP to the ic-healthd process                     |
 | `restart`         | Restart the ic-healthd container                          |
-| `status`          | Print the shared daemon's health status key               |
+| `status`          | Print the status, IP addresses, and metrics of healthd    |
 | `up`              | Create the sidecar, or replace one running an older image |
 | `down [--force]`  | Stop and remove the sidecar                               |
 
@@ -122,10 +123,43 @@ is required without a terminal.
 
 _Since: v1.3.0_: `healthd status`.
 
+`healthd status` prints the healthd sidecar's status, IP addresses, and
+optionally Prometheus metrics:
+
+| Option      | Description                                     | Default |
+| ----------- | ----------------------------------------------- | ------- |
+| `--format`  | Output format: `text` or `json`                 | `text`  |
+| `--port`    | HTTP port to query on the sidecar               | `9153`  |
+| `--metrics` | Include Prometheus metrics in the status report | `false` |
+
 `healthd up` also accepts `--image`, `--binary`, `--incus`, `--network`,
 `--scope`, `--pull` and `--timeout`. See
 [Health Checking - Scope](/healthd#scope-one-daemon-or-one-per-project) and
 [Network Configuration](/healthd#network-configuration).
+
+## dns
+
+Manage the ic-dns sidecar. See [DNS](/dns) for full details.
+
+```
+incus-compose dns <subcommand>
+```
+
+| Subcommand        | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `logs [--follow]` | Stream the ic-dns container log                       |
+| `status`          | Print the status, IP addresses, and metrics of ic-dns |
+| `up`              | Create or recreate the ic-dns sidecar                 |
+| `down [--force]`  | Stop and remove the ic-dns sidecar                    |
+
+`dns status` prints the ic-dns sidecar's status, IP addresses, and optionally
+Prometheus metrics:
+
+| Option      | Description                                     | Default |
+| ----------- | ----------------------------------------------- | ------- |
+| `--format`  | Output format: `text` or `json`                 | `text`  |
+| `--port`    | HTTP port to query on the sidecar               | `9153`  |
+| `--metrics` | Include Prometheus metrics in the status report | `false` |
 
 ## self-update
 
@@ -177,6 +211,12 @@ flags that deliberately have none.
 | `healthd down`    | `INCUS_COMPOSE_HEALTHD_TIMEOUT`         | `--timeout`      | Timeout for stopping                     |
 | `healthd logs`    | `INCUS_COMPOSE_HEALTHD_LOGS_FOLLOW`     | `--follow`, `-f` | Follow log output                        |
 | `healthd restart` | `INCUS_COMPOSE_HEALTHD_RESTART_TIMEOUT` | `--timeout`      | Timeout for stopping                     |
+| `healthd status`  | `INCUS_COMPOSE_HEALTHD_STATUS_FORMAT`   | `--format`       | Output format: `text` or `json`          |
+| `healthd status`  | `INCUS_COMPOSE_HEALTHD_HTTP_PORT`       | `--port`         | HTTP port to query (default: 9153)       |
+| `healthd status`  | `INCUS_COMPOSE_HEALTHD_STATUS_METRICS`  | `--metrics`      | Include Prometheus metrics in output     |
+| `dns status`      | `INCUS_COMPOSE_DNS_STATUS_FORMAT`       | `--format`       | Output format: `text` or `json`          |
+| `dns status`      | `INCUS_COMPOSE_DNS_HTTP_PORT`           | `--port`         | HTTP port to query (default: 9153)       |
+| `dns status`      | `INCUS_COMPOSE_DNS_STATUS_METRICS`      | `--metrics`      | Include Prometheus metrics in output     |
 | `self-update`     | `INCUS_COMPOSE_SELF_UPDATE_DRAFT`       | `--draft`        | Also consider draft releases             |
 | `self-update`     | `INCUS_COMPOSE_SELF_UPDATE_PRE_RELEASE` | `--pre-release`  | Also consider pre-releases               |
 

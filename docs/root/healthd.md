@@ -483,7 +483,7 @@ act on the shared daemon in the `incus-compose` project:
 | `logs [--follow]` | Stream the ic-healthd container log                       |
 | `reload`          | Send SIGHUP to force a full manual resync (rarely needed) |
 | `restart`         | Restart the ic-healthd container                          |
-| `status`          | Print the shared daemon's health status key               |
+| `status`          | Print the status, IP addresses, and metrics of healthd    |
 | `up`              | Create the sidecar, or replace one running an older image |
 | `down [--force]`  | Stop and remove the sidecar                               |
 
@@ -492,7 +492,65 @@ act on the shared daemon in the `incus-compose` project:
 service there requires healthd (no healthcheck, no restart policy, no
 `service_healthy` dependency).
 
-_Since: v1.3.0_: `healthd status`.
+_Since: v1.3.0_: `healthd status`. _
+
+### healthd status
+
+`healthd status` queries the sidecar's `/ready` HTTP endpoint (and `/metrics` if
+requested) via `incus port-forward` and reports its status and IP addresses.
+
+```bash
+incus-compose healthd status [options]
+```
+
+| Option      | Description                                     | Default | Environment Variable                   |
+| ----------- | ----------------------------------------------- | ------- | -------------------------------------- |
+| `--format`  | Output format: `text` or `json`                 | `text`  | `INCUS_COMPOSE_HEALTHD_STATUS_FORMAT`  |
+| `--port`    | HTTP port to query on the sidecar               | `9153`  | `INCUS_COMPOSE_HEALTHD_HTTP_PORT`      |
+| `--metrics` | Include Prometheus metrics in the status report | `false` | `INCUS_COMPOSE_HEALTHD_STATUS_METRICS` |
+
+Text output format (default):
+
+```text
+Status: ready
+IPv4: 10.90.190.100
+IPv6: fd42::100
+```
+
+When `--metrics` is passed:
+
+```text
+Status: ready
+IPv4: 10.90.190.100
+IPv6: fd42::100
+Metrics:
+# HELP ...
+...
+```
+
+JSON output format (`--format json`):
+
+```json
+{
+  "status": "ready",
+  "ipv4": "10.90.190.100",
+  "ipv6": "fd42::100"
+}
+```
+
+When `--metrics` is passed with `--format json`:
+
+```json
+{
+  "status": "ready",
+  "ipv4": "10.90.190.100",
+  "ipv6": "fd42::100",
+  "metrics": "# HELP ...\n..."
+}
+```
+
+_Changed: v1.4.0 queries /ready directly via incus port-forward, reports IP
+addresses, and adds --format, --port, and --metrics._
 
 ### Outside a project
 

@@ -11,16 +11,16 @@ import (
 	"github.com/lxc/incus-compose/client"
 )
 
-func newDNSStatusCommand() *cli.Command {
+func newHealthdStatusCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "status",
-		Usage: "Prints the status of ic-dns",
+		Usage: "Prints the status of healthd",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "format",
 				Usage:   "Format the output. Values: [text | json]",
 				Value:   "text",
-				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_STATUS_FORMAT"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_STATUS_FORMAT"),
 				Action: func(ctx context.Context, cmd *cli.Command, v string) error {
 					if !slices.Contains([]string{"text", "json"}, v) {
 						return fmt.Errorf("invalid format: %s (must be text or json)", v)
@@ -32,12 +32,12 @@ func newDNSStatusCommand() *cli.Command {
 				Name:    "port",
 				Usage:   "HTTP port to query",
 				Value:   9153,
-				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_HTTP_PORT"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_HTTP_PORT"),
 			},
 			&cli.BoolFlag{
 				Name:    "metrics",
 				Usage:   "Include Prometheus metrics in output",
-				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_STATUS_METRICS"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_STATUS_METRICS"),
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -51,21 +51,21 @@ func newDNSStatusCommand() *cli.Command {
 				return err
 			}
 
-			target, done, err := resolveDNSTarget(ctx, cmd, globalClient)
+			target, done, err := resolveHealthdTarget(ctx, cmd, globalClient)
 			if err != nil {
-				globalClient.LogError("Finding dns", "error", err)
+				globalClient.LogError("Finding healthd", "error", err)
 				return errLogged.Wrap(err)
 			}
 			defer done()
 
 			err = client.RunAction(ctx, target.instance, client.ActionEnsure)
 			if err != nil {
-				return fmt.Errorf("while fetching dns: %w", err)
+				return fmt.Errorf("while fetching healthd: %w", err)
 			}
 
 			state := target.instance.State()
 			if state == nil {
-				return errors.New("no dns state after fetch")
+				return errors.New("no healthd state after fetch")
 			}
 
 			ipv4, ipv6 := sidecarIPAddresses(state)
@@ -79,8 +79,4 @@ func newDNSStatusCommand() *cli.Command {
 			return renderSidecarStatus(cmd.Root().Writer, cmd.String("format"), status, ipv4, ipv6, metricsBody)
 		},
 	}
-}
-
-func dnsIPAddresses(state *client.InstanceState) (string, string) {
-	return sidecarIPAddresses(state)
 }

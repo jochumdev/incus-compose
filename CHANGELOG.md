@@ -42,7 +42,7 @@ form.
   based on querier network visibility and client subnet (RFC 7871 ECS). Supports
   UDP and TCP on port 53, zone transfers (`--allow-transfer`), upstream
   forwarding (`--forward`), configurable TTL, and Prometheus metrics and health
-  endpoints on `:8080` (or `--http`). Projects opt in via `--project-marker`
+  endpoints on `:9153` (or `--http`). Projects opt in via `--project-marker`
   (defaulting to `user.label.dns.scope=global`), an explicit `--project` list,
   or serve all visible projects with `--project-marker ""`. (by @jochumdev)
 - `ievent`: A pluggable event pipeline framework for Incus lifecycle events,
@@ -70,6 +70,12 @@ form.
   `ClientSleepImage`). (by @jochumdev)
 
 ### Changed
+
+- `healthd status` now format output with status, IPv4 and IPv6 addresses, and
+  optional Prometheus metrics queried directly via `incus port-forward` and
+  HTTP, add `--port` to override the HTTP port (default: 9153),
+  `--format <text|json>` (default: `text`), and `--metrics` to include
+  Prometheus metrics in the report. (by @jochumdev)
 
 - The global network `icompose0` now configures DHCP ranges after creation to
   reserve addresses for static IP assignment, and the global DNS sidecar is

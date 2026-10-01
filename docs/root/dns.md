@@ -198,7 +198,7 @@ each plugin's own internals are not configurable.
 | Flag        | Env                         | Default |                                                           |
 | ----------- | --------------------------- | ------- | --------------------------------------------------------- |
 | `--listen`  | `INCUS_COMPOSE_DNS_LISTEN`  | `:53`   | DNS, UDP and TCP both                                     |
-| `--http`    | `INCUS_COMPOSE_DNS_HTTP`    | `:8080` | `/metrics`, `/health`, `/ready`; empty disables           |
+| `--http`    | `INCUS_COMPOSE_DNS_HTTP`    | `:9153` | `/metrics`, `/health`, `/ready`; empty disables           |
 | `--forward` | `INCUS_COMPOSE_DNS_FORWARD` |         | upstream(s) for names we do not serve; empty refuses them |
 
 ### Tuning The Chain
@@ -259,6 +259,72 @@ says they are gone, never on a timer.
 A zone's serial moves when that zone's records move, and at no other time.
 Republishing identical records leaves it alone, so a secondary re-transfers on a
 real change and on nothing else.
+
+## Management Commands
+
+The `dns` command group manages the `ic-dns` sidecar directly:
+
+| Subcommand        | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `logs [--follow]` | Stream the ic-dns container log                       |
+| `status`          | Print the status, IP addresses, and metrics of ic-dns |
+| `up`              | Create or recreate the ic-dns sidecar                 |
+| `down [--force]`  | Stop and remove the ic-dns sidecar                    |
+
+### dns status
+
+`dns status` queries the sidecar's `/ready` HTTP endpoint (and `/metrics` if
+requested) via `incus port-forward` and reports its status and IP addresses.
+
+```bash
+incus-compose dns status [options]
+```
+
+| Option      | Description                                     | Default | Environment Variable               |
+| ----------- | ----------------------------------------------- | ------- | ---------------------------------- |
+| `--format`  | Output format: `text` or `json`                 | `text`  | `INCUS_COMPOSE_DNS_STATUS_FORMAT`  |
+| `--port`    | HTTP port to query on the sidecar               | `9153`  | `INCUS_COMPOSE_DNS_HTTP_PORT`      |
+| `--metrics` | Include Prometheus metrics in the status report | `false` | `INCUS_COMPOSE_DNS_STATUS_METRICS` |
+
+Text output format (default):
+
+```text
+Status: ready
+IPv4: 10.90.190.53
+IPv6: fd42::53
+```
+
+When `--metrics` is passed:
+
+```text
+Status: ready
+IPv4: 10.90.190.53
+IPv6: fd42::53
+Metrics:
+# HELP ...
+...
+```
+
+JSON output format (`--format json`):
+
+```json
+{
+  "status": "ready",
+  "ipv4": "10.90.190.53",
+  "ipv6": "fd42::53"
+}
+```
+
+When `--metrics` is passed with `--format json`:
+
+```json
+{
+  "status": "ready",
+  "ipv4": "10.90.190.53",
+  "ipv6": "fd42::53",
+  "metrics": "# HELP ...\n..."
+}
+```
 
 ## Further Reading
 
