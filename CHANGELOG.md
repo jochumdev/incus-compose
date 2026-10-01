@@ -72,7 +72,8 @@ form.
 ### Changed
 
 - The global network `icompose0` now configures DHCP ranges after creation to
-  reserve addresses for static IP assignment. (by @jochumdev)
+  reserve addresses for static IP assignment, and the global DNS sidecar is
+  assigned a static `.53` address within that reserved range. (by @jochumdev)
 
 - Require incus 7.0.2+ LTS or 7.5+ both unreleased at the time of writing, we
   need various recent bugfixes (by @jochumdev)

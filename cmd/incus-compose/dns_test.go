@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -414,4 +416,110 @@ services:
 
 	assert.Equal(t, "10.0.0.53", inst.Config.Extensions["oci.dns.nameservers"])
 	assert.Equal(t, "shop.incus", inst.Config.Extensions["oci.dns.search"])
+}
+
+func TestDNSInstance_GlobalStaticIP(t *testing.T) {
+	testlib.SkipLocal(t)
+	t.Parallel()
+
+	ctx := t.Context()
+	gc, err := client.NewTestClient(ctx)
+	require.NoError(t, err)
+
+	c, err := gc.EnsureProject(globalProject)
+	require.NoError(t, err)
+
+	params := dnsParams{
+		global: true,
+		image:  "ghcr.io/lxc/incus-compose/ic-dns:latest",
+		scope:  shared.DNSScopeGlobal,
+	}
+
+	inst, _, err := dnsGetResources(c, params)
+	require.NoError(t, err)
+
+	err = client.RunAction(ctx, inst, client.ActionEnsure, client.OptionCreate())
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = client.RunAction(context.WithoutCancel(ctx), inst, client.ActionDelete)
+	})
+
+	var eth0 *client.InstanceDevice
+	for i := range inst.Config.Devices {
+		if inst.Config.Devices[i].Name == "eth0" {
+			eth0 = &inst.Config.Devices[i]
+			break
+		}
+	}
+	require.NotNil(t, eth0)
+	require.NotEmpty(t, eth0.Config.Extensions["ipv4.address"])
+	assert.Contains(t, eth0.Config.Extensions["ipv4.address"], ".53/")
+	assert.NotEmpty(t, eth0.Config.Extensions["ipv4.gateway"])
+}
+
+func TestCalcIPv4DNSAddress(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		cidr        string
+		want        string
+		wantGateway string
+		wantErr     bool
+	}{
+		{
+			name:        "/24 bridge address",
+			cidr:        "10.100.0.1/24",
+			want:        "10.100.0.53/24",
+			wantGateway: "10.100.0.1",
+		},
+		{
+			name:        "/24 network address",
+			cidr:        "10.100.0.0/24",
+			want:        "10.100.0.53/24",
+			wantGateway: "10.100.0.1",
+		},
+		{
+			name:        "/16 address",
+			cidr:        "172.16.0.1/16",
+			want:        "172.16.0.53/16",
+			wantGateway: "172.16.0.1",
+		},
+		{
+			name:        "/26 address (fits 53)",
+			cidr:        "192.168.1.0/26",
+			want:        "192.168.1.53/26",
+			wantGateway: "192.168.1.1",
+		},
+		{
+			name:    "/27 address (too small for 53)",
+			cidr:    "192.168.1.0/27",
+			wantErr: true,
+		},
+		{
+			name:    "invalid CIDR",
+			cidr:    "not-a-cidr",
+			wantErr: true,
+		},
+		{
+			name:    "IPv6 CIDR",
+			cidr:    "fd42::1/64",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, gw, err := calcIPv4DNSAddress(tt.cidr)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.wantGateway, gw)
+		})
+	}
 }

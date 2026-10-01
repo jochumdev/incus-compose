@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -422,11 +423,68 @@ func dnsGetResources(c *client.Client, params dnsParams) (*client.Instance, []cl
 				Extensions:  map[string]string{},
 			},
 		}
-		if params.ipv4Address != "" {
-			eth0.Config.Extensions["ipv4.address"] = params.ipv4Address
+
+		var gateway4 string
+		ipv4 := params.ipv4Address
+		if ipv4 == "" && network.IncusName() == globalDNSNetwork {
+			cfg := network.State().IncusNetwork.Config
+			if cfg != nil && cfg["ipv4.address"] != "" && cfg["ipv4.address"] != "none" {
+				dnsCIDR, gw, err := calcIPv4DNSAddress(cfg["ipv4.address"])
+				if err != nil {
+					return fmt.Errorf("calculating dns IPv4 address: %w", err)
+				}
+
+				ipv4 = dnsCIDR
+				gateway4 = gw
+			}
+		} else if ipv4 != "" {
+			cfg := network.State().IncusNetwork.Config
+			if cfg != nil && cfg["ipv4.address"] != "" && cfg["ipv4.address"] != "none" {
+				prefix, err := netip.ParsePrefix(cfg["ipv4.address"])
+				if err == nil {
+					if prefix.Addr() == prefix.Masked().Addr() {
+						gateway4 = prefix.Addr().Next().String()
+					} else {
+						gateway4 = prefix.Addr().String()
+					}
+					if !strings.Contains(ipv4, "/") {
+						ipv4 = fmt.Sprintf("%s/%d", ipv4, prefix.Bits())
+					}
+				}
+			}
 		}
-		if params.ipv6Address != "" {
-			eth0.Config.Extensions["ipv6.address"] = params.ipv6Address
+
+		if ipv4 != "" {
+			eth0.Config.Extensions["ipv4.address"] = ipv4
+		}
+		if gateway4 != "" {
+			eth0.Config.Extensions["ipv4.gateway"] = gateway4
+		}
+
+		var gateway6 string
+		ipv6 := params.ipv6Address
+		if ipv6 != "" {
+			cfg := network.State().IncusNetwork.Config
+			if cfg != nil && cfg["ipv6.address"] != "" && cfg["ipv6.address"] != "none" {
+				prefix6, err := netip.ParsePrefix(cfg["ipv6.address"])
+				if err == nil {
+					if prefix6.Addr() == prefix6.Masked().Addr() {
+						gateway6 = prefix6.Addr().Next().String()
+					} else {
+						gateway6 = prefix6.Addr().String()
+					}
+					if !strings.Contains(ipv6, "/") {
+						ipv6 = fmt.Sprintf("%s/%d", ipv6, prefix6.Bits())
+					}
+				}
+			}
+		}
+
+		if ipv6 != "" {
+			eth0.Config.Extensions["ipv6.address"] = ipv6
+		}
+		if gateway6 != "" {
+			eth0.Config.Extensions["ipv6.gateway"] = gateway6
 		}
 		inst.Config.Devices = append(inst.Config.Devices, eth0)
 		inst.Config.Extensions["oci.entrypoint"] = "/usr/local/sbin/ic-dns run"
@@ -435,6 +493,43 @@ func dnsGetResources(c *client.Client, params dnsParams) (*client.Instance, []cl
 	})
 
 	return inst, []client.Resource{img, volume}, nil
+}
+
+// calcIPv4DNSAddress calculates the static .53 DNS CIDR and gateway for an IPv4 network CIDR.
+func calcIPv4DNSAddress(cidr string) (string, string, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return "", "", fmt.Errorf("parsing IPv4 CIDR %q: %w", cidr, err)
+	}
+
+	if !prefix.Addr().Is4() {
+		return "", "", fmt.Errorf("CIDR %q is not IPv4", cidr)
+	}
+
+	bits := prefix.Bits()
+	if bits > 26 {
+		return "", "", fmt.Errorf("IPv4 prefix /%d too small for static .53 address (need at most /26)", bits)
+	}
+
+	var gateway string
+	if prefix.Addr() == prefix.Masked().Addr() {
+		gateway = prefix.Addr().Next().String()
+	} else {
+		gateway = prefix.Addr().String()
+	}
+
+	dnsIP := addIPv4Offset(prefix.Masked().Addr(), 53)
+	dnsCIDR := fmt.Sprintf("%s/%d", dnsIP, bits)
+
+	return dnsCIDR, gateway, nil
+}
+
+func addIPv4Offset(addr netip.Addr, offset uint64) netip.Addr {
+	b := addr.As4()
+	v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	v += uint32(offset)
+
+	return netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
 }
 
 func parseDNSNetwork(c *client.Client, network string, global bool) (sidecarNetworkRef, error) {
