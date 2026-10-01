@@ -509,6 +509,10 @@ func (p *Plugin) readNetwork(ctx context.Context, project, name string) {
 // on it. It runs on the goroutine Run owns, because the state does.
 func (p *Plugin) settleRead(ctx context.Context, res result) {
 	c := res.call
+	if !p.reads.current(c) {
+		return
+	}
+
 	p.reads.done(ctx, c)
 
 	switch c.kind {
@@ -670,6 +674,9 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 
 	it := p.q.push(ev, false)
 
+	waitForRunning := ev.Action() == incusapi.EventLifecycleInstanceStarted ||
+		ev.Action() == incusapi.EventLifecycleInstanceRestarted
+
 	c := &call{
 		key:            resourceKey(kindInstance, ev.ProjectName(), ev.Name()),
 		kind:           kindInstance,
@@ -677,6 +684,7 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 		name:           ev.Name(),
 		items:          []*item{it},
 		wantInterfaces: want.Enrich&iutil.EnrichedInstanceWithInterfaces != 0,
+		waitForRunning: waitForRunning,
 	}
 
 	p.reads.send(ctx, c)

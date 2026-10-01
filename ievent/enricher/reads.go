@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"time"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
@@ -39,6 +40,10 @@ type call struct {
 	// wantInterfaces says whether any event waiting on this read asked for
 	// EnrichedInstanceWithInterfaces.
 	wantInterfaces bool
+
+	// waitForRunning says whether this read should actively wait for the instance
+	// to become Running (used for instance-started).
+	waitForRunning bool
 }
 
 // join folds a second call for the same key into this one; the first ev is
@@ -51,6 +56,7 @@ func (c *call) join(other *call) {
 	}
 
 	c.wantInterfaces = c.wantInterfaces || other.wantInterfaces
+	c.waitForRunning = c.waitForRunning || other.waitForRunning
 }
 
 // result is what a worker hands back, carrying the call rather than a key so
@@ -71,7 +77,7 @@ type result struct {
 // readFunc is one instance read. A function rather than the connection itself,
 // so a test can answer with Incus values it built instead of ones a daemon
 // returned.
-type readFunc func(ctx context.Context, project, name string, wantInterfaces bool) (*incusapi.Instance, *incusapi.InstanceState, error)
+type readFunc func(ctx context.Context, project, name string, wantInterfaces bool, waitForRunning bool) (*incusapi.Instance, *incusapi.InstanceState, error)
 
 // netReadFunc is one network read. Its own type beside readFunc so a test can
 // answer either without a daemon.
@@ -136,7 +142,7 @@ func hasAddresses(state *incusapi.InstanceState) bool {
 // interfaces are requested, it polls until global IP addresses appear or the
 // timeout expires.
 func incusReader(logger *slog.Logger, conn *iclient.Connection, ipTimeout time.Duration) readFunc {
-	return func(ctx context.Context, project, name string, wantInterfaces bool) (*incusapi.Instance, *incusapi.InstanceState, error) {
+	return func(ctx context.Context, project, name string, wantInterfaces bool, waitForRunning bool) (*incusapi.Instance, *incusapi.InstanceState, error) {
 		inst, _, err := conn.GetInstance(ctx, project, name, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading instance %s/%s: %w", project, name, err)
@@ -147,8 +153,14 @@ func incusReader(logger *slog.Logger, conn *iclient.Connection, ipTimeout time.D
 			return nil, nil, fmt.Errorf("reading the state of %s/%s: %w", project, name, err)
 		}
 
-		if !wantInterfaces || inst.StatusCode != incusapi.Running || state.StatusCode != incusapi.Running || !hasNICDevices(&inst.Instance) || hasAddresses(state) {
-			return &inst.Instance, state, nil
+		if !waitForRunning {
+			if !wantInterfaces || inst.StatusCode != incusapi.Running || state.StatusCode != incusapi.Running || !hasNICDevices(&inst.Instance) || hasAddresses(state) {
+				return &inst.Instance, state, nil
+			}
+		} else {
+			if state != nil && state.StatusCode == incusapi.Running && (!hasNICDevices(&inst.Instance) || hasAddresses(state)) {
+				return &inst.Instance, state, nil
+			}
 		}
 
 		pollCtx, cancel := context.WithTimeout(ctx, ipTimeout)
@@ -160,7 +172,7 @@ func incusReader(logger *slog.Logger, conn *iclient.Connection, ipTimeout time.D
 		for {
 			select {
 			case <-pollCtx.Done():
-				logger.Warn("timed out waiting for instance IP address",
+				logger.Warn("timed out waiting for instance",
 					"project", project,
 					"instance", name,
 					"timeout", ipTimeout,
@@ -172,7 +184,7 @@ func incusReader(logger *slog.Logger, conn *iclient.Connection, ipTimeout time.D
 				newState, _, err := conn.GetInstanceState(pollCtx, project, name)
 				if err != nil {
 					if pollCtx.Err() != nil {
-						logger.Warn("timed out waiting for instance IP address",
+						logger.Warn("timed out waiting for instance",
 							"project", project,
 							"instance", name,
 							"timeout", ipTimeout,
@@ -185,8 +197,26 @@ func incusReader(logger *slog.Logger, conn *iclient.Connection, ipTimeout time.D
 				}
 
 				state = newState
-				if state.StatusCode != incusapi.Running || hasAddresses(state) {
-					return &inst.Instance, state, nil
+
+				if waitForRunning {
+					if state.StatusCode == incusapi.Running {
+						if !hasNICDevices(&inst.Instance) || hasAddresses(state) {
+							if inst.StatusCode != incusapi.Running {
+								newInst, _, err := conn.GetInstance(pollCtx, project, name, nil)
+								if err == nil {
+									inst = newInst
+								}
+							}
+
+							return &inst.Instance, state, nil
+						}
+					} else if state.StatusCode != incusapi.Starting && state.StatusCode != incusapi.Started {
+						return &inst.Instance, state, nil
+					}
+				} else {
+					if state.StatusCode != incusapi.Running || hasAddresses(state) {
+						return &inst.Instance, state, nil
+					}
 				}
 			}
 		}
@@ -218,6 +248,9 @@ type deferred struct {
 	// calls is the read in flight for each key; a second event on a key joins
 	// it rather than issuing another.
 	calls map[string]*call
+
+	// cancels is the cancel function for each in-flight read.
+	cancels map[string]context.CancelFunc
 
 	// pendingProject is instance reads held until the project's own read lands.
 	pendingProject map[string][]string
@@ -255,6 +288,7 @@ func newDeferred(workers int, timeout time.Duration) *deferred {
 		timeout:        timeout,
 		results:        make(chan result, workers),
 		calls:          map[string]*call{},
+		cancels:        map[string]context.CancelFunc{},
 		pendingProject: map[string][]string{},
 		timer:          timer,
 	}
@@ -277,6 +311,12 @@ func (d *deferred) start(workers int) error {
 func (d *deferred) stop() {
 	d.pool.Release()
 	d.timer.Stop()
+
+	for _, cancel := range d.cancels {
+		cancel()
+	}
+
+	clear(d.cancels)
 }
 
 // send sends one read, or joins the one already out for that key: coalescing
@@ -288,9 +328,21 @@ func (d *deferred) stop() {
 func (d *deferred) send(ctx context.Context, c *call) {
 	out, running := d.calls[c.key]
 	if running {
-		out.join(c)
+		if c.kind == kindInstance && c.waitForRunning && !out.waitForRunning {
+			prev := d.cancel(c.key)
+			if prev != nil {
+				c.items = append(prev.items, c.items...)
+				if c.ev == nil {
+					c.ev = prev.ev
+				}
 
-		return
+				c.wantInterfaces = c.wantInterfaces || prev.wantInterfaces
+			}
+		} else {
+			out.join(c)
+
+			return
+		}
 	}
 
 	d.calls[c.key] = c
@@ -323,6 +375,43 @@ func (d *deferred) send(ctx context.Context, c *call) {
 	}
 }
 
+// cancel aborts the read in flight for key, if any, and returns it.
+func (d *deferred) cancel(key string) *call {
+	cancel, running := d.cancels[key]
+	if running {
+		cancel()
+		delete(d.cancels, key)
+	}
+
+	c, ok := d.calls[key]
+	if !ok {
+		return nil
+	}
+
+	delete(d.calls, key)
+
+	d.waiting = slices.DeleteFunc(d.waiting, func(w *call) bool {
+		return w.key == key
+	})
+
+	d.cold = slices.DeleteFunc(d.cold, func(k string) bool {
+		return k == key
+	})
+
+	if c.kind == kindInstance {
+		d.pendingProject[c.project] = slices.DeleteFunc(d.pendingProject[c.project], func(k string) bool {
+			return k == key
+		})
+	}
+
+	return c
+}
+
+// current reports whether c is still the active read for its key.
+func (d *deferred) current(c *call) bool {
+	return c != nil && d.calls[c.key] == c
+}
+
 // flush sends every read held cold, in arrival order. Called once, by the first
 // run to land, after which nothing is held back again.
 func (d *deferred) flush(ctx context.Context) {
@@ -339,6 +428,10 @@ func (d *deferred) flush(ctx context.Context) {
 
 	for _, key := range cold {
 		c := d.calls[key]
+		if c == nil {
+			continue
+		}
+
 		delete(d.calls, key)
 
 		d.send(ctx, c)
@@ -369,6 +462,7 @@ func (d *deferred) owes() int { return d.owed }
 // read a run owes is what releases the instances held behind it.
 func (d *deferred) done(ctx context.Context, c *call) {
 	delete(d.calls, c.key)
+	delete(d.cancels, c.key)
 
 	if c.kind != kindProject {
 		return
@@ -406,9 +500,12 @@ func (d *deferred) submit(ctx context.Context, c *call) error {
 	name := c.name
 	kind := c.kind
 	wantInterfaces := c.wantInterfaces
+	waitForRunning := c.waitForRunning
+
+	readCtx, cancel := context.WithTimeout(ctx, d.timeout)
+	d.cancels[c.key] = cancel
 
 	err := d.pool.Submit(func() {
-		readCtx, cancel := context.WithTimeout(ctx, d.timeout)
 		defer cancel()
 
 		res := result{call: c}
@@ -421,7 +518,7 @@ func (d *deferred) submit(ctx context.Context, c *call) error {
 			res.project, _, res.err = d.readProject(readCtx, project)
 
 		default:
-			res.instance, res.state, res.err = d.read(readCtx, project, name, wantInterfaces)
+			res.instance, res.state, res.err = d.read(readCtx, project, name, wantInterfaces, waitForRunning)
 		}
 
 		select {
@@ -430,6 +527,9 @@ func (d *deferred) submit(ctx context.Context, c *call) error {
 		}
 	})
 	if err != nil {
+		cancel()
+		delete(d.cancels, c.key)
+
 		if errors.Is(err, ants.ErrPoolOverload) {
 			return err
 		}

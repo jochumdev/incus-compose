@@ -30,6 +30,10 @@ var wanted = map[string]iutil.Want{
 		Action: incusapi.EventLifecycleInstanceUpdated,
 		Enrich: iutil.EnrichedInstance | iutil.EnrichedNetwork | iutil.EnrichedProject,
 	},
+	incusapi.EventLifecycleInstanceStarted: {
+		Action: incusapi.EventLifecycleInstanceStarted,
+		Enrich: iutil.EnrichedInstance | iutil.EnrichedNetwork | iutil.EnrichedProject,
+	},
 	incusapi.EventLifecycleInstanceDeleted: {Action: incusapi.EventLifecycleInstanceDeleted},
 
 	// Wanted for its networks alone, which is what makes it the case that a
@@ -321,7 +325,7 @@ func (h *fixture) stop() {
 func (h *fixture) answer(
 	ctx context.Context,
 	project, name string,
-	_ bool,
+	_, _ bool,
 ) (*incusapi.Instance, *incusapi.InstanceState, error) {
 	h.mu.Lock()
 	h.reads[project+"/"+name]++
@@ -1626,4 +1630,64 @@ func TestEveryWantOfDNSIsReadFor(t *testing.T) {
 		assert.NotZero(t, want.Enrich&wantsInstanceRead,
 			"%s asks for interfaces without asking for a read", want.Action)
 	}
+}
+
+// TestInstanceStartedSupersedesInFlightUpdatedRead verifies that when an instance
+// read is in flight without waitForRunning, an incoming instance-started cancels it
+// and issues a fresh read waiting for running state.
+func TestInstanceStartedSupersedesInFlightUpdatedRead(t *testing.T) {
+	t.Parallel()
+
+	h := seeded(t, 1, 1)
+
+	firstCancelled := make(chan struct{})
+	secondStarted := make(chan struct{})
+
+	var (
+		closeFirst  sync.Once
+		closeSecond sync.Once
+	)
+
+	h.p.reads.read = func(ctx context.Context, project, name string, wantInterfaces, waitForRunning bool) (*incusapi.Instance, *incusapi.InstanceState, error) {
+		if !waitForRunning {
+			<-ctx.Done()
+			closeFirst.Do(func() {
+				close(firstCancelled)
+			})
+
+			return nil, nil, ctx.Err()
+		}
+
+		closeSecond.Do(func() {
+			close(secondStarted)
+		})
+
+		return h.answer(ctx, project, name, wantInterfaces, waitForRunning)
+	}
+
+	h.retag("moved")
+	h.send(incusapi.EventLifecycleInstanceUpdated, "p", testlib.InstanceName(0))
+	h.send(incusapi.EventLifecycleInstanceStarted, "p", testlib.InstanceName(0))
+
+	select {
+	case <-firstCancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first read was not canceled by instance-started")
+	}
+
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second read did not start")
+	}
+
+	ev1 := h.next()
+	require.NoError(t, ev1.Err())
+	assert.Equal(t, incusapi.EventLifecycleInstanceUpdated, ev1.Action())
+	assert.NotNil(t, ev1.Instance())
+
+	ev2 := h.next()
+	require.NoError(t, ev2.Err())
+	assert.Equal(t, incusapi.EventLifecycleInstanceStarted, ev2.Action())
+	assert.NotNil(t, ev2.Instance())
 }
