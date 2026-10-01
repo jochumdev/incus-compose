@@ -1,29 +1,29 @@
 name: test-local-config
 services:
   always-restart:
+    restart: always
     image: docker.io/library/alpine:latest
     networks:
       default: null
-    restart: always
   default-restart:
     image: docker.io/library/alpine:latest
     networks:
       default: null
   no-restart:
-    image: docker.io/library/alpine:latest
-    networks:
-      default: null
     restart: 'no'
+    image: docker.io/library/alpine:latest
+    networks:
+      default: null
   on-failure-restart:
-    image: docker.io/library/alpine:latest
-    networks:
-      default: null
     restart: on-failure
-  unless-stopped-restart:
     image: docker.io/library/alpine:latest
     networks:
       default: null
+  unless-stopped-restart:
     restart: unless-stopped
+    image: docker.io/library/alpine:latest
+    networks:
+      default: null
 networks:
   default:
     name: test-local-config_default

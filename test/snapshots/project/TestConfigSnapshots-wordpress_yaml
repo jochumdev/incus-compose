@@ -1,6 +1,7 @@
 name: wordpress
 services:
   db:
+    restart: always
     environment:
       MYSQL_DATABASE: wordpress
       MYSQL_PASSWORD: wordpress
@@ -9,17 +10,13 @@ services:
     image: docker.io/library/mysql:9.5.0
     networks:
       default: null
-    restart: always
     volumes:
       - type: volume
         source: db_data
         target: /var/lib/mysql
         volume: {}
   wordpress:
-    depends_on:
-      db:
-        condition: service_started
-        required: true
+    restart: always
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_NAME: wordpress
@@ -28,12 +25,15 @@ services:
     image: docker.io/library/wordpress:6.9.0-php8.1-apache
     networks:
       default: null
-    restart: always
     volumes:
       - type: volume
         source: wordpress_data
         target: /var/www/html
         volume: {}
+    depends_on:
+      db:
+        condition: service_started
+        required: true
 networks:
   default:
     name: wordpress_default

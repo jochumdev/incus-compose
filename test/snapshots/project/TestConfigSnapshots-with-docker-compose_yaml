@@ -1,11 +1,11 @@
 name: with-docker-compose
 services:
   web:
+    restart: unless-stopped
     image: docker.io/alpine:edge
     networks:
       default:
         ipv4_address: 10.131.35.17
-    restart: unless-stopped
     x-incus:
       limits.cpu: 1
 networks:

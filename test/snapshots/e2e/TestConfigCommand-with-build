@@ -1,23 +1,23 @@
 name: test-local-config
 services:
   app:
+    networks:
+      default: null
     build:
       context: $FIXTURE_PATH
       dockerfile: Dockerfile
       no_cache: true
       target: runtime
+  app2:
+    image: localhost/app2:latest
     networks:
       default: null
-  app2:
     build:
       context: $FIXTURE_PATH
       dockerfile_inline: |
         FROM docker.io/alpine:latest
         RUN echo "built inline by incus-compose"
       no_cache: true
-    image: localhost/app2:latest
-    networks:
-      default: null
 networks:
   default:
     name: test-local-config_default

@@ -1,17 +1,17 @@
 name: two-services
 services:
   web1:
+    restart: unless-stopped
     image: docker.io/alpine:edge
     networks:
       default: null
-    restart: unless-stopped
     x-incus:
       limits.cpu: 1
   web2:
+    restart: unless-stopped
     image: docker.io/alpine:edge
     networks:
       default: null
-    restart: unless-stopped
     x-incus:
       limits.cpu: 1
 networks:

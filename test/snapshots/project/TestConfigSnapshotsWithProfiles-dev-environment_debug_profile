@@ -5,10 +5,6 @@ services:
       - npm
       - run
       - dev
-    depends_on:
-      db:
-        condition: service_started
-        required: true
     environment:
       NODE_ENV: development
     image: docker.io/library/node:24-alpine
@@ -20,6 +16,10 @@ services:
         target: /app/node_modules
         volume: {}
     working_dir: /app
+    depends_on:
+      db:
+        condition: service_started
+        required: true
   db:
     environment:
       POSTGRES_DB: devdb
@@ -44,16 +44,16 @@ services:
     profiles:
       - debug
       - tools
-    depends_on:
-      db:
-        condition: service_started
-        required: true
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@local.dev
       PGADMIN_DEFAULT_PASSWORD: admin
     image: docker.io/dpage/pgadmin4:latest
     networks:
       default: null
+    depends_on:
+      db:
+        condition: service_started
+        required: true
 networks:
   default:
     name: dev-environment_default

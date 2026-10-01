@@ -3,10 +3,10 @@ services:
   web:
     deploy:
       replicas: 4
+    restart: unless-stopped
     image: docker.io/alpine:edge
     networks:
       default: null
-    restart: unless-stopped
     x-incus:
       limits.cpu: "1"
       limits.memory: 512MiB
