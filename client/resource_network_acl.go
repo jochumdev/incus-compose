@@ -115,7 +115,9 @@ func (r *Network) ensureACLs(ctx context.Context) error {
 			return fmt.Errorf("network %q: ACL has no name", r.Name())
 		}
 
-		acls = append(acls, *r.Config.ACL)
+		acl := *r.Config.ACL
+		acl.Name = SanitizeIncusName(acl.Name, -1)
+		acls = append(acls, acl)
 	}
 
 	if len(acls) == 0 {
@@ -259,7 +261,7 @@ func (r *Network) deleteACLs(ctx context.Context) error {
 	}
 
 	if r.Config.ACL != nil && r.Config.ACL.Name != "" {
-		names = append(names, r.Config.ACL.Name)
+		names = append(names, SanitizeIncusName(r.Config.ACL.Name, -1))
 	}
 
 	if len(names) == 0 {
@@ -371,6 +373,8 @@ func (r *Network) detachACLs(ctx context.Context, names []string) error {
 // RemoveACL deletes the named ACL. If the ACL is still in use by this
 // network, detachACLs is called to remove it before deletion.
 func (r *Network) RemoveACL(ctx context.Context, name string) error {
+	name = SanitizeIncusName(name, -1)
+
 	conn, err := r.client.GlobalConnection()
 	if err != nil {
 		return err
@@ -415,6 +419,8 @@ func (r *Network) RemovePeer(ctx context.Context, name string) error {
 		return nil
 	}
 
+	name = SanitizeIncusName(name, -1)
+
 	conn, err := r.client.GlobalConnection()
 	if err != nil {
 		return err
@@ -457,6 +463,8 @@ func (r *Network) ensurePeers(ctx context.Context) error {
 	var errs error
 
 	for _, peer := range r.Config.Peers {
+		peer.Name = SanitizeIncusName(peer.Name, -1)
+
 		var haveName *incusApi.NetworkPeer
 		var haveTarget *incusApi.NetworkPeer
 
