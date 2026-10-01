@@ -442,6 +442,9 @@ type ResourcesOptions struct {
 
 	// oneOff replaces one service's declared instances with a single one-off.
 	oneOff *OneOff
+
+	// noDNS carries x-incus-compose.dns.disabled to the instances.
+	noDNS bool
 }
 
 // OneOff is the instance `run` builds from a service, in place of the ones the
@@ -510,6 +513,7 @@ func (p *Project) Resources(c *client.Client, opts ...ResourcesOption) (map[stri
 	options.marks = p.InstanceMarks
 	options.noAutoVolumes = p.ClientConfig.NoAutoVolumes
 	options.uplink = p.ClientConfig.Network.Uplink
+	options.noDNS = p.ClientConfig.DNS.Disabled
 
 	result := map[string][]client.Resource{}
 

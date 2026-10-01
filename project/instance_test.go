@@ -2520,3 +2520,62 @@ func TestServiceToInstancePostStart(t *testing.T) {
 		assert.Contains(t, err.Error(), `post_start user "2000" does not match service user "1000"`)
 	})
 }
+
+func TestServiceToInstance_DNSAliases(t *testing.T) {
+	t.Parallel()
+
+	newProject := func() (*client.Client, *types.Project) {
+		c := client.NewOfflineClient(t.Context(), "test")
+		service := types.ServiceConfig{
+			Name:  "web",
+			Image: "docker.io/nginx:alpine",
+			Networks: map[string]*types.ServiceNetworkConfig{
+				"default": {
+					Aliases: []string{"frontend", "web.mydomain.lan"},
+				},
+			},
+		}
+		p := &types.Project{Services: types.Services{"web": service}}
+		return c, p
+	}
+
+	t.Run("sets user.label.dns.aliases when DNS is enabled", func(t *testing.T) {
+		t.Parallel()
+
+		c, p := newProject()
+		inst, _, err := serviceToInstance(c, p, "web", &ResourcesOptions{noDNS: false}, 1, 1)
+		require.NoError(t, err)
+
+		aliases := inst.Config.Extensions["user.label.dns.aliases"]
+		assert.Equal(t, "frontend,web.mydomain.lan.", aliases)
+	})
+
+	t.Run("omits user.label.dns.aliases when noDNS is true", func(t *testing.T) {
+		t.Parallel()
+
+		c, p := newProject()
+		inst, _, err := serviceToInstance(c, p, "web", &ResourcesOptions{noDNS: true}, 1, 1)
+		require.NoError(t, err)
+
+		_, hasAliases := inst.Config.Extensions["user.label.dns.aliases"]
+		assert.False(t, hasAliases, "user.label.dns.aliases must not be set when noDNS is true")
+	})
+
+	t.Run("only assigns aliases to replica 1 when scaled", func(t *testing.T) {
+		t.Parallel()
+
+		c, p := newProject()
+		inst1, _, err := serviceToInstance(c, p, "web", &ResourcesOptions{}, 1, 2)
+		require.NoError(t, err)
+
+		aliases1 := inst1.Config.Extensions["user.label.dns.aliases"]
+		assert.Equal(t, "frontend,web.mydomain.lan.", aliases1)
+
+		c2 := client.NewOfflineClient(t.Context(), "test")
+		inst2, _, err := serviceToInstance(c2, p, "web", &ResourcesOptions{}, 2, 2)
+		require.NoError(t, err)
+
+		_, hasAliases2 := inst2.Config.Extensions["user.label.dns.aliases"]
+		assert.False(t, hasAliases2, "replica 2 must not have user.label.dns.aliases")
+	})
+}

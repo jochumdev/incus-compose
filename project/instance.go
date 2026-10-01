@@ -88,6 +88,40 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	}
 	resources = append(resources, networks...)
 
+	if options != nil && options.noDNS {
+		delete(config, "user.label.dns.aliases")
+	} else if scale == 1 || index == 1 {
+		_, hasAliases := config["user.label.dns.aliases"]
+		if !hasAliases {
+			var dnsAliases []string
+			for _, sNet := range service.Networks {
+				if sNet == nil {
+					continue
+				}
+
+				for _, alias := range sNet.Aliases {
+					alias = strings.TrimSpace(alias)
+					if alias == "" {
+						continue
+					}
+
+					// ic-dns treats names with dots as relative to the zone unless terminated with a dot.
+					if strings.Contains(alias, ".") && !strings.HasSuffix(alias, ".") {
+						alias += "."
+					}
+
+					if !slices.Contains(dnsAliases, alias) {
+						dnsAliases = append(dnsAliases, alias)
+					}
+				}
+			}
+
+			if len(dnsAliases) > 0 {
+				config["user.label.dns.aliases"] = strings.Join(dnsAliases, ",")
+			}
+		}
+	}
+
 	devices, err = instanceProxyDevices(c, devices, service)
 	if err != nil {
 		errs = errors.Join(errs, err)

@@ -344,7 +344,11 @@ func newUpCommand() *cli.Command {
 			}
 
 			var dnsConfigs map[string]string
-			usesDNS := !p.ClientConfig.DNS.Disabled && !cmd.Bool("disable-dns")
+			if cmd.Bool("disable-dns") {
+				p.ClientConfig.DNS.Disabled = true
+			}
+
+			usesDNS := !p.ClientConfig.DNS.Disabled
 			if usesDNS {
 				err = dnsUp(ctx, p, c, dnsUpArgs{
 					Image:   cmd.String("dns-image"),
