@@ -14,8 +14,7 @@ TMPFS_INCUS_PROJECT="${ICT_INCUS_PROJECT:-default}"
 
 ICTS=(
     "ict-daily-dev01-main"
-    "ict-daily-dev01-wt01"
-    "ict-daily-dev01-wt02"
+    "ict-daily-dev01-develop"
 )
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
