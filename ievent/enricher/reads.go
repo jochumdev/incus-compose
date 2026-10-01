@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/netip"
 	"time"
 
 	incusapi "github.com/lxc/incus/v7/shared/api"
@@ -13,7 +15,12 @@ import (
 	"github.com/lxc/incus-compose/ievent/iutil"
 )
 
-// call is one read, and every event waiting on it.
+// pollInterval is how often a worker re-reads an instance's state while waiting
+// for its IP address.
+const pollInterval = 150 * time.Millisecond
+
+// call is one read, and every event waiting on it. Owned by the goroutine Run
+// owns; workers never read its fields.
 type call struct {
 	key     string
 	project string
@@ -28,6 +35,10 @@ type call struct {
 	// ev is the event a fan-out would emit, held here rather than pushed: it goes
 	// in the line only if the read found something new.
 	ev *iutil.Event
+
+	// wantInterfaces says whether any event waiting on this read asked for
+	// EnrichedInstanceWithInterfaces.
+	wantInterfaces bool
 }
 
 // join folds a second call for the same key into this one; the first ev is
@@ -38,6 +49,8 @@ func (c *call) join(other *call) {
 	if c.ev == nil {
 		c.ev = other.ev
 	}
+
+	c.wantInterfaces = c.wantInterfaces || other.wantInterfaces
 }
 
 // result is what a worker hands back, carrying the call rather than a key so
@@ -58,7 +71,7 @@ type result struct {
 // readFunc is one instance read. A function rather than the connection itself,
 // so a test can answer with Incus values it built instead of ones a daemon
 // returned.
-type readFunc func(ctx context.Context, project, name string) (*incusapi.Instance, *incusapi.InstanceState, error)
+type readFunc func(ctx context.Context, project, name string, wantInterfaces bool) (*incusapi.Instance, *incusapi.InstanceState, error)
 
 // netReadFunc is one network read. Its own type beside readFunc so a test can
 // answer either without a daemon.
@@ -68,9 +81,62 @@ type netReadFunc func(ctx context.Context, project, name string) (*incusapi.Netw
 // in that project carries.
 type projectReadFunc func(ctx context.Context, name string) (*incusapi.Project, string, error)
 
-// incusReader reads one instance and its state through the connection.
-func incusReader(conn *iclient.Connection) readFunc {
-	return func(ctx context.Context, project, name string) (*incusapi.Instance, *incusapi.InstanceState, error) {
+// hasNICDevices reports whether the instance configuration attaches any NIC devices.
+func hasNICDevices(inst *incusapi.Instance) bool {
+	if inst == nil {
+		return false
+	}
+
+	devices := inst.ExpandedDevices
+	if len(devices) == 0 {
+		devices = inst.Devices
+	}
+
+	for _, dev := range devices {
+		if dev["type"] == "nic" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasAddresses reports whether any non-loopback interface in the instance state
+// has acquired at least one global IP address.
+func hasAddresses(state *incusapi.InstanceState) bool {
+	if state == nil {
+		return false
+	}
+
+	for _, iface := range state.Network {
+		if iface.Type == "loopback" {
+			continue
+		}
+
+		for _, addr := range iface.Addresses {
+			if addr.Scope != "global" || addr.Address == "" {
+				continue
+			}
+
+			ip, err := netip.ParseAddr(addr.Address)
+			if err != nil {
+				continue
+			}
+
+			if ip.Is4() {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// incusReader reads one instance and its state through the connection. When
+// interfaces are requested, it polls until global IP addresses appear or the
+// timeout expires.
+func incusReader(logger *slog.Logger, conn *iclient.Connection, ipTimeout time.Duration) readFunc {
+	return func(ctx context.Context, project, name string, wantInterfaces bool) (*incusapi.Instance, *incusapi.InstanceState, error) {
 		inst, _, err := conn.GetInstance(ctx, project, name, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading instance %s/%s: %w", project, name, err)
@@ -81,7 +147,49 @@ func incusReader(conn *iclient.Connection) readFunc {
 			return nil, nil, fmt.Errorf("reading the state of %s/%s: %w", project, name, err)
 		}
 
-		return &inst.Instance, state, nil
+		if !wantInterfaces || inst.StatusCode != incusapi.Running || state.StatusCode != incusapi.Running || !hasNICDevices(&inst.Instance) || hasAddresses(state) {
+			return &inst.Instance, state, nil
+		}
+
+		pollCtx, cancel := context.WithTimeout(ctx, ipTimeout)
+		defer cancel()
+
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-pollCtx.Done():
+				logger.Warn("timed out waiting for instance IP address",
+					"project", project,
+					"instance", name,
+					"timeout", ipTimeout,
+				)
+
+				return &inst.Instance, state, nil
+
+			case <-ticker.C:
+				newState, _, err := conn.GetInstanceState(pollCtx, project, name)
+				if err != nil {
+					if pollCtx.Err() != nil {
+						logger.Warn("timed out waiting for instance IP address",
+							"project", project,
+							"instance", name,
+							"timeout", ipTimeout,
+						)
+
+						return &inst.Instance, state, nil
+					}
+
+					continue
+				}
+
+				state = newState
+				if state.StatusCode != incusapi.Running || hasAddresses(state) {
+					return &inst.Instance, state, nil
+				}
+			}
+		}
 	}
 }
 
@@ -294,21 +402,26 @@ func (d *deferred) done(ctx context.Context, c *call) {
 // The deadline is set inside the task rather than around the submit, so a read
 // that waited for a worker still gets its whole budget.
 func (d *deferred) submit(ctx context.Context, c *call) error {
+	project := c.project
+	name := c.name
+	kind := c.kind
+	wantInterfaces := c.wantInterfaces
+
 	err := d.pool.Submit(func() {
 		readCtx, cancel := context.WithTimeout(ctx, d.timeout)
 		defer cancel()
 
 		res := result{call: c}
 
-		switch c.kind {
+		switch kind {
 		case kindNetwork:
-			res.network, _, res.err = d.readNet(readCtx, c.project, c.name)
+			res.network, _, res.err = d.readNet(readCtx, project, name)
 
 		case kindProject:
-			res.project, _, res.err = d.readProject(readCtx, c.project)
+			res.project, _, res.err = d.readProject(readCtx, project)
 
 		default:
-			res.instance, res.state, res.err = d.read(readCtx, c.project, c.name)
+			res.instance, res.state, res.err = d.read(readCtx, project, name, wantInterfaces)
 		}
 
 		select {

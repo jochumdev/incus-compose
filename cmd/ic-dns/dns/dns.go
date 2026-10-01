@@ -496,23 +496,9 @@ func (p *Plugin) publish() {
 	p.cold.store(b)
 }
 
-// serveable reports whether this read is one to fold. Up or down is not this
-// plugin's business; addresses are. A running instance with no address raced
-// DHCP and is left as it was, while one that is not running has lost them, and
-// that loss is the answer.
+// serveable reports whether this read is one to fold.
 func (p *Plugin) serveable(ev *iutil.Event) bool {
-	if !ev.Enriched(iutil.EnrichedInstanceWithInterfaces) {
-		return false
-	}
-
-	inst := ev.Instance()
-	for iface := range inst.Interfaces() {
-		if len(iface.IPv4()) > 0 || len(iface.IPv6()) > 0 {
-			return true
-		}
-	}
-
-	return !inst.Running()
+	return ev.Enriched(iutil.EnrichedInstanceWithInterfaces)
 }
 
 // _ pins the interface here, so a change to it fails the build at the plugin

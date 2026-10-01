@@ -34,6 +34,10 @@ const (
 	// defaultStoreInterval is how often what this plugin holds is written, and
 	// so how much of a fleet a start finds stale.
 	defaultStoreInterval = 5 * time.Second
+
+	// defaultIPTimeout bounds how long a worker polls for an instance to acquire an
+	// IP address when interfaces are requested.
+	defaultIPTimeout = 10 * time.Second
 )
 
 // storeStopTimeout bounds the wait for the last write on the way down. A disk
@@ -130,6 +134,7 @@ var _ iutil.Plugin = (*Plugin)(nil)
 type options struct {
 	Workers       int
 	ReadTimeout   time.Duration
+	IPTimeout     time.Duration
 	InboxSize     int
 	ReadDelay     time.Duration
 	SweepInterval time.Duration
@@ -150,6 +155,10 @@ func Workers(n int) Option { return func(o *options) { o.Workers = n } }
 
 // ReadTimeout bounds one read of the daemon.
 func ReadTimeout(d time.Duration) Option { return func(o *options) { o.ReadTimeout = d } }
+
+// IPTimeout bounds how long a worker polls for an instance to acquire an IP
+// address when interfaces are requested.
+func IPTimeout(d time.Duration) Option { return func(o *options) { o.IPTimeout = d } }
 
 // InboxSize sets how many events this plugin buffers before it has to drop.
 func InboxSize(n int) Option { return func(o *options) { o.InboxSize = n } }
@@ -197,6 +206,7 @@ func New(logger *slog.Logger, opts ...Option) *Plugin {
 	o := options{
 		Workers:       defaultWorkers,
 		ReadTimeout:   defaultReadTimeout,
+		IPTimeout:     defaultIPTimeout,
 		InboxSize:     defaultInboxSize,
 		ReadDelay:     defaultReadDelay,
 		SweepInterval: defaultSweepInterval,
@@ -281,7 +291,7 @@ func (p *Plugin) Setup(args iutil.SetupArgs) error {
 	p.args = args
 
 	if p.reads.read == nil {
-		p.reads.read = incusReader(args.Conn)
+		p.reads.read = incusReader(p.logger, args.Conn, p.opts.IPTimeout)
 	}
 
 	if p.reads.readNet == nil {
@@ -661,11 +671,12 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 	it := p.q.push(ev, false)
 
 	c := &call{
-		key:     resourceKey(kindInstance, ev.ProjectName(), ev.Name()),
-		kind:    kindInstance,
-		project: ev.ProjectName(),
-		name:    ev.Name(),
-		items:   []*item{it},
+		key:            resourceKey(kindInstance, ev.ProjectName(), ev.Name()),
+		kind:           kindInstance,
+		project:        ev.ProjectName(),
+		name:           ev.Name(),
+		items:          []*item{it},
+		wantInterfaces: want.Enrich&iutil.EnrichedInstanceWithInterfaces != 0,
 	}
 
 	p.reads.send(ctx, c)
@@ -675,6 +686,8 @@ func (p *Plugin) accept(ctx context.Context, ev *iutil.Event) {
 // instance-updated of its own held on its call, going on only if the read
 // found something new.
 func (p *Plugin) fanOut(ctx context.Context, subjects iter.Seq[subject]) {
+	wantInterfaces := p.args.Wanted[incusapi.EventLifecycleInstanceUpdated].Enrich&iutil.EnrichedInstanceWithInterfaces != 0
+
 	for s := range subjects {
 		p.reads.send(ctx, &call{
 			key:     resourceKey(kindInstance, s.project, s.instance),
@@ -684,6 +697,7 @@ func (p *Plugin) fanOut(ctx context.Context, subjects iter.Seq[subject]) {
 			ev: iutil.NewEvent(time.Now(),
 				incusapi.EventLifecycleInstanceUpdated, s.project, s.instance, "").
 				WithChainState(p.chain),
+			wantInterfaces: wantInterfaces,
 		})
 	}
 }

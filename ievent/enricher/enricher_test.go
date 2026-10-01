@@ -321,6 +321,7 @@ func (h *fixture) stop() {
 func (h *fixture) answer(
 	ctx context.Context,
 	project, name string,
+	_ bool,
 ) (*incusapi.Instance, *incusapi.InstanceState, error) {
 	h.mu.Lock()
 	h.reads[project+"/"+name]++
