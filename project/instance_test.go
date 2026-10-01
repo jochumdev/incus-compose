@@ -757,7 +757,6 @@ func TestInstanceConfigMinimal(t *testing.T) {
 	// Only the default restart policy is applied.
 	assert.Equal(t, map[string]string{
 		"boot.autostart":                   "false",
-		"raw.lxc":                          "lxc.start.delay = 1\n",
 		"user.label.incus-compose.project": "project1",
 		"user.label.incus-compose.service": "web",
 	}, config)
