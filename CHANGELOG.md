@@ -51,6 +51,18 @@ form.
 - Running ic-healthd by hand can now present an already-trusted certificate
   (`--client-cert` with `--client-key`) or connect as a remote from the Incus
   CLI configuration (`--remote` with `--use-remote`). (by @jochumdev)
+- Support for Compose Specification lifecycle hooks (`pre_start` and
+  `post_start`) on services. `pre_start` runs ephemeral init containers sharing
+  the service's volumes and tmpfs mounts before the main service starts,
+  supporting `command`, `image`, `user`, `privileged`, `working_dir`,
+  `environment`, and `per_replica`. Runner containers are deleted on success and
+  retained stopped on failure for inspection. `post_start` executes commands
+  non-interactively inside the running service container after startup and
+  before healthcheck evaluation, supporting `command`, `user`, `privileged`,
+  `working_dir`, and `environment`. (by @jochumdev)
+- Configurable tools volume, mount path, and sleep helper image options on
+  `client.Client` (`ClientToolsVolume`, `ClientToolsMount`, `ClientSleepImage`)
+  with runtime getters and setters. (by @jochumdev)
 
 ### Changed
 
@@ -64,6 +76,11 @@ form.
   replaces its listener, router and per-project schedulers. The sidecar contract
   is unchanged - the same flags, environment variables and status writes, and
   `healthd reload` still forces a full resync. (by @jochumdev)
+
+- Refactor the `run` command in `cmd/incus-compose/run.go` to use
+  `client.Client` abstractions (`c.EnsureTools()`, `c.ToolsMount()`,
+  `c.SleepImage()`, and `c.Resource()`) instead of raw Incus API and `iclient`
+  calls. (by @jochumdev)
 
 ## [Unreleased-main]
 

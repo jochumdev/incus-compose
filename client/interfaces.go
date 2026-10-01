@@ -137,6 +137,11 @@ type DeleteAble interface {
 	Delete(ctx context.Context, opts ...Option) error
 }
 
+// IgnoreAble is implemented by resources that report whether they should be ignored by stack operations.
+type IgnoreAble interface {
+	Ignored() bool
+}
+
 // doner is implemented by resources holding something Incus will not reclaim
 // on its own, such as the instance an image is read through.
 type doner interface {

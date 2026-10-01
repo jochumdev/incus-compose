@@ -174,6 +174,11 @@ func newConfigCommand() *cli.Command {
 					if svc.Image != "" {
 						_, _ = fmt.Fprintln(writer, svc.Image)
 					}
+					for _, hook := range svc.PreStart {
+						if hook.Image != "" && hook.Image != svc.Image {
+							_, _ = fmt.Fprintln(writer, hook.Image)
+						}
+					}
 				}
 				return nil
 			}

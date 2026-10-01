@@ -103,6 +103,38 @@ func TestAddDeduplicatesSamePointer(t *testing.T) {
 	require.Len(t, stack.resources, 1, "same resource added twice must appear only once")
 }
 
+func TestStackIgnoreStack(t *testing.T) {
+	t.Parallel()
+
+	instNormal := &Instance{
+		BaseResource: NewBaseResource(KindInstance, "web-1", PriorityInstance),
+		Config: InstanceConfig{
+			ServiceName: "web",
+		},
+	}
+	instIgnored := &Instance{
+		BaseResource: NewBaseResource(KindInstance, "web-pre_start-0", PriorityInstance),
+		Config: InstanceConfig{
+			ServiceName: "web",
+			IgnoreStack: true,
+		},
+	}
+
+	stack := NewStack(nil)
+	stack.Add(instNormal, instIgnored)
+
+	forActionEnsureStack := stack.ForAction(ActionEnsure)
+	require.Len(t, forActionEnsureStack.All(), 2)
+
+	forActionStack := stack.ForAction(ActionStart)
+	require.Len(t, forActionStack.All(), 1)
+	require.Equal(t, "web-1", forActionStack.All()[0].Name())
+
+	forActionFStack := stack.ForActionF(ActionStart, nil)
+	require.Len(t, forActionFStack.All(), 1)
+	require.Equal(t, "web-1", forActionFStack.All()[0].Name())
+}
+
 // ----------------------------------------------------------------------------
 // Integration Tests
 // ----------------------------------------------------------------------------

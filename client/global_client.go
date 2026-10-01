@@ -83,10 +83,34 @@ type ClientConfig struct {
 
 	// LocksVolume is the storage volume holding advisory locks in GlobalProject.
 	LocksVolume string
+
+	// SleepImage is the image providing ic-sleep for one-off and init containers.
+	SleepImage string
+
+	// ToolsVolume is the storage volume holding helper tools.
+	ToolsVolume string
+
+	// ToolsMount is the mount path for helper tools.
+	ToolsMount string
 }
 
 // ClientOption is a functional option for configuring the Client.
 type ClientOption func(*ClientConfig)
+
+// ClientToolsVolume sets the storage volume name holding helper tools.
+func ClientToolsVolume(vol string) ClientOption {
+	return func(c *ClientConfig) { c.ToolsVolume = vol }
+}
+
+// ClientToolsMount sets the mount path for helper tools.
+func ClientToolsMount(mount string) ClientOption {
+	return func(c *ClientConfig) { c.ToolsMount = mount }
+}
+
+// ClientSleepImage sets the sleep image to use for one-off and init containers.
+func ClientSleepImage(img string) ClientOption {
+	return func(c *ClientConfig) { c.SleepImage = img }
+}
 
 // ClientURL sets the Incus server ClientURL.
 func ClientURL(u string) ClientOption {
@@ -199,6 +223,9 @@ func New(ctx context.Context, opts ...ClientOption) *GlobalClient {
 		DescriptionFormat:  DefaultGlobalProject + ": %s",
 		GlobalProject:      DefaultGlobalProject,
 		LocksVolume:        DefaultLocksVolume,
+		SleepImage:         DefaultSleepImage,
+		ToolsVolume:        DefaultToolsVolume,
+		ToolsMount:         DefaultToolsMount,
 		Stdout:             os.Stdout,
 		Stderr:             NewSwapWriter(os.Stderr),
 	}
@@ -312,7 +339,11 @@ func NewTestClient(ctx context.Context) (*GlobalClient, error) {
 	}
 
 	// Use own cache project for tests.
-	opts = append(opts, ClientCacheProject(cacheProject))
+	opts = append(opts,
+		ClientCacheProject(cacheProject),
+		ClientToolsVolume("incus-compose-tools"),
+		ClientToolsMount("/incus-compose-tools"),
+	)
 
 	c := New(ctx, opts...)
 	if err := c.Connect(); err != nil {

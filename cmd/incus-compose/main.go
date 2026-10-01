@@ -32,6 +32,9 @@ const managedKey = "user.incus-compose.managed"
 
 const globalProject = "incus-compose"
 const locksVolume = "locks"
+const toolsVolume = "incus-compose-tools"
+const toolsMount = "/incus-compose-tools"
+const defaultSleepImage = "ghcr.io/lxc/incus-compose/ic-sleep:{version}"
 
 type noColorKey struct{}
 
@@ -381,6 +384,9 @@ func newRootCommand() *cli.Command {
 			opts := []client.ClientOption{
 				client.ClientGlobalProject(globalProject),
 				client.ClientLocksVolume(locksVolume),
+				client.ClientToolsVolume(toolsVolume),
+				client.ClientToolsMount(toolsMount),
+				client.ClientSleepImage(defaultSleepImage),
 				client.ClientDescriptionFormat("incus-compose: %s"),
 				client.ClientLogger(logger),
 				client.ClientStdout(cmd.Writer),

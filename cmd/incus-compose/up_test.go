@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/cmd/incus-compose/version"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/project"
@@ -220,4 +221,54 @@ func TestBuildLoadOptions_NetworkOptions(t *testing.T) {
 	loadOpts := project.NewLoadOptions(capturedOpts...)
 	assert.Equal(t, "ovn", loadOpts.NetworkDriver)
 	assert.Equal(t, "incusbr0", loadOpts.NetworkUplink)
+}
+
+func TestUp_PreStartSeedsNotForwardedToMainInstance(t *testing.T) {
+	t.Parallel()
+
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"app.conf":  "listen 80;",
+		"etc/dummy": "",
+		"compose.yaml": `name: test-seed
+services:
+  web:
+    image: docker.io/nginx:alpine
+    volumes:
+      - type: bind
+        source: ./app.conf
+        target: /etc/nginx/app.conf
+        x-incus-compose:
+          seed: true
+      - type: bind
+        source: ./etc
+        target: /etc/nginx
+    pre_start:
+      - command: ["echo", "init"]
+`,
+	})
+
+	composeFile := filepath.Join(dir, "compose.yaml")
+	p, err := project.New().Load(t.Context(), project.LoadFiles([]string{composeFile}))
+	require.NoError(t, err)
+
+	c := client.NewOfflineClient(t.Context(), "default")
+	resources, err := p.Resources(c)
+	require.NoError(t, err)
+
+	var inst *client.Instance
+	for _, res := range resources["web"] {
+		i, ok := res.(*client.Instance)
+		if ok {
+			inst = i
+			break
+		}
+	}
+	require.NotNil(t, inst)
+	require.Len(t, inst.Config.PreRun, 1)
+
+	runner := inst.Config.PreRun[0]
+	require.Len(t, runner.Config.Files, 1, "runner should receive the volume seed file")
+	assert.Equal(t, "/etc/nginx/app.conf", runner.Config.Files[0].Target)
+
+	assert.Empty(t, inst.Config.Files, "main instance should not re-seed the volume file")
 }

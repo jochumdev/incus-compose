@@ -10,6 +10,7 @@ import (
 
 	"github.com/bradleyjkemp/cupaloy/v2"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lxc/incus-compose/client"
@@ -323,6 +324,29 @@ func TestConfigFilterByService(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigImagesWithPreStart(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	composePath := filepath.Join(tmpDir, "compose.yaml")
+	content := `name: test-prestart-images
+services:
+  web:
+    image: docker.io/nginx:alpine
+    pre_start:
+      - image: docker.io/busybox:latest
+        command: ["echo", "init"]
+`
+	err := os.WriteFile(composePath, []byte(content), 0o600)
+	require.NoError(t, err)
+
+	stdout, err := testlib.RunCompose(t.Context(), t, "test-images", "", nil, "-f", composePath, "config", "--images")
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	assert.Contains(t, lines, "docker.io/nginx:alpine")
+	assert.Contains(t, lines, "docker.io/busybox:latest")
 }
 
 func TestUpDownUpSimple(t *testing.T) {

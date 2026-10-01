@@ -2240,6 +2240,8 @@ func TestOneOffService(t *testing.T) {
 	require.NotNil(t, got.Deploy)
 	assert.Nil(t, got.Deploy.Replicas, "a one-off is a single instance")
 	assert.Equal(t, &limits, got.Deploy.Resources.Limits, "but it keeps the limits")
+	assert.Nil(t, got.PreStart)
+	assert.Nil(t, got.PostStart)
 
 	assert.Equal(t, 3, replicas, "the declared service must not be touched")
 	assert.NotNil(t, service.HealthCheck)
@@ -2272,4 +2274,249 @@ func TestOneOffMarks(t *testing.T) {
 		"a one-off is not something healthd restarts")
 
 	assert.NotPanics(t, func() { oneOffMarks(nil) })
+}
+
+func TestServiceToInstancePreStart(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default image and per_replica false", func(t *testing.T) {
+		t.Parallel()
+		c := client.NewOfflineClient(t.Context(), "test")
+		envVal := "bar"
+		hookEnvVal := "override"
+		service := types.ServiceConfig{
+			Name:  "web",
+			Image: "docker.io/nginx:alpine",
+			Environment: types.MappingWithEquals{
+				"FOO": &envVal,
+			},
+			PreStart: []types.PreStartHook{
+				{
+					ContainerSpec: types.ContainerSpec{
+						Command:    types.ShellCommand{"echo", "init"},
+						WorkingDir: "/app",
+						Environment: types.MappingWithEquals{
+							"FOO": &hookEnvVal,
+							"BAR": &envVal,
+						},
+					},
+					PerReplica: false,
+				},
+			},
+		}
+		p := &types.Project{Services: types.Services{"web": service}}
+
+		// Replica 1 has PreRun
+		inst1, res1, err := serviceToInstance(c, p, "web", &ResourcesOptions{}, 1, 2)
+		require.NoError(t, err)
+		require.Len(t, inst1.Config.PreRun, 1)
+
+		runner := inst1.Config.PreRun[0]
+		assert.Equal(t, "web-pre_start-0", runner.Name())
+		assert.True(t, runner.Config.IgnoreStack)
+		assert.True(t, runner.Ignored())
+		assert.Equal(t, "docker.io/nginx:alpine", runner.Config.Image)
+		assert.Equal(t, []string{"echo", "init"}, runner.Config.Command)
+		assert.Equal(t, "/app", runner.Config.WorkingDir)
+		assert.Equal(t, "override", runner.Config.Extensions["environment.FOO"])
+		assert.Equal(t, "bar", runner.Config.Extensions["environment.BAR"])
+		assert.Equal(t, "pre_start", runner.Config.Extensions["user.incus-compose.hook"])
+		assert.Equal(t, "0", runner.Config.Extensions["user.incus-compose.hook.index"])
+
+		// Runner is also in returned resources
+		assert.Contains(t, res1, runner)
+
+		// Replica 2 does not have PreRun when per_replica is false
+		c2 := client.NewOfflineClient(t.Context(), "test")
+		inst2, _, err := serviceToInstance(c2, p, "web", &ResourcesOptions{}, 2, 2)
+		require.NoError(t, err)
+		assert.Empty(t, inst2.Config.PreRun)
+	})
+
+	t.Run("custom image and per_replica true", func(t *testing.T) {
+		t.Parallel()
+		c := client.NewOfflineClient(t.Context(), "test")
+		service := types.ServiceConfig{
+			Name:  "web",
+			Image: "docker.io/nginx:alpine",
+			PreStart: []types.PreStartHook{
+				{
+					ContainerSpec: types.ContainerSpec{
+						Image:      "docker.io/busybox:latest",
+						Command:    types.ShellCommand{"sh", "-c", "touch /init"},
+						Privileged: true,
+					},
+					PerReplica: true,
+				},
+			},
+		}
+		p := &types.Project{Services: types.Services{"web": service}}
+
+		inst1, res1, err := serviceToInstance(c, p, "web", &ResourcesOptions{}, 1, 2)
+		require.NoError(t, err)
+		require.Len(t, inst1.Config.PreRun, 1)
+		assert.Equal(t, "web-1-pre_start-0", inst1.Config.PreRun[0].Name())
+		assert.Equal(t, "docker.io/busybox:latest", inst1.Config.PreRun[0].Config.Image)
+		assert.Equal(t, "true", inst1.Config.PreRun[0].Config.Extensions["security.privileged"])
+
+		// Custom image must be in resources
+		hasCustomImage := false
+		for _, r := range res1 {
+			if r.Kind() == client.KindImage && r.Name() == "docker.io/busybox:latest" {
+				hasCustomImage = true
+				break
+			}
+		}
+		assert.True(t, hasCustomImage, "custom hook image must be included in resources")
+
+		// Replica 2 also gets PreRun when per_replica is true
+		c2 := client.NewOfflineClient(t.Context(), "test")
+		inst2, _, err := serviceToInstance(c2, p, "web", &ResourcesOptions{}, 2, 2)
+		require.NoError(t, err)
+		require.Len(t, inst2.Config.PreRun, 1)
+		assert.Equal(t, "web-2-pre_start-0", inst2.Config.PreRun[0].Name())
+	})
+
+	t.Run("filters proxy and tmpfs devices from runner", func(t *testing.T) {
+		t.Parallel()
+		c := client.NewOfflineClient(t.Context(), "test")
+		service := types.ServiceConfig{
+			Name:    "web",
+			Image:   "docker.io/nginx:alpine",
+			Ports:   []types.ServicePortConfig{{Target: 80, Published: "8080"}},
+			Tmpfs:   types.StringList{"/tmp"},
+			Volumes: []types.ServiceVolumeConfig{{Type: "bind", Source: t.TempDir(), Target: "/data"}},
+			PreStart: []types.PreStartHook{
+				{
+					ContainerSpec: types.ContainerSpec{
+						Command: types.ShellCommand{"echo", "prep"},
+					},
+				},
+			},
+		}
+		p := &types.Project{Services: types.Services{"web": service}}
+
+		inst, _, err := serviceToInstance(c, p, "web", &ResourcesOptions{}, 1, 1)
+		require.NoError(t, err)
+		require.Len(t, inst.Config.PreRun, 1)
+		runner := inst.Config.PreRun[0]
+		hasTmpfs := false
+		for _, dev := range runner.Config.Devices {
+			assert.NotEqual(t, client.InstanceDeviceTypeProxy, dev.Config.DeviceType, "proxy devices must be filtered out")
+			if dev.Config.DeviceType == client.InstanceDeviceTypeTmpfs {
+				hasTmpfs = true
+			}
+		}
+		assert.True(t, hasTmpfs, "tmpfs devices must be kept on runner")
+	})
+
+	t.Run("seeds volume files to pre_start runner only", func(t *testing.T) {
+		t.Parallel()
+		c := client.NewOfflineClient(t.Context(), "test")
+		hostDir := testlib.WriteTempFiles(t, map[string]string{
+			"seed.conf": "data",
+		})
+		seedFile := filepath.Join(hostDir, "seed.conf")
+
+		service := types.ServiceConfig{
+			Name:  "web",
+			Image: "docker.io/nginx:alpine",
+			Volumes: []types.ServiceVolumeConfig{
+				{
+					Type:   "bind",
+					Source: seedFile,
+					Target: "/data/seed.conf",
+					Extensions: types.Extensions{
+						"x-incus-compose": map[string]any{"seed": true},
+					},
+				},
+				{
+					Type:   "bind",
+					Source: hostDir,
+					Target: "/data",
+				},
+			},
+			PreStart: []types.PreStartHook{
+				{
+					ContainerSpec: types.ContainerSpec{
+						Command: types.ShellCommand{"echo", "init"},
+					},
+				},
+			},
+		}
+		p := &types.Project{Services: types.Services{"web": service}}
+
+		inst, _, err := serviceToInstance(c, p, "web", &ResourcesOptions{}, 1, 1)
+		require.NoError(t, err)
+		require.Len(t, inst.Config.PreRun, 1)
+
+		runner := inst.Config.PreRun[0]
+		require.Len(t, runner.Config.Files, 1, "runner should receive the volume seed file")
+		assert.Equal(t, "/data/seed.conf", runner.Config.Files[0].Target)
+
+		assert.Empty(t, inst.Config.Files, "main instance should not re-seed the volume file")
+	})
+}
+
+func TestServiceToInstancePostStart(t *testing.T) {
+	t.Parallel()
+	c := client.NewOfflineClient(t.Context(), "test")
+	envVal := "base"
+	hookEnvVal := "override"
+	extraVal := "extra"
+	service := types.ServiceConfig{
+		Name:       "web",
+		Image:      "docker.io/nginx:alpine",
+		User:       "1000",
+		WorkingDir: "/var/www",
+		Environment: types.MappingWithEquals{
+			"BASE":  &envVal,
+			"CLASH": &envVal,
+		},
+		PostStart: []types.ServiceHook{
+			{
+				Command:    types.ShellCommand{"touch", "/ready"},
+				User:       "0",
+				Privileged: true,
+				WorkingDir: "/tmp",
+				Environment: types.MappingWithEquals{
+					"CLASH": &hookEnvVal,
+					"EXTRA": &extraVal,
+				},
+			},
+		},
+	}
+	p := &types.Project{Services: types.Services{"web": service}}
+
+	inst, _, err := serviceToInstance(c, p, "web", &ResourcesOptions{}, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, inst.Config.PostRun, 1)
+
+	hook := inst.Config.PostRun[0]
+	assert.Equal(t, []string{"touch", "/ready"}, hook.Command)
+	assert.Equal(t, "0", hook.User)
+	assert.True(t, hook.Privileged)
+	assert.Equal(t, "/tmp", hook.WorkingDir)
+	assert.Equal(t, "base", hook.Environment["BASE"])
+	assert.Equal(t, "override", hook.Environment["CLASH"])
+	assert.Equal(t, "extra", hook.Environment["EXTRA"])
+
+	t.Run("rejects user mismatch for unprivileged hook", func(t *testing.T) {
+		t.Parallel()
+		badService := types.ServiceConfig{
+			Name:  "web",
+			Image: "docker.io/nginx:alpine",
+			User:  "1000",
+			PostStart: []types.ServiceHook{
+				{
+					Command: types.ShellCommand{"whoami"},
+					User:    "2000",
+				},
+			},
+		}
+		badProj := &types.Project{Services: types.Services{"web": badService}}
+		_, _, err := serviceToInstance(c, badProj, "web", &ResourcesOptions{}, 1, 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `post_start user "2000" does not match service user "1000"`)
+	})
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -269,4 +271,53 @@ func newPullCommand() *cli.Command {
 			})
 		},
 	}
+}
+
+func downloadTools(ctx context.Context, c *client.Client, healthdImage string, sleepImage string, dnsImage string) error {
+	var errs error
+	if healthdImage == "" {
+		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_HEALTHD_IMAGE is empty"))
+	}
+	healthdImage = resolveImageVersion(healthdImage)
+
+	if sleepImage == "" {
+		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_SLEEP_IMAGE is empty"))
+	}
+	sleepImage = resolveImageVersion(sleepImage)
+
+	if dnsImage == "" {
+		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_DNS_IMAGE is empty"))
+	}
+	dnsImage = resolveImageVersion(dnsImage)
+
+	if errs != nil {
+		return errs
+	}
+
+	sysClient, err := c.Global().EnsureProject(globalProject, client.EnsureProjectWithCreate())
+	if err != nil {
+		return fmt.Errorf("failed to ensure the %q project: %w", globalProject, err)
+	}
+
+	release, err := c.Global().LockGlobalProject(ctx)
+	if err != nil {
+		return err
+	}
+	release()
+
+	for _, image := range []string{healthdImage, sleepImage, dnsImage} {
+		res, err := sysClient.Resource(client.KindImage, image, &client.ImageConfig{})
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+
+		err = client.RunAction(ctx, res, client.ActionEnsure, client.OptionCreate())
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+	}
+
+	return errs
 }

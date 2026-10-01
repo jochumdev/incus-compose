@@ -134,24 +134,211 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		errs = errors.Join(errs, err)
 	}
 
+	instanceResources := slices.Clone(resources)
+
+	var (
+		instanceFiles []client.InstanceFile
+		preRun        []*client.Instance
+		seededVolumes = make(map[string]bool)
+	)
+
+	hasPreStart := len(service.PreStart) > 0
+
+	for i, hook := range service.PreStart {
+		if !hook.PerReplica && index > 1 {
+			continue
+		}
+
+		runnerName := fmt.Sprintf("%s-pre_start-%d", service.Name, i)
+		if hook.PerReplica {
+			runnerName = fmt.Sprintf("%s-pre_start-%d", instanceName, i)
+		}
+
+		hookImageName := hook.Image
+		var hookImage client.Resource
+		if hookImageName != "" && hookImageName != service.Image {
+			img, err := c.Resource(client.KindImage, hookImageName, &client.ImageConfig{
+				Platform: service.Platform,
+			})
+			if err != nil {
+				errs = errors.Join(errs, err)
+				continue
+			}
+			hookImg, ok := img.(*client.Image)
+			if ok {
+				err = hookImg.AddService(service.Name, service.Platform)
+				if err != nil {
+					errs = errors.Join(errs, err)
+				}
+			}
+			hookImage = img
+			resources = append(resources, img)
+		} else {
+			hookImage = image
+			hookImageName = image.Name()
+		}
+
+		runnerDevices := filterRunnerDevices(devices)
+
+		var runnerFiles []client.InstanceFile
+		for _, f := range files {
+			if isVolumeFile(runnerDevices, f.Target) {
+				volTarget := volumeDevicePath(runnerDevices, f.Target)
+				if !seededVolumes[volTarget] {
+					runnerFiles = append(runnerFiles, f)
+					seededVolumes[volTarget] = true
+				}
+			} else {
+				runnerFiles = append(runnerFiles, f)
+			}
+		}
+
+		runnerExtensions := maps.Clone(config)
+		if runnerExtensions == nil {
+			runnerExtensions = map[string]string{}
+		}
+		for key, val := range hook.Environment {
+			if val != nil {
+				runnerExtensions["environment."+key] = *val
+			}
+		}
+		if hook.Privileged {
+			runnerExtensions["security.privileged"] = "true"
+		}
+		runnerExtensions[OneOffKey] = "true"
+		runnerExtensions[shared.HealthEnabledKey] = "false"
+		runnerExtensions["user.incus-compose.hook"] = "pre_start"
+		runnerExtensions["user.incus-compose.hook.index"] = strconv.Itoa(i)
+
+		hookUser := hook.User
+		if hookUser == "" {
+			hookUser = service.User
+		}
+
+		hookWorkingDir := hook.WorkingDir
+		if hookWorkingDir == "" {
+			hookWorkingDir = service.WorkingDir
+		}
+
+		runnerCommand := append(slices.Clone(hook.Entrypoint), hook.Command...)
+
+		runnerCfg := &client.InstanceConfig{
+			ServiceName:   service.Name,
+			NoAutoVolumes: options.noAutoVolumes,
+			Image:         hookImageName,
+			Resources:     []client.Resource{hookImage},
+			Extensions:    runnerExtensions,
+			Devices:       runnerDevices,
+			Profiles:      profiles,
+			Files:         runnerFiles,
+			Command:       runnerCommand,
+			User:          hookUser,
+			WorkingDir:    hookWorkingDir,
+			IgnoreStack:   true,
+		}
+
+		rInst, err := c.Resource(client.KindInstance, runnerName, runnerCfg)
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+
+		runnerInstance, ok := rInst.(*client.Instance)
+		if !ok {
+			errs = errors.Join(errs, client.ErrUnknown.WithKindName(client.KindInstance, runnerName))
+			continue
+		}
+
+		resources = append(resources, runnerInstance)
+		preRun = append(preRun, runnerInstance)
+	}
+
+	var postRun []client.PostRunHook
+	if len(service.PostStart) > 0 {
+		postRun = make([]client.PostRunHook, 0, len(service.PostStart))
+		for _, hook := range service.PostStart {
+			env := make(map[string]string, len(service.Environment)+len(hook.Environment))
+			for k, v := range service.Environment {
+				if v != nil {
+					env[k] = *v
+				}
+			}
+			for k, v := range hook.Environment {
+				if v != nil {
+					env[k] = *v
+				}
+			}
+
+			if hook.User != "" && !hook.Privileged && !service.Privileged {
+				if service.User != "" && hook.User != service.User {
+					errs = errors.Join(errs, fmt.Errorf("service %q post_start user %q does not match service user %q", service.Name, hook.User, service.User))
+					continue
+				}
+				if service.User == "" && hook.User != "root" && hook.User != "0" {
+					img, ok := image.(*client.Image)
+					if ok && img.IsEnsured() {
+						expected := img.State().OCIUser
+						if expected == "" {
+							expected = "root"
+						}
+						if hook.User != expected {
+							errs = errors.Join(errs, fmt.Errorf("service %q post_start user %q does not match instance user", service.Name, hook.User))
+							continue
+						}
+					}
+				}
+			}
+
+			user := hook.User
+			if user == "" {
+				user = service.User
+			}
+
+			workingDir := hook.WorkingDir
+			if workingDir == "" {
+				workingDir = service.WorkingDir
+			}
+
+			postRun = append(postRun, client.PostRunHook{
+				Command:     hook.Command,
+				User:        user,
+				Privileged:  hook.Privileged || service.Privileged,
+				WorkingDir:  workingDir,
+				Environment: env,
+			})
+		}
+	}
+
 	if errs != nil {
 		return nil, nil, errs
+	}
+
+	if hasPreStart {
+		for _, f := range files {
+			if !isVolumeFile(devices, f.Target) {
+				instanceFiles = append(instanceFiles, f)
+			}
+		}
+	} else {
+		instanceFiles = files
 	}
 
 	instCfg := &client.InstanceConfig{
 		ServiceName:   service.Name,
 		NoAutoVolumes: options.noAutoVolumes,
 		Image:         image.Name(),
-		Resources:     slices.Clone(resources),
+		Resources:     instanceResources,
 		Extensions:    config,
 		Devices:       devices,
 		Profiles:      profiles,
-		Files:         files,
+		Files:         instanceFiles,
 		Dependencies:  instanceDependencyWaits(p, service, options),
 		Entrypoint:    service.Entrypoint,
 		Command:       service.Command,
 		User:          service.User,
 		WorkingDir:    service.WorkingDir,
+		PreRun:        preRun,
+		PostRun:       postRun,
 	}
 
 	ir, err := c.Resource(client.KindInstance, instanceName, instCfg)
@@ -165,6 +352,35 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 	}
 
 	return instance, resources, nil
+}
+
+func filterRunnerDevices(devices []client.InstanceDevice) []client.InstanceDevice {
+	out := make([]client.InstanceDevice, 0, len(devices))
+	for _, dev := range devices {
+		if dev.Config.DeviceType == client.InstanceDeviceTypeProxy {
+			continue
+		}
+		out = append(out, dev)
+	}
+	return out
+}
+
+func isVolumeFile(devices []client.InstanceDevice, target string) bool {
+	for _, dev := range devices {
+		if dev.Config.DeviceType == client.InstanceDeviceTypeDisk && client.CoversPath(dev.Config.Disk.Path, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func volumeDevicePath(devices []client.InstanceDevice, target string) string {
+	for _, dev := range devices {
+		if dev.Config.DeviceType == client.InstanceDeviceTypeDisk && client.CoversPath(dev.Config.Disk.Path, target) {
+			return dev.Config.Disk.Path
+		}
+	}
+	return ""
 }
 
 // OneOffKey marks the instances `run` created, which `up` leaves alone and
@@ -185,6 +401,8 @@ func oneOffService(service types.ServiceConfig, oneOff *OneOff) types.ServiceCon
 
 	service.Restart = ""
 	service.HealthCheck = nil
+	service.PreStart = nil
+	service.PostStart = nil
 
 	// Deploy also carries the resource limits, which a one-off keeps.
 	if service.Deploy != nil {

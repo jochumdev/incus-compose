@@ -160,6 +160,13 @@ func (s *Stack) runBatch(ctx context.Context, batch []Resource, action Action, o
 
 	pool := NewWorkerPool(s.options.Workers)
 	for _, r := range batch {
+		if action != ActionEnsure {
+			ign, ok := r.(IgnoreAble)
+			if ok && ign.Ignored() {
+				continue
+			}
+		}
+
 		task := r // capture for closure
 		pool.Submit(func() error {
 			return RunAction(ctx, task, action, opts...)
@@ -207,6 +214,13 @@ func (s *Stack) ForAction(action Action) *Stack {
 	}
 
 	for _, r := range s.All() {
+		if action != ActionEnsure {
+			ign, ok := r.(IgnoreAble)
+			if ok && ign.Ignored() {
+				continue
+			}
+		}
+
 		if SupportsAction(r, action) {
 			result.Add(r)
 		}
@@ -229,6 +243,13 @@ func (s *Stack) ForActionF(action Action, filter func(r Resource) bool) *Stack {
 	}
 
 	for _, r := range s.All() {
+		if action != ActionEnsure {
+			ign, ok := r.(IgnoreAble)
+			if ok && ign.Ignored() {
+				continue
+			}
+		}
+
 		if SupportsAction(r, action) && filter(r) {
 			result.Add(r)
 		}

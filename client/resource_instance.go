@@ -124,6 +124,24 @@ type InstanceConfig struct {
 
 	// WorkingDir is the compose `working_dir:` override of the image's WORKDIR.
 	WorkingDir string
+
+	// IgnoreStack indicates this instance should not be executed by the stack worker pool.
+	IgnoreStack bool
+
+	// PreRun holds init container instances run to completion before this instance starts.
+	PreRun []*Instance
+
+	// PostRun holds commands executed inside the container after this instance starts.
+	PostRun []PostRunHook
+}
+
+// PostRunHook defines a command to execute inside the instance after it starts.
+type PostRunHook struct {
+	Command     []string
+	User        string
+	Privileged  bool
+	WorkingDir  string
+	Environment map[string]string
 }
 
 // GetConfig returns the configuration.
@@ -248,6 +266,11 @@ func (r *Instance) Created() bool {
 // ServiceName returns the compose service name which has been set by the config.
 func (r *Instance) ServiceName() string {
 	return r.Config.ServiceName
+}
+
+// Ignored reports whether the instance should be ignored by stack operations.
+func (r *Instance) Ignored() bool {
+	return r.Config.IgnoreStack
 }
 
 // WaitIPs polls the instance state until each attached NIC reports its
@@ -585,6 +608,38 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 
 	r.image = image
 
+	if r.Config.IgnoreStack && len(r.Config.Command) > 0 {
+		vol, entrypoint, err := r.client.EnsureTools(ctx)
+		if err != nil {
+			return fmt.Errorf("ensuring tools volume: %w", err)
+		}
+
+		toolsVol := r.client.ToolsVolume()
+		hasTools := false
+		for _, dev := range r.Config.Devices {
+			if dev.Name == toolsVol {
+				hasTools = true
+				break
+			}
+		}
+		if !hasTools {
+			r.Config.Devices = append(r.Config.Devices, InstanceDevice{
+				Name: toolsVol,
+				Config: InstanceDeviceConfig{
+					DeviceType: InstanceDeviceTypeDisk,
+					Disk: InstanceDeviceDiskConfig{
+						StorageVolumeConfig: &StorageVolumeConfig{Pool: vol.Config.Pool},
+						Source:              vol.IncusName(),
+						Path:                r.client.ToolsMount(),
+						ReadOnly:            true,
+					},
+				},
+			})
+		}
+
+		r.Config.Entrypoint = []string{entrypoint}
+	}
+
 	config := map[string]string{}
 
 	imageState := image.State()
@@ -834,32 +889,265 @@ func (r *Instance) Start(ctx context.Context, opts ...Option) error {
 		return r.client.hookAfter(ctx, action, r, options, err)
 	}
 
+	if len(r.Config.PreRun) > 0 {
+		for i, runner := range r.Config.PreRun {
+			r.client.globalClient.emitProgress(action, r, options, Progress{
+				Percent: -1,
+				Text:    fmt.Sprintf("Running pre_start [%d/%d]", i+1, len(r.Config.PreRun)),
+			})
+
+			err := runner.Run(startCtx, opts...)
+			if err != nil {
+				return r.client.hookAfter(ctx, action, r, options, fmt.Errorf("service %q pre_start[%d] failed: %w", r.Config.ServiceName, i, err))
+			}
+		}
+	}
+
 	err = r.start(startCtx, options)
 	if err != nil {
 		return r.client.hookAfter(ctx, action, r, options, err)
 	}
 
-	if options.Healthd {
-		if (hasTest || restart) && !isHealthd {
+	if len(r.Config.PostRun) > 0 {
+		for i, hook := range r.Config.PostRun {
 			r.client.globalClient.emitProgress(action, r, options, Progress{
 				Percent: -1,
-				Text:    "Waiting for the healthcheck",
+				Text:    fmt.Sprintf("Running post_start [%d/%d]", i+1, len(r.Config.PostRun)),
 			})
 
-			err = r.waitForHealthCheck(startCtx)
+			err := r.execPostRun(startCtx, hook)
 			if err != nil {
-				return r.client.hookAfter(
-					ctx,
-					action,
-					r,
-					options,
-					fmt.Errorf("failed to wait for the healthcheck with timeout: %v", options.Timeout),
-				)
+				return r.client.hookAfter(ctx, action, r, options, fmt.Errorf("service %q post_start[%d] failed: %w", r.Config.ServiceName, i, err))
 			}
 		}
 	}
 
+	if options.Healthd && (hasTest || restart) && !isHealthd {
+		r.client.globalClient.emitProgress(action, r, options, Progress{
+			Percent: -1,
+			Text:    "Waiting for the healthcheck",
+		})
+
+		err = r.waitForHealthCheck(startCtx)
+		if err != nil {
+			return r.client.hookAfter(
+				ctx,
+				action,
+				r,
+				options,
+				fmt.Errorf("failed to wait for the healthcheck with timeout: %v", options.Timeout),
+			)
+		}
+	}
+
 	return r.client.hookAfter(ctx, action, r, options, nil)
+}
+
+func (r *Instance) execPostRun(ctx context.Context, hook PostRunHook) error {
+	conn, err := r.client.Connection()
+	if err != nil {
+		return err
+	}
+
+	if len(hook.Command) == 0 {
+		return errors.New("command is empty")
+	}
+
+	var stdout, stderr bytes.Buffer
+	post := incusApi.InstanceExecPost{
+		Command:     hook.Command,
+		Cwd:         hook.WorkingDir,
+		Environment: hook.Environment,
+	}
+	if hook.Privileged {
+		post.User = 0
+		post.Group = 0
+	} else {
+		state := r.State()
+		post.User = uint32(state.UID)
+		post.Group = uint32(state.GID)
+
+		if hook.User != "" && hook.User != r.Config.User {
+			name, group, hasGroup := strings.Cut(hook.User, ":")
+			uid, uidErr := strconv.ParseUint(name, 10, 32)
+			gid, gidErr := strconv.ParseUint(group, 10, 32)
+
+			matched := false
+			if uidErr == nil && (!hasGroup || gidErr == nil) {
+				if uid == state.UID && (!hasGroup || gid == state.GID) {
+					matched = true
+				}
+			} else if (name == "root" || (uidErr == nil && uid == 0)) && state.UID == 0 &&
+				(!hasGroup || group == "root" || ((gidErr == nil && gid == 0) && state.GID == 0)) {
+				matched = true
+			} else {
+				image := r.image
+				if image == nil && r.Config.Image != "" {
+					imageRes, err := r.client.Resource(KindImage, r.Config.Image, &ImageConfig{})
+					if err == nil {
+						image, _ = imageRes.(*Image)
+					}
+				}
+
+				if image != nil {
+					owner, err := image.ResolveUser(ctx, hook.User)
+					if err == nil && owner.UID == state.UID && (!hasGroup || owner.GID == state.GID) {
+						matched = true
+					}
+				}
+			}
+
+			if !matched {
+				return fmt.Errorf("user %q does not match instance user", hook.User)
+			}
+		}
+	}
+
+	updates, err := conn.ExecInstance(ctx, r.client.incusProject, r.IncusName(), post, &iclient.InstanceExecArgs{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		return err
+	}
+
+	op, err := iclient.WaitOperation(ctx, updates)
+	tail := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
+	tail = strings.TrimSpace(tail)
+	if err != nil {
+		return err
+	}
+
+	var exitCode int
+	ret, ok := op.Metadata["return"].(float64)
+	if ok {
+		exitCode = int(ret)
+	}
+
+	if exitCode != 0 {
+		return fmt.Errorf("exited with status %d: %s", exitCode, tail)
+	}
+
+	return nil
+}
+
+// Run executes the instance's configured command in a runner container with the ic-sleep helper.
+func (r *Instance) Run(ctx context.Context, opts ...Option) error {
+	vol, entrypoint, err := r.client.EnsureTools(ctx)
+	if err != nil {
+		return fmt.Errorf("ensuring tools volume: %w", err)
+	}
+
+	toolsVol := r.client.ToolsVolume()
+	hasTools := false
+	for _, dev := range r.Config.Devices {
+		if dev.Name == toolsVol {
+			hasTools = true
+			break
+		}
+	}
+	if !hasTools {
+		r.Config.Devices = append(r.Config.Devices, InstanceDevice{
+			Name: toolsVol,
+			Config: InstanceDeviceConfig{
+				DeviceType: InstanceDeviceTypeDisk,
+				Disk: InstanceDeviceDiskConfig{
+					StorageVolumeConfig: &StorageVolumeConfig{Pool: vol.Config.Pool},
+					Source:              vol.IncusName(),
+					Path:                r.client.ToolsMount(),
+					ReadOnly:            true,
+				},
+			},
+		})
+	}
+
+	r.Config.Entrypoint = []string{entrypoint}
+
+	err = r.Ensure(ctx, OptionCreate(), OptionNoHealthd())
+	if err != nil {
+		return fmt.Errorf("ensuring runner %q: %w", r.Name(), err)
+	}
+
+	startOpts := append(slices.Clone(opts), OptionNoHealthd())
+	err = r.Start(ctx, startOpts...)
+	if err != nil && !errors.Is(err, ErrRunning) {
+		return fmt.Errorf("starting runner %q: %w", r.Name(), err)
+	}
+
+	cleanup := func() {
+		cleanCtx := context.WithoutCancel(ctx)
+		r.client.IgnoreError(ActionStop, ErrNotRunning)
+		_ = RunAction(cleanCtx, r, ActionStop, OptionForce(), OptionNoHealthd())
+	}
+
+	conn, err := r.client.Connection()
+	if err != nil {
+		cleanup()
+		return err
+	}
+
+	command := r.Config.Command
+	if len(command) == 0 {
+		cleanup()
+		return errors.New("no command defined for runner")
+	}
+
+	cwd := r.Config.WorkingDir
+	if cwd == "" && r.image != nil {
+		cwd = r.image.State().Cwd
+	}
+
+	var stdout, stderr bytes.Buffer
+	state := r.State()
+	post := incusApi.InstanceExecPost{
+		Command: command,
+		Cwd:     cwd,
+		User:    uint32(state.UID),
+		Group:   uint32(state.GID),
+	}
+
+	env := map[string]string{}
+	for k, v := range r.Config.Extensions {
+		if strings.HasPrefix(k, "environment.") {
+			env[strings.TrimPrefix(k, "environment.")] = v
+		}
+	}
+	if len(env) > 0 {
+		post.Environment = env
+	}
+
+	updates, err := conn.ExecInstance(ctx, r.client.incusProject, r.IncusName(), post, &iclient.InstanceExecArgs{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("executing runner %q: %w", r.IncusName(), err)
+	}
+
+	op, err := iclient.WaitOperation(ctx, updates)
+	tail := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
+	tail = strings.TrimSpace(tail)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("waiting for runner %q: %w", r.IncusName(), err)
+	}
+
+	var exitCode int
+	ret, ok := op.Metadata["return"].(float64)
+	if ok {
+		exitCode = int(ret)
+	}
+
+	cleanup()
+
+	if exitCode == 0 {
+		cleanCtx := context.WithoutCancel(ctx)
+		_ = RunAction(cleanCtx, r, ActionDelete, OptionForce(), OptionNoHealthd())
+		return nil
+	}
+
+	return fmt.Errorf("runner %q exited with status %d: %s", r.IncusName(), exitCode, tail)
 }
 
 // Running returns true if the instance is running.
@@ -1232,6 +1520,11 @@ func (r *Instance) volumeTarget(target string) (string, string) {
 	}
 
 	return device, path.Join("/", strings.TrimPrefix(target, mount))
+}
+
+// CoversPath reports whether target sits at or below mount.
+func CoversPath(mount string, target string) bool {
+	return coversPath(mount, target)
 }
 
 // coversPath reports whether target sits at or below mount.

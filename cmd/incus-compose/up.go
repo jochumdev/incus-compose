@@ -205,6 +205,8 @@ func newUpCommand() *cli.Command {
 			}
 			defer c.WarnError(c.Done, "Failure during Client.Done()")
 
+			c.SetSleepImage(resolveImageVersion(cmd.String("sleep-image")))
+
 			err = c.Open()
 			if err != nil {
 				globalClient.LogError("Opening the project client", "error", err)

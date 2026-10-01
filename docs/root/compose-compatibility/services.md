@@ -27,6 +27,8 @@ leafwiki_last_author_id: system
 - `volumes` - Named volumes and bind mounts
 - `deploy.replicas` - Service scaling (instances named `{service}-{index}`)
 - `restart` - Restart policies (`no`, `always`, `on-failure`, `unless-stopped`)
+- `pre_start` - Init containers run before container start (see below)
+- `post_start` - Lifecycle hooks run after container start (see below)
 - `x-incus` extension - pass any Incus project, network and instance option
   directly (see [Extras](/extras#x-incus))
 - Top-level `x-incus-compose.healthd` - configure the ic-healthd sidecar's
@@ -314,3 +316,113 @@ services:
 
 Restart enforcement is handled by the ic-healthd sidecar, including `restart`
 without a healthcheck - see [Health Checking](/healthd#restart-without-a-test).
+
+## Lifecycle Hooks (pre_start and post_start)
+
+incus-compose supports Compose Specification `pre_start` and `post_start`
+lifecycle hooks to run initialization tasks before or after the main service
+container starts.
+
+```yaml
+services:
+  web:
+    image: docker.io/nginx:alpine
+    volumes:
+      - data:/data
+    pre_start:
+      - command: ["sh", "-c", "echo ready > /data/initialized"]
+    post_start:
+      - command: ["touch", "/var/run/web.ready"]
+        privileged: true
+volumes:
+  data:
+```
+
+### pre_start
+
+`pre_start` runs one or more ephemeral init containers in order before the main
+service container boots:
+
+```yaml
+services:
+  app:
+    image: docker.io/node:20-alpine
+    volumes:
+      - app-data:/app/data
+    pre_start:
+      - command: ["npm", "run", "migrate"]
+      - image: docker.io/alpine:edge
+        command: ["sh", "-c", "chown -R 1000:1000 /app/data"]
+        privileged: true
+```
+
+- **Shared storage & tmpfs:** The runner instance inherits the service's volumes
+  and tmpfs mounts so init scripts can prepare schemas, initialize files, or fix
+  permissions. Published ports and proxy devices are stripped from the runner so
+  host port bindings do not conflict.
+- **Volume seeding (`seed: true`):** When a volume configuration sets
+  `x-incus-compose: { seed: true }`, seed files are copied into the `pre_start`
+  runner rather than the main instance, allowing migration or init scripts to
+  consume or move them.
+- **Custom images:** If `image:` is specified on a hook item, the runner uses
+  that image; otherwise it defaults to the service's image. Custom hook images
+  are recognized and pulled by `incus-compose pull` and listed by
+  `incus-compose config --images`.
+- **Scaling (`per_replica`):**
+  - When `per_replica: false` (the default), the init container runs once before
+    replica 1 starts.
+  - When `per_replica: true`, each replica executes its own init container
+    before that replica starts.
+  - Runner instances are named `{service}-pre_start-{index}` (or
+    `{service}-{replica}-pre_start-{index}` when `per_replica: true`).
+- **Success and failure behavior:**
+  - On exit code `0`, the runner container is automatically stopped and removed.
+  - If a hook exits non-zero, startup aborts immediately and the main container
+    is never started. The failed runner container is kept stopped for inspection
+    with `incus-compose incus exec` or `incus-compose logs`.
+
+| Field         | Type          | Description                                                          |
+| ------------- | ------------- | -------------------------------------------------------------------- |
+| `command`     | string / list | Command to execute in the init container                             |
+| `image`       | string        | Optional image override (defaults to service `image`)                |
+| `user`        | string        | User / UID to run as                                                 |
+| `privileged`  | boolean       | Run container as privileged root                                     |
+| `working_dir` | string        | Working directory                                                    |
+| `environment` | map / list    | Environment variables (overrides/extends service env)                |
+| `per_replica` | boolean       | Run for each replica (`true`) or once per service (`false`, default) |
+
+_Since: v1.4.0_
+
+### post_start
+
+`post_start` executes commands inside the running service container immediately
+after container startup, before waiting for health checks:
+
+```yaml
+services:
+  web:
+    image: docker.io/nginx:alpine
+    user: "1000"
+    post_start:
+      - command: ["nginx", "-t"]
+      - command: ["chmod", "600", "/etc/ssl/certs/app.key"]
+        privileged: true
+```
+
+- **Execution:** Runs non-interactively inside the started container using the
+  Incus exec API.
+- **Permissions:** Unprivileged hooks must run as the instance's configured
+  `user` (or the image's default `USER`); any mismatch is rejected. Setting
+  `privileged: true` allows running the command as `root` (`0:0`).
+- **Failure:** If any `post_start` command exits with a non-zero exit code, the
+  service startup fails.
+
+| Field         | Type          | Description                                                         |
+| ------------- | ------------- | ------------------------------------------------------------------- |
+| `command`     | string / list | Command to execute inside the started instance                      |
+| `user`        | string        | User to run as (must match instance user unless `privileged: true`) |
+| `privileged`  | boolean       | Run command as root (`0:0`)                                         |
+| `working_dir` | string        | Working directory                                                   |
+| `environment` | map / list    | Environment variables                                               |
+
+_Since: v1.4.0_

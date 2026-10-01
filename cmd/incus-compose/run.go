@@ -16,19 +16,17 @@ import (
 	"github.com/compose-spec/compose-go/v2/format"
 	"github.com/compose-spec/compose-go/v2/types"
 	shellquote "github.com/kballard/go-shellquote"
-	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/lxc/incus/v7/shared/util"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
-	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
 
 // DefaultSleepImage ships the blocking helper a one-off runs as its entrypoint.
-const DefaultSleepImage = "ghcr.io/lxc/incus-compose/ic-sleep:{version}"
+const DefaultSleepImage = defaultSleepImage
 
 // runArgs holds the run() options, mirroring the run command's flags.
 type runArgs struct {
@@ -73,9 +71,14 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 
 	c.IgnoreError(client.ActionEnsure, client.ErrNotFound)
 
-	volume, entrypoint, err := runTools(ctx, c, args)
+	if args.SleepImage != "" {
+		c.SetSleepImage(resolveImageVersion(args.SleepImage))
+	}
+
+	volume, entrypoint, err := c.EnsureTools(ctx)
 	if err != nil {
-		return err
+		c.LogError("Preparing the tools volume", "error", err)
+		return errLogged.Wrap(err)
 	}
 
 	oneOff := project.OneOff{
@@ -83,7 +86,7 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		Name:         args.Name,
 		Entrypoint:   entrypoint,
 		Volume:       volume,
-		Mount:        toolsMount,
+		Mount:        c.ToolsMount(),
 		ServicePorts: args.ServicePorts || len(args.Publish) > 0,
 	}
 
@@ -94,7 +97,7 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		WithDeps:        !args.NoDeps,
 		IgnoreBuildable: true,
 		HealthdImage:    DefaultHealthdImage,
-		SleepImage:      DefaultSleepImage,
+		SleepImage:      c.SleepImage(),
 		DNSImage:        DefaultDNSImage,
 		Pull:            args.Pull,
 		Workers:         args.Workers,
@@ -251,56 +254,6 @@ func applyRunOptions(service types.ServiceConfig, args runArgs) (types.ServiceCo
 	}
 
 	return service, nil
-}
-
-// runTools puts the blocking helper where the one-off can run it.
-func runTools(ctx context.Context, c *client.Client, args runArgs) (*client.StorageVolume, string, error) {
-	sys, err := c.Global().EnsureProject(globalProject, client.EnsureProjectWithCreate())
-	if err != nil {
-		c.LogError("Getting the global project", "project", globalProject, "error", err)
-		return nil, "", errLogged.Wrap(err)
-	}
-
-	release, err := c.Global().LockGlobalProject(ctx)
-	if err != nil {
-		c.LogError("Locking the global project", "error", err)
-		return nil, "", errLogged.Wrap(err)
-	}
-	release()
-
-	// Done removes the stopped instance the helpers image was read through.
-	defer sys.WarnError(sys.Done, "Failure during Client.Done() on the global project")
-
-	// Resolved once: {version} is what the flag holds, and an error naming that
-	// sends the reader looking for a tag nobody ever asked a registry for.
-	name := resolveImageVersion(args.SleepImage)
-
-	res, err := sys.Resource(client.KindImage, name, &client.ImageConfig{})
-	if err != nil {
-		return nil, "", errLogged.Wrap(err)
-	}
-
-	err = client.RunAction(ctx, res, client.ActionEnsure, client.OptionCreate())
-	if err != nil {
-		c.LogError("Fetching the tools image", "image", name, "error", err)
-		c.LogError("`run` execs into it. Fetch it with `incus-compose pull` while connected, " +
-			"or point --sleep-image or x-incus-compose.sleep-image at an image this server can reach")
-
-		return nil, "", errLogged.Wrap(err)
-	}
-
-	image, ok := res.(*client.Image)
-	if !ok {
-		return nil, "", errLogged.Wrap(client.ErrUnknownResource.WithText(name))
-	}
-
-	volume, entrypoint, err := ensureTools(ctx, c, sys, image)
-	if err != nil {
-		c.LogError("Preparing the tools volume", "error", err)
-		return nil, "", errLogged.Wrap(err)
-	}
-
-	return volume, entrypoint, nil
 }
 
 // oneOffResources picks the one-off and the image it runs out of what the
@@ -651,7 +604,7 @@ func newRunCommand() *cli.Command {
 
 // oneOffInstances returns the project's one-offs, which are nobody's declared
 // service and so appear in no resource map.
-func oneOffInstances(ctx context.Context, c *client.Client) ([]incusApi.InstanceFull, error) {
+func oneOffInstances(ctx context.Context, c *client.Client) ([]*client.Instance, error) {
 	conn, err := c.Connection()
 	if err != nil {
 		return nil, err
@@ -662,11 +615,22 @@ func oneOffInstances(ctx context.Context, c *client.Client) ([]incusApi.Instance
 		return nil, err
 	}
 
-	found := []incusApi.InstanceFull{}
+	found := []*client.Instance{}
 
 	for _, inst := range instances {
 		if util.IsTrue(inst.Config[project.OneOffKey]) {
-			found = append(found, inst)
+			res, err := c.Resource(client.KindInstance, inst.Name, &client.InstanceConfig{})
+			if err != nil {
+				continue
+			}
+
+			instance, ok := res.(*client.Instance)
+			if !ok {
+				continue
+			}
+
+			_ = client.RunAction(ctx, instance, client.ActionEnsure)
+			found = append(found, instance)
 		}
 	}
 
@@ -683,34 +647,7 @@ func removeOneOffs(ctx context.Context, c *client.Client, timeout time.Duration)
 		return
 	}
 
-	conn, err := c.Connection()
-	if err != nil {
-		return
-	}
-
 	for _, inst := range instances {
-		if inst.StatusCode == incusApi.Running || inst.StatusCode == incusApi.Frozen {
-			op, err := conn.UpdateInstanceState(ctx, c.IncusProject(), inst.Name, incusApi.InstanceStatePut{
-				Action:  "stop",
-				Force:   true,
-				Timeout: int(timeout.Seconds()),
-			}, "")
-			if err == nil {
-				_, err = iclient.WaitOperation(ctx, op)
-			}
-
-			if err != nil {
-				c.LogWarn("Stopping a one-off", "instance", inst.Name, "error", err)
-			}
-		}
-
-		op, err := conn.DeleteInstance(ctx, c.IncusProject(), inst.Name)
-		if err == nil {
-			_, err = iclient.WaitOperation(ctx, op)
-		}
-
-		if err != nil {
-			c.LogWarn("Deleting a one-off", "instance", inst.Name, "error", err)
-		}
+		removeOneOff(ctx, c, inst, timeout)
 	}
 }
