@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -193,6 +194,13 @@ func newDownCommand() *cli.Command {
 				Name:    "rmi",
 				Usage:   `Remove images used by services. "local" for known images - all is currently the same as "local".`,
 				Sources: cli.EnvVars("INCUS_COMPOSE_DOWN_RMI"),
+				Validator: func(v string) error {
+					if v == "" || v == "local" || v == "all" {
+						return nil
+					}
+
+					return errors.New(`must be "local" or "all"`)
+				},
 			},
 			&cli.BoolFlag{
 				Name:    "images",
@@ -244,6 +252,17 @@ func newDownCommand() *cli.Command {
 			if err != nil {
 				globalClient.LogError("Configuring the project", "error", err)
 				return errLogged.Wrap(err)
+			}
+
+			if cmd.Args().Len() > 0 {
+				for _, s := range cmd.Args().Slice() {
+					_, ok := p.Services[s]
+					if !ok {
+						err := client.ErrNotFound.WithKindName(client.KindInstance, s)
+						globalClient.LogError("Service not found", "service", s)
+						return errLogged.Wrap(err)
+					}
+				}
 			}
 
 			usesHealthd := !cmd.Bool("no-healthd")

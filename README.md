@@ -189,9 +189,9 @@ Fixes and new features are greatly appreciated. Make sure to read our
 ## Credits
 
 incus-compose wouldn't be what it is without the people who tested it, filed
-reports, and pushed on ideas along the way: @alien43, @Sagi, @neitsab,
-@pyrodogg, @kgoetz, @edorgeville, @bburky, @blurry, @stgraber, @ishaan-jindal,
-@code-by-tanveer, @tallica, and @Tofil.
+reports, and pushed on ideas along the way: @alien43, @bburky, @blurry,
+@code-by-tanveer, @edorgeville, @ishaan-jindal, @kgoetz, @neitsab, @pikeas,
+@pyrodogg, @Sagi, @stgraber, and @Tofil.
 
 It also stands on a few libraries that make maintaining it far easier:
 
