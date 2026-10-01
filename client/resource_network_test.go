@@ -799,7 +799,7 @@ func TestCalcIPv4DHCPRange(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := calcIPv4DHCPRange(tt.cidr)
+			got, err := CalcIPv4DHCPRange(tt.cidr)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -844,7 +844,7 @@ func TestCalcIPv6DHCPRange(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := calcIPv6DHCPRange(tt.cidr)
+			got, err := CalcIPv6DHCPRange(tt.cidr)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -900,4 +900,45 @@ func TestNetworkEnsure_ConcurrentCreate(t *testing.T) {
 		require.NoError(t, err, i)
 		require.True(t, nets[i].IsEnsured(), i)
 	}
+}
+
+func TestNetworkPatchConfigEmpty(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	net := &Network{}
+	err := net.PatchConfig(ctx, nil)
+	require.NoError(t, err)
+
+	err = net.PatchConfig(ctx, map[string]string{})
+	require.NoError(t, err)
+}
+
+func TestNetworkPatchConfig(t *testing.T) {
+	skipLocal(t)
+	ctx := t.Context()
+
+	c := newRandomTestClient(t, "network-patch-")
+	name := "icnet" + strings.ToLower(shared.RandString(6))
+
+	r, err := c.Resource(KindNetwork, name, &NetworkConfig{OverrideName: name})
+	require.NoError(t, err)
+
+	net, ok := r.(*Network)
+	require.True(t, ok)
+
+	err = RunAction(ctx, net, ActionEnsure, OptionCreate())
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = RunAction(context.WithoutCancel(ctx), net, ActionDelete)
+	})
+
+	err = net.PatchConfig(ctx, map[string]string{
+		"user.custom_key": "custom_value",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, "custom_value", net.State().IncusNetwork.Config["user.custom_key"])
+	require.Equal(t, "custom_value", net.Config.Extensions["user.custom_key"])
 }

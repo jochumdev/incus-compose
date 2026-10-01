@@ -79,6 +79,13 @@ func (c *Connection) UpdateNetwork(ctx context.Context, project string, name str
 	return err
 }
 
+// PatchNetwork merges a network's configuration.
+func (c *Connection) PatchNetwork(ctx context.Context, project string, name string, network api.NetworkPut, etag string) error {
+	_, _, err := c.do(ctx, project, http.MethodPatch, incusNetworksPath+"/"+url.PathEscape(name), nil, network, etag)
+
+	return err
+}
+
 // DeleteNetwork removes a managed network.
 func (c *Connection) DeleteNetwork(ctx context.Context, project string, name string) error {
 	_, _, err := c.do(ctx, project, http.MethodDelete, incusNetworksPath+"/"+url.PathEscape(name), nil, nil, "")

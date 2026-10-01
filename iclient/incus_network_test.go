@@ -91,6 +91,20 @@ func TestIncusNetworkRequests(t *testing.T) {
 		require.Equal(t, "the-etag", req.etag, "a conditional update must carry If-Match")
 	})
 
+	t.Run("PatchNetwork sends the ETag", func(t *testing.T) {
+		t.Parallel()
+
+		conn, seen := recordingServer(t, `{}`)
+
+		err := conn.PatchNetwork(ctx, "myproject", "br0", api.NetworkPut{Config: map[string]string{"k": "v"}}, "the-etag")
+		require.NoError(t, err)
+
+		req := seen.all()[0]
+		require.Equal(t, http.MethodPatch, req.method)
+		require.Equal(t, "/1.0/networks/br0?project=myproject", req.uri())
+		require.Equal(t, "the-etag", req.etag, "a conditional update must carry If-Match")
+	})
+
 	t.Run("DeleteNetwork", func(t *testing.T) {
 		t.Parallel()
 

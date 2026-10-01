@@ -198,3 +198,33 @@ func TestNoHealthdWhenNotNeeded(t *testing.T) {
 	require.Nil(t, h)
 	require.Error(t, err)
 }
+
+func TestSidecarEnsureNetwork_GlobalDHCPRanges(t *testing.T) {
+	testlib.SkipLocal(t)
+	t.Parallel()
+
+	ctx := t.Context()
+	gc, err := client.NewTestClient(ctx)
+	require.NoError(t, err)
+
+	c, err := gc.EnsureProject(globalProject)
+	require.NoError(t, err)
+
+	ref := sidecarNetworkRef{
+		name:      globalHealthdNetwork,
+		deflt:     true,
+		incusName: globalHealthdNetwork,
+	}
+
+	net, err := sidecarEnsureNetwork(ctx, c, ref, "test")
+	require.NoError(t, err)
+	require.NotNil(t, net)
+
+	cfg := net.State().IncusNetwork.Config
+	require.NotEmpty(t, cfg["ipv4.address"])
+	require.NotEmpty(t, cfg["ipv4.dhcp.ranges"])
+
+	if net.State().IncusNetwork.Type == "bridge" && cfg["ipv6.address"] != "" && cfg["ipv6.address"] != "none" {
+		require.NotEmpty(t, cfg["ipv6.dhcp.ranges"])
+	}
+}

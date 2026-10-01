@@ -71,6 +71,9 @@ form.
 
 ### Changed
 
+- The global network `icompose0` now configures DHCP ranges after creation to
+  reserve addresses for static IP assignment. (by @jochumdev)
+
 - Require incus 7.0.2+ LTS or 7.5+ both unreleased at the time of writing, we
   need various recent bugfixes (by @jochumdev)
 

@@ -392,7 +392,7 @@ func networkCreateConfig(extensions map[string]string) (map[string]string, error
 	config := maps.Clone(extensions)
 
 	if addr := config["ipv4.address"]; addr != "" && addr != "none" && addr != "auto" && config["ipv4.dhcp.ranges"] == "" {
-		dhcpRange, err := calcIPv4DHCPRange(addr)
+		dhcpRange, err := CalcIPv4DHCPRange(addr)
 		if err != nil {
 			return nil, fmt.Errorf("calculating IPv4 DHCP range: %w", err)
 		}
@@ -400,7 +400,7 @@ func networkCreateConfig(extensions map[string]string) (map[string]string, error
 	}
 
 	if addr := config["ipv6.address"]; addr != "" && addr != "none" && addr != "auto" && config["ipv6.dhcp.ranges"] == "" {
-		dhcpRange, err := calcIPv6DHCPRange(addr)
+		dhcpRange, err := CalcIPv6DHCPRange(addr)
 		if err != nil {
 			return nil, fmt.Errorf("calculating IPv6 DHCP range: %w", err)
 		}
@@ -475,6 +475,62 @@ func (r *Network) Delete(ctx context.Context, opts ...Option) error {
 
 	r.client.resources.Remove(r)
 	return r.client.hookAfter(ctx, ActionDelete, r, options, err)
+}
+
+// PatchConfig merges config keys into the network configuration on Incus.
+func (r *Network) PatchConfig(ctx context.Context, config map[string]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(config) == 0 {
+		return nil
+	}
+
+	conn, err := r.client.GlobalConnection()
+	if err != nil {
+		return err
+	}
+
+	err = retry.New(
+		retry.Context(ctx),
+		retry.Attempts(10),
+		retry.Delay(100*time.Millisecond),
+		retry.DelayType(retry.FixedDelay),
+		retry.LastErrorOnly(true),
+		retry.RetryIf(isConcurrencyConflict),
+	).Do(func() error {
+		net, etag, readErr := conn.GetNetwork(ctx, r.incusProject(), r.incusName)
+		if readErr != nil {
+			return readErr
+		}
+
+		put := incusApi.NetworkPut{
+			Description: net.Description,
+			Config:      config,
+		}
+
+		updateErr := conn.PatchNetwork(ctx, r.incusProject(), r.incusName, put, etag)
+		if updateErr != nil {
+			return updateErr
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("patching network %q config: %w", r.Name(), err)
+	}
+
+	if r.Config.Extensions == nil {
+		r.Config.Extensions = make(map[string]string)
+	}
+	maps.Copy(r.Config.Extensions, config)
+
+	err = r.get(ctx)
+	if err != nil {
+		return fmt.Errorf("refreshing network %q state: %w", r.Name(), err)
+	}
+
+	return nil
 }
 
 // isConcurrencyConflict reports whether err is a transient concurrency conflict:
@@ -655,11 +711,8 @@ func shortNetworkName(prefix, full string) string {
 	return prefix + encoded[:networkNameHashLen]
 }
 
-// calcIPv4DHCPRange calculates an Incus-format DHCP range for an IPv4 bridge network.
-// The first quarter of the address block (1 << (hostBits-2)) is reserved for static
-// assignment; DHCP starts at that boundary and runs to the last usable address.
-// Returns a range string in "FIRST-LAST" format.
-func calcIPv4DHCPRange(cidr string) (string, error) {
+// CalcIPv4DHCPRange calculates an Incus-format DHCP range for an IPv4 bridge network.
+func CalcIPv4DHCPRange(cidr string) (string, error) {
 	prefix, err := netip.ParsePrefix(cidr)
 	if err != nil {
 		return "", fmt.Errorf("parsing IPv4 CIDR %q: %w", cidr, err)
@@ -683,10 +736,8 @@ func calcIPv4DHCPRange(cidr string) (string, error) {
 	return fmt.Sprintf("%s-%s", dhcpStart, dhcpEnd), nil
 }
 
-// calcIPv6DHCPRange calculates an Incus-format DHCP range for an IPv6 bridge network.
-// The first 256 addresses (::0-::ff) are reserved for static assignment.
-// Returns a range string in "FIRST-LAST" format.
-func calcIPv6DHCPRange(cidr string) (string, error) {
+// CalcIPv6DHCPRange calculates an Incus-format DHCP range for an IPv6 bridge network.
+func CalcIPv6DHCPRange(cidr string) (string, error) {
 	prefix, err := netip.ParsePrefix(cidr)
 	if err != nil {
 		return "", fmt.Errorf("parsing IPv6 CIDR %q: %w", cidr, err)

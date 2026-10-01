@@ -480,6 +480,7 @@ func TestE2EUpgradeNonOVNToOVN(t *testing.T) {
 	net, _, err := conn.GetNetwork(ctx, globalProject, globalHealthdNetwork)
 	require.NoError(t, err)
 	assert.Equal(t, "ovn", net.Type, "icompose0 must be an OVN network")
+	assert.NotEmpty(t, net.Config["ipv4.dhcp.ranges"], "icompose0 must have ipv4.dhcp.ranges configured")
 
 	dc := projectClient(ctx, t, globalProject)
 	global, err := dc.InstanceExists(globalHealthdName)

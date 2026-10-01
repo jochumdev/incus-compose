@@ -58,6 +58,44 @@ func sidecarEnsureNetwork(ctx context.Context, c *client.Client, ref sidecarNetw
 		return nil, client.ErrNotEnsured.WithResource(network)
 	}
 
+	if network.IncusName() == globalHealthdNetwork {
+		patch := map[string]string{}
+		cfg := network.State().IncusNetwork.Config
+		if cfg == nil {
+			cfg = map[string]string{}
+		}
+
+		if addr := cfg["ipv4.address"]; addr != "" && addr != "none" && cfg["ipv4.dhcp.ranges"] == "" {
+			dhcpRange, err := client.CalcIPv4DHCPRange(addr)
+			if err != nil {
+				return nil, fmt.Errorf("calculating IPv4 DHCP range for %s: %w", network.IncusName(), err)
+			}
+
+			patch["ipv4.dhcp.ranges"] = dhcpRange
+		}
+
+		if network.State().IncusNetwork.Type == "bridge" {
+			if addr := cfg["ipv6.address"]; addr != "" && addr != "none" && cfg["ipv6.dhcp.ranges"] == "" {
+				dhcpRange, err := client.CalcIPv6DHCPRange(addr)
+				if err != nil {
+					return nil, fmt.Errorf("calculating IPv6 DHCP range for %s: %w", network.IncusName(), err)
+				}
+
+				patch["ipv6.dhcp.ranges"] = dhcpRange
+				if cfg["ipv6.dhcp.stateful"] == "" {
+					patch["ipv6.dhcp.stateful"] = "true"
+				}
+			}
+		}
+
+		if len(patch) > 0 {
+			err = network.PatchConfig(ctx, patch)
+			if err != nil {
+				return nil, fmt.Errorf("configuring DHCP ranges for %s: %w", network.IncusName(), err)
+			}
+		}
+	}
+
 	return network, nil
 }
 
