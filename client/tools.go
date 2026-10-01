@@ -284,6 +284,24 @@ func copyTools(ctx context.Context, c *Client, sys *Client, master *StorageVolum
 		return vol, nil
 	}
 
+	release, err := c.Global().Lock(ctx, "tools/copy/"+c.IncusProject(), toolsLockStale)
+	if err != nil {
+		return nil, ErrCreate.WithText("locking tools volume copy for " + c.IncusProject()).Wrap(err)
+	}
+	defer release()
+
+	sc, err = vol.SFTP(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = sc.Stat(helper)
+	c.WarnError(sc.Close, "Failed to close the tools volume connection")
+
+	if err == nil {
+		return vol, nil
+	}
+
 	conn, err := c.Connection()
 	if err != nil {
 		return nil, err
