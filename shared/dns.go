@@ -13,6 +13,9 @@ const (
 	// DNSZoneKey is the project config key setting the DNS zone.
 	DNSZoneKey = "user.label.dns.zone"
 
+	// DNSTransferKey is the project config key opting a project into zone transfers.
+	DNSTransferKey = "user.label.dns.transfer"
+
 	DNSScopeProject = "project"
 	DNSScopeGlobal  = "global"
 )

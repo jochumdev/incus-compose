@@ -335,6 +335,7 @@ func newUpCommand() *cli.Command {
 					Timeout: cmd.Duration("timeout"),
 					Workers: cmd.Root().Int("workers"),
 					Debug:   cmd.Root().Bool("debug"),
+					Trace:   cmd.Root().Bool("trace"),
 					Writer:  cmd.Root().Writer,
 				})
 				if err != nil {
@@ -356,7 +357,11 @@ func newUpCommand() *cli.Command {
 						zone = p.Name + "." + project.DefaultDNSZoneSuffix
 					}
 				}
-				err = c.Global().UpdateProjectConfig(p.Name, map[string]string{shared.DNSZoneKey: zone})
+				dnsProjectConfig := map[string]string{shared.DNSZoneKey: zone}
+				if p.ClientConfig.DNS.Transfer || len(p.ClientConfig.DNS.AllowTransfer) > 0 {
+					dnsProjectConfig[shared.DNSTransferKey] = "true"
+				}
+				err = c.Global().UpdateProjectConfig(p.Name, dnsProjectConfig)
 				if err != nil {
 					c.LogError("Updating project dns zone", "error", err)
 					return errLogged.Wrap(err)

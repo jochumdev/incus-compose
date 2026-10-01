@@ -227,13 +227,15 @@ type XICHealthd struct {
 
 // XICDNS is the x-incus-compose.dns block.
 type XICDNS struct {
-	Disabled    bool   `mapstructure:"disabled"`
-	Network     string `mapstructure:"network"`
-	IPv4Address string `mapstructure:"ipv4_address"`
-	IPv6Address string `mapstructure:"ipv6_address"`
-	NoMetrics   bool   `mapstructure:"no_metrics"`
-	Scope       string `mapstructure:"scope"`
-	Zone        string `mapstructure:"zone"`
+	Disabled      bool     `mapstructure:"disabled"`
+	Network       string   `mapstructure:"network"`
+	IPv4Address   string   `mapstructure:"ipv4_address"`
+	IPv6Address   string   `mapstructure:"ipv6_address"`
+	NoMetrics     bool     `mapstructure:"no_metrics"`
+	Scope         string   `mapstructure:"scope"`
+	Zone          string   `mapstructure:"zone"`
+	AllowTransfer []string `mapstructure:"allow_transfer"`
+	Transfer      bool     `mapstructure:"transfer"`
 }
 
 // DefaultDNSZoneSuffix is the default TLD suffix used when no zone is specified.
@@ -305,13 +307,15 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			} `mapstructure:"healthd"`
 
 			DNS struct {
-				Disabled    bool   `mapstructure:"disabled"`
-				Network     string `mapstructure:"network"`
-				IPv4Address string `mapstructure:"ipv4_address"`
-				IPv6Address string `mapstructure:"ipv6_address"`
-				NoMetrics   bool   `mapstructure:"no_metrics"`
-				Scope       string `mapstructure:"scope"`
-				Zone        string `mapstructure:"zone"`
+				Disabled      bool     `mapstructure:"disabled"`
+				Network       string   `mapstructure:"network"`
+				IPv4Address   string   `mapstructure:"ipv4_address"`
+				IPv6Address   string   `mapstructure:"ipv6_address"`
+				NoMetrics     bool     `mapstructure:"no_metrics"`
+				Scope         string   `mapstructure:"scope"`
+				Zone          string   `mapstructure:"zone"`
+				AllowTransfer []string `mapstructure:"allow_transfer"`
+				Transfer      bool     `mapstructure:"transfer"`
 			} `mapstructure:"dns"`
 
 			Network struct {
@@ -349,6 +353,12 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.DNS.NoMetrics = ext.DNS.NoMetrics
 			p.ClientConfig.DNS.Scope = ext.DNS.Scope
 			p.ClientConfig.DNS.Zone = ext.DNS.Zone
+
+			p.ClientConfig.DNS.AllowTransfer = ext.DNS.AllowTransfer
+			p.ClientConfig.DNS.Transfer = ext.DNS.Transfer
+			if len(p.ClientConfig.DNS.AllowTransfer) > 0 {
+				p.ClientConfig.DNS.Transfer = true
+			}
 			if !p.ClientConfig.DNS.Disabled && p.ClientConfig.DNS.Zone == "" {
 				p.ClientConfig.DNS.Zone = p.Name + "." + DefaultDNSZoneSuffix
 			}

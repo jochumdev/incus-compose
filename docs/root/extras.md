@@ -387,21 +387,25 @@ x-incus-compose:
     ipv4_address: 10.0.0.2
     ipv6_address: fd42::2
     no_metrics: false
+    allow_transfer:
+      - 192.168.1.0/24
 
 services:
   web:
     image: docker.io/nginx:alpine
 ```
 
-| Key            | Description                                                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `disabled`     | Set to `true` to disable DNS sidecar creation and DNS configuration for the project. Equivalent to `--no-dns` on `up`.             |
-| `scope`        | `global` (one shared daemon in the Incus `incus-compose` project, the default) or `project` (a sidecar dedicated to this project). |
-| `zone`         | Custom DNS zone domain for the project, replacing the default `<project>.incus`.                                                   |
-| `network`      | Network attachment for the DNS sidecar. Defaults to the project bridge/network.                                                    |
-| `ipv4_address` | Static IPv4 address assigned to the DNS sidecar instance.                                                                          |
-| `ipv6_address` | Static IPv6 address assigned to the DNS sidecar instance.                                                                          |
-| `no_metrics`   | Disable Prometheus metrics endpoint on the DNS sidecar.                                                                            |
+| Key              | Description                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`       | Set to `true` to disable DNS sidecar creation and DNS configuration for the project. Equivalent to `--no-dns` on `up`.                                                                |
+| `scope`          | `global` (one shared daemon in the Incus `incus-compose` project, the default) or `project` (a sidecar dedicated to this project).                                                    |
+| `zone`           | Custom DNS zone domain for the project, replacing the default `<project>.incus`.                                                                                                      |
+| `network`        | Network attachment for the DNS sidecar. Defaults to the project bridge/network.                                                                                                       |
+| `ipv4_address`   | Static IPv4 address assigned to the DNS sidecar instance.                                                                                                                             |
+| `ipv6_address`   | Static IPv6 address assigned to the DNS sidecar instance.                                                                                                                             |
+| `no_metrics`     | Disable Prometheus metrics endpoint on the DNS sidecar.                                                                                                                               |
+| `allow_transfer` | CIDR prefix(es) permitted to perform zone transfers (AXFR/IXFR). Configures `--allow-transfer` on the sidecar and automatically stamps `user.label.dns.transfer=true` on the project. |
+| `transfer`       | Explicitly opt the project zone into transfers (`user.label.dns.transfer=true`) without configuring sidecar CIDRs (useful when sharing a global sidecar).                             |
 
 See [DNS (ic-dns)](/dns) for details on split-horizon resolution and DNS
 configuration.

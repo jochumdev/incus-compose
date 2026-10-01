@@ -2,18 +2,20 @@
 date: 2026-08-28T01:33:50Z
 dateCreated: 2026-08-14T11:46:35Z
 leafwiki_id: BMZeYtUDg
-leafwiki_title: dns
+leafwiki_title: DNS Architecture & Daemon Internals (ic-dns)
 leafwiki_created_at: "2026-08-14T11:46:35Z"
 leafwiki_updated_at: "2026-08-28T01:33:50Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---
 
-# dns
+# DNS Architecture & Daemon Internals (ic-dns)
 
-The DNS half of the chain: it folds events into records and answers queries from
-them. What it serves for an operator is [[dns|the ic-dns page]]; this is how it
-is built.
+The DNS half of the event chain: it folds Incus lifecycle events into DNS
+records and answers queries from them. User-facing configuration and compose
+usage is documented on the main [DNS](/dns) page; this document covers how
+`ic-dns` is built, its plugin chain, and how to run the standalone daemon
+directly.
 
 ## A Plugin Owns What It Serves
 
@@ -301,6 +303,89 @@ without either plugin knowing the other exists.
 
 Edges rather than a level, so whoever folds them starts not-ready - the truth
 before anything has been read.
+
+## Running the daemon directly
+
+`incus-compose up` creates the `ic-dns` sidecar and manages its lifecycle
+automatically. You can also run the `ic-dns run` binary yourself — on the host
+or inside a custom container — and configure it using the CLI flags or
+environment variables below.
+
+Every flag has a matching environment variable:
+
+### Connecting To Incus
+
+| Flag                             | Env                                             | Default              | Description                                                |
+| -------------------------------- | ----------------------------------------------- | -------------------- | ---------------------------------------------------------- |
+| `--incus`                        | `INCUS_COMPOSE_DNS_INCUS`                       |                      | URL of the Incus API                                       |
+| `--token`                        | `INCUS_COMPOSE_DNS_TOKEN`                       |                      | One-time trust token                                       |
+| `--data-dir`                     | `INCUS_COMPOSE_DNS_DATA_DIR`                    | `/var/lib/dns-incus` | Persistent directory for certificates and cold-start state |
+| `--secrets-dir`                  | `INCUS_COMPOSE_DNS_SECRETS_DIR`                 | `/run/secrets`       | Directory holding trust tokens                             |
+| `--client-cert` / `--client-key` | `INCUS_COMPOSE_DNS_CLIENT_CERT` / `_KEY`        |                      | Client certificate and key for authentication              |
+| `--restricted`                   | `INCUS_COMPOSE_DNS_RESTRICTED`                  | `false`              | Enroll confined to `--project`                             |
+| `--remote` / `--use-remote`      | `INCUS_REMOTE` / `INCUS_COMPOSE_DNS_USE_REMOTE` |                      | Connect using an existing remote from Incus CLI config     |
+
+### Choosing What To Serve
+
+| Flag               | Env                                | Default                       | Description                                 |
+| ------------------ | ---------------------------------- | ----------------------------- | ------------------------------------------- |
+| `--suffix`         | `INCUS_COMPOSE_DNS_SUFFIX`         | `incus`                       | TLD used for default project zones          |
+| `--project`        | `INCUS_COMPOSE_DNS_PROJECTS`       |                               | Comma-separated list of projects to serve   |
+| `--project-marker` | `INCUS_COMPOSE_DNS_PROJECT_MARKER` | `user.label.dns.scope=global` | Project label marker that opts a project in |
+
+### Where To Listen
+
+| Flag               | Env                                                       | Default | Description                                                   |
+| ------------------ | --------------------------------------------------------- | ------- | ------------------------------------------------------------- |
+| `--listen`         | `INCUS_COMPOSE_DNS_LISTEN`                                | `:53`   | DNS listen address (UDP and TCP)                              |
+| `--allow-transfer` | `INCUS_COMPOSE_DNS_ALLOW_TRANSFER` / `DNS_ALLOW_TRANSFER` |         | CIDR(s) that may ask for a zone transfer; empty allows nobody |
+| `--http`           | `INCUS_COMPOSE_DNS_HTTP`                                  | `:9153` | HTTP endpoint address (`/metrics`, `/health`, `/ready`)       |
+| `--forward`        | `INCUS_COMPOSE_DNS_FORWARD`                               |         | Upstream DNS server(s) for unresolved external domains        |
+
+### Tuning The Chain
+
+| Flag                    | Env                                     | Default | Description                                               |
+| ----------------------- | --------------------------------------- | ------- | --------------------------------------------------------- |
+| `--ttl`                 | `INCUS_COMPOSE_DNS_TTL`                 | `5`     | TTL (in seconds) for served records (up to 3600)          |
+| `--debounce-window`     | `INCUS_COMPOSE_DNS_DEBOUNCE_WINDOW`     | `250ms` | Quiet period before flushing burst updates                |
+| `--workers`             | `INCUS_COMPOSE_DNS_WORKERS`             | `16`    | Parallel Incus API read workers                           |
+| `--read-timeout`        | `INCUS_COMPOSE_DNS_READ_TIMEOUT`        | `10s`   | Timeout budget for single Incus reads                     |
+| `--sweep-project-delay` | `INCUS_COMPOSE_DNS_SWEEP_PROJECT_DELAY` | `30s`   | Delay between consecutive project sweeps                  |
+| `--sweep-read-delay`    | `INCUS_COMPOSE_DNS_SWEEP_READ_DELAY`    | `5s`    | Delay between instance reads in a sweep                   |
+| `--echo-subnet`         | `INCUS_COMPOSE_DNS_ECHO_SUBNET`         | `false` | Echo back RFC 7871 client subnet                          |
+| `--exclude`             | `INCUS_COMPOSE_DNS_EXCLUDE`             |         | Chain position(s) to leave out (`debounce`, `http`, etc.) |
+| `--log`                 | `INCUS_COMPOSE_DNS_LOG`                 | `INFO`  | Log level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`)     |
+
+`--ttl` is short on purpose. A fleet moves, and a resolver that cached an
+address for an hour is one handing out an address that has been reassigned.
+
+`--exclude` takes `debounce`, `http` and the log positions. The enricher and
+`dns` may not go: without the enricher nothing is ever read, and the process
+would start, answer, and serve nothing.
+
+## HTTP Endpoints & Liveness
+
+| Path       | Description                                                                     |
+| ---------- | ------------------------------------------------------------------------------- |
+| `/metrics` | Prometheus metrics for all CoreDNS and ievent plugins                           |
+| `/health`  | Liveness check (stream is connected and has processed events recently)          |
+| `/ready`   | Readiness check (fleet has been fully enumerated and the event stream is alive) |
+
+The two answer different questions on purpose. The only sensible response to
+`/health` failing is a restart, and a restart does not fix an Incus that is down
+— it throws away everything held and answers nothing until the fleet has been
+re-read. So **a lost stream is unready, never unhealthy.**
+
+A round does not make it unready. One is always running and the server answers
+from what it published last throughout, so `/ready` stays up and nothing pulls
+the process out of rotation for it.
+
+The fleet is read a name at a time rather than all at once, so those two delays
+are what decides how long a change nothing announced goes unnoticed: roughly
+`--sweep-read-delay` times how many instances there are. There is no safe
+direction: long leaves a wider window for a quirk; short pays for the round and
+the event stream at the same time. The first round after a start or a reconnect
+ignores both and runs flat out, because nothing is served until it lands.
 
 ## Known Gaps
 

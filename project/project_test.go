@@ -853,6 +853,41 @@ services:
 				Zone: "my.internal.lan",
 			},
 		},
+		{
+			name: "allow_transfer list",
+			yaml: `
+name: myproject
+x-incus-compose:
+  dns:
+    allow_transfer:
+      - 10.0.0.0/24
+      - 192.168.1.53/32
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Zone:          "myproject.incus",
+				AllowTransfer: []string{"10.0.0.0/24", "192.168.1.53/32"},
+				Transfer:      true,
+			},
+		},
+		{
+			name: "transfer boolean",
+			yaml: `
+name: myproject
+x-incus-compose:
+  dns:
+    transfer: true
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Zone:     "myproject.incus",
+				Transfer: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -341,7 +341,7 @@ func newRootCommand() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:    "trace",
-				Usage:   `Enable per-event logging, which implies --debug. Only ic-healthd reads it so far`,
+				Usage:   `Enable per-event logging, which implies --debug`,
 				Sources: cli.EnvVars("INCUS_COMPOSE_TRACE"),
 			},
 			&cli.IntFlag{

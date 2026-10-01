@@ -20,9 +20,9 @@ the chain: wherever this sits, it sees what was dropped and by whom.
 
 Which makes it the one plugin worth listing **more than once** - before
 [[developer/ievent/debounce|debounce]] it reports what Incus sent, and after
-[[developer/ievent/dns|dns]] it reports what became of each one. A line per
-position is how you see ordering and what a position cost, and it is noise
-otherwise, which is why `--trace` adds positions rather than raising a level.
+[[developer/dns|dns]] it reports what became of each one. A line per position is
+how you see ordering and what a position cost, and it is noise otherwise, which
+is why `--trace` adds positions rather than raising a level.
 
 Listing it multiple times means separate constructions, not one value listed
 repeatedly - that would have `Setup` called on it multiple times and a later

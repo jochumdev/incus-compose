@@ -10,271 +10,332 @@ leafwiki_creator_id: system
 leafwiki_last_author_id: public-editor
 ---
 
-# DNS
+# DNS (ic-dns)
 
-DNS for an Incus fleet, sourced from the Incus API and kept current by its event
-stream. One zone per project, no zone files, no reload.
+`incus-compose` provides automatic, real-time DNS resolution for your compose
+fleet through the `ic-dns` sidecar. Sourced directly from the Incus API and kept
+synchronized by its event stream, it delivers split-horizon DNS with one zone
+per project — without manual zone files or server reloads.
 
-**Answers depend on who is asking.** An instance resolves only the names it
-shares a network with, and the answer holds only their addresses on those
-networks. A name it cannot reach is NXDOMAIN rather than an address that times
-out.
+> **Enabled by default.** When you run `incus-compose up`, the tool
+> automatically brings up `ic-dns`, assigns the project zone
+> (`<project>.incus`), and sets `oci.dns.nameservers` and `oci.dns.search` on
+> every instance. All services and containers can resolve each other out of the
+> box.
 
-## Why The Answer Differs Per Querier
+```mermaid
+flowchart TD
+    subgraph Incus["Incus Host"]
+        API["Incus API & Lifecycle Events"]
+    end
 
-An Incus fleet is not one flat network. A project has its own bridges, an
-instance sits on some of them, and two instances that share none cannot reach
-each other at all. A single answer for a name is therefore wrong for somebody:
-it either hands out an address the client cannot route to, or it names a host it
-has no business seeing.
+    subgraph Sidecar["DNS Sidecar (ic-dns)"]
+        ENRICHER["ievent Enricher / Cache"]
+        DNS["CoreDNS Server (:53)"]
+        ENRICHER -->|"real-time zone updates"| DNS
+    end
 
-So a querier is placed on the set of networks it sits on, and a multi-homed host
-is answered on the wire it shares with the client.
+    subgraph Project["Compose Project Network"]
+        CLIENT["client instance"]
+        WEB["web instance (10.90.190.10)"]
+    end
 
-It fails closed. A querier that lands on no known network is refused, and a name
-that exists but is invisible answers NXDOMAIN rather than NODATA, so response
-codes leak nothing about what else is out there.
+    API -->|"lifecycle event stream"| ENRICHER
+    CLIENT -->|"1. DNS query: web.shop.incus"| DNS
+    DNS -->|"2. Answer: 10.90.190.10"| CLIENT
+    CLIENT -.->|"3. Direct connection"| WEB
+```
 
-### How The Querier Is Identified
+---
 
-Two ways, in this order:
+## Quick Start & Management (`incus-compose dns *`)
 
-1. **[EDNS0 Client Subnet](https://datatracker.ietf.org/doc/html/rfc7871)**,
-   when the query carries one. Incus's own dnsmasq fills it in with
-   `add-subnet=32,128`.
-2. **The query's source address**, when it does not - which is the case when an
-   instance's `resolv.conf` names this server directly.
+Manage the `ic-dns` sidecar directly using the `incus-compose dns` command
+group:
 
-The order matters: whatever forwarded the query has already replaced the source
-address with its own, so a client subnet is the only truth when one is present.
+| Command                                   | Description                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| [`incus-compose dns status`](#dns-status) | Print the status, IP addresses, readiness, and metrics of `ic-dns` |
+| [`incus-compose dns logs`](#dns-logs)     | Stream or inspect the `ic-dns` sidecar container logs              |
+| [`incus-compose dns up`](#dns-up)         | Create or recreate the `ic-dns` sidecar container                  |
+| [`incus-compose dns down`](#dns-down)     | Stop and remove the `ic-dns` sidecar container                     |
 
-Worth knowing: **a client subnet is asserted by whoever sends it.** Anything
-that can reach the server can claim to be any client. Reaching the server is the
-real boundary, which is why this belongs on a network only its clients are on.
+### Common CLI Operations
+
+Check if the DNS sidecar is running and ready:
+
+```bash
+incus-compose dns status
+```
+
+```text
+Status: ready
+IPv4: 10.90.190.53
+IPv6: fd42::53
+```
+
+Include Prometheus metrics in the status report:
+
+```bash
+incus-compose dns status --metrics
+```
+
+Stream live queries and events from the daemon:
+
+```bash
+incus-compose dns logs --follow
+```
+
+Explicitly spin up or recreate the daemon (e.g. after updating an image or
+config):
+
+```bash
+incus-compose dns up
+```
+
+Recreate the daemon with trace-level logging:
+
+```bash
+incus-compose --trace dns up
+```
+
+Stop and tear down the sidecar:
+
+```bash
+incus-compose dns down
+```
+
+Opt out of DNS during stack deployment:
+
+```bash
+incus-compose up --no-dns
+```
+
+---
+
+## Compose Configuration (`x-incus-compose.dns`)
+
+Configure DNS behavior directly in your `compose.yaml` using the top-level
+`x-incus-compose.dns` extension:
+
+```yaml
+x-incus-compose:
+  dns:
+    disabled: false
+    scope: global
+    zone: shop.example.org
+    network: custom-net
+    ipv4_address: 10.0.0.2
+    ipv6_address: fd42::2
+    no_metrics: false
+    allow_transfer:
+      - 192.168.1.0/24
+      - 10.0.0.53/32
+
+services:
+  web:
+    image: docker.io/nginx:alpine
+    networks:
+      default:
+        aliases:
+          - api.shop.example.org
+
+  client:
+    image: docker.io/busybox:glibc
+    command: ["sleep", "infinity"]
+```
+
+### Options Reference
+
+| Key              | Type            | Default           | Description                                                                                                                                                                           |
+| ---------------- | --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`       | boolean         | `false`           | Disable DNS sidecar creation and DNS configuration for the project. Equivalent to `--no-dns` on `incus-compose up`.                                                                   |
+| `scope`          | string          | `global`          | Sidecar lifecycle scope: `global` (one shared daemon in the `incus-compose` project) or `project` (a dedicated sidecar scoped to this project).                                       |
+| `zone`           | string          | `<project>.incus` | Custom DNS zone domain for the project, replacing the default `<project>.<suffix>`.                                                                                                   |
+| `network`        | string          | project network   | Network attachment for the DNS sidecar.                                                                                                                                               |
+| `ipv4_address`   | string          | auto              | Static IPv4 address assigned to the DNS sidecar instance.                                                                                                                             |
+| `ipv6_address`   | string          | auto              | Static IPv6 address assigned to the DNS sidecar instance.                                                                                                                             |
+| `no_metrics`     | boolean         | `false`           | Disable the HTTP Prometheus `/metrics` endpoint on the sidecar.                                                                                                                       |
+| `allow_transfer` | list of strings | `[]`              | CIDR prefix(es) permitted to perform zone transfers (AXFR/IXFR). Configures `--allow-transfer` on the sidecar and automatically stamps `user.label.dns.transfer=true` on the project. |
+| `transfer`       | boolean         | `false`           | Explicitly opt the project zone into transfers (`user.label.dns.transfer=true`) without configuring sidecar CIDRs (useful when sharing a global sidecar).                             |
+
+---
 
 ## Names An Instance Answers To
 
-| Name                                   | When                                                              |
-| -------------------------------------- | ----------------------------------------------------------------- |
-| `<instance>.<zone>`                    | always                                                            |
-| `<service>.<zone>`                     | `user.label.incus-compose.service`, else `user.label.dns.service` |
-| `<alias>.<zone>`, or any absolute name | `user.label.dns.aliases`, as a CNAME onto `<instance>.<zone>`     |
-| `in-addr.arpa` / `ip6.arpa`            | every address inside its own network's prefixes                   |
+| Name                                   | When                                                              | Description                                |
+| -------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
+| `<instance>.<zone>`                    | always                                                            | Individual instance name                   |
+| `<service>.<zone>`                     | `user.label.incus-compose.service`, else `user.label.dns.service` | Resolves to all replicas of that service   |
+| `<alias>.<zone>`, or any absolute name | `user.label.dns.aliases`, or compose `aliases`                    | CNAME pointing to `<instance>.<zone>`      |
+| `in-addr.arpa` / `ip6.arpa`            | every address inside its own network's prefixes                   | Reverse lookup returning the instance FQDN |
 
-`<zone>` is `<project>.<suffix>`, `--suffix` being `incus` unless changed.
+`<zone>` defaults to `<project>.<suffix>`, where `--suffix` is `incus` unless
+changed.
 
-A service name resolves to every replica carrying it, which is what makes a
-scaled service resolvable at all. A PTR names the instance and never the
-service: a reverse lookup wants the one name that names this host alone.
+A service name resolves to every replica carrying it, enabling round-robin load
+distribution across scaled instances. A PTR record always resolves to the unique
+instance name rather than the service name.
 
-Only subnets holding an instance are answered for. A reverse query into a bridge
-nothing sits on falls through to `--forward` rather than answering NXDOMAIN for
-a fleet this server knows nothing about.
+---
+
+## Why Answers Differ Per Querier (Split-Horizon)
+
+An Incus fleet is not one flat network. A project has its own bridges or OVN
+networks, an instance sits on some of them, and two instances that share no
+network cannot reach each other. A single static answer for a name would either
+hand out an unreachable IP address or leak the existence of hosts across project
+boundaries.
+
+- **Queriers resolve what they share**: An instance is answered only with
+  addresses on networks it shares with the target host.
+- **Fail-closed security**: If a querier sits on no known network or attempts to
+  query a host it cannot reach, `ic-dns` returns `NXDOMAIN` rather than `NODATA`
+  or timing out. Response codes leak nothing about other existing
+  infrastructure.
+
+```mermaid
+sequenceDiagram
+    participant ClientA as Client A (shares net1)
+    participant ClientB as Client B (on net2)
+    participant DNS as ic-dns
+    participant Web as Web (on net1)
+
+    Note over ClientA,Web: Client A shares net1 with Web
+    ClientA->>DNS: Query A web.shop.incus
+    DNS-->>ClientA: Answer: 10.90.1.10 (routable)
+    ClientA->>Web: Connect to 10.90.1.10
+
+    Note over ClientB,Web: Client B shares no network with Web
+    ClientB->>DNS: Query A web.shop.incus
+    DNS-->>ClientB: NXDOMAIN (fail-closed, no leak)
+```
+
+### How The Querier Is Identified
+
+1. **[EDNS0 Client Subnet (RFC 7871)](https://datatracker.ietf.org/doc/html/rfc7871)**,
+   when the query carries one. Incus's internal dnsmasq forwards queries with
+   `add-subnet=32,128`.
+2. **The query's source address**, when no subnet is present (such as when an
+   instance's `resolv.conf` targets `ic-dns` directly).
+
+---
 
 ## Labels That Configure DNS
 
-Everything lives under `user.label.dns.*`. Nothing has to be labelled for this
-to work.
+DNS behavior can also be controlled at the Incus project and instance level
+using `user.label.dns.*` keys:
 
-| Key       | Set on   | Meaning                                                                                               |
-| --------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `scope`   | project  | opts the project in - see [Which Projects Are Served](#which-projects-are-served)                     |
-| `zone`    | project  | the full zone name, replacing `<project>.<suffix>`                                                    |
-| `ns`      | project  | comma-separated NS names for the zone - see [Naming Your Own NS Servers](#naming-your-own-ns-servers) |
-| `service` | instance | an extra name every replica carrying it answers to                                                    |
-| `aliases` | instance | comma-separated extra names, each a CNAME                                                             |
+| Key        | Set on   | Meaning                                                                                            |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `scope`    | project  | Opts the project in (`global` or `project`)                                                        |
+| `zone`     | project  | The full zone name, replacing `<project>.<suffix>`                                                 |
+| `ns`       | project  | Comma-separated NS names for the zone                                                              |
+| `transfer` | project  | Opts the zone into AXFR and IXFR zone transfers (see [Zone Transfers](#zone-transfers-axfr--ixfr)) |
+| `service`  | instance | An extra service name every replica carrying it answers to                                         |
+| `aliases`  | instance | Comma-separated extra names, each created as a CNAME                                               |
 
 ```bash
 incus project set shop user.label.dns.scope=global
 incus project set shop user.label.dns.zone=shop.example.org
+incus project set shop user.label.dns.transfer=true
 incus config set web user.label.dns.service=api --project shop
 incus config set web user.label.dns.aliases=alias1,me.example.com. --project shop
 ```
 
-A project's keys come from `incus project set` and never from its default
-profile, whose keys every instance already carries expanded - so a project-wide
-setting would have nowhere of its own to live.
-
-A project's labels are defaults its instances override, except `aliases`, which
-does not inherit at all: one name claimed by every instance in a project is a
-collision rather than a setting.
-
-An empty value turns a label off again rather than reading as a blank name,
-which is how an instance escapes what a profile handed it.
-
-`user.label.incus-compose.service` is the one key outside our namespace that is
-read, and it wins over `user.label.dns.service`: a compose fleet is named by the
-compose file that owns it, so a stack resolves without being labelled twice.
-
 ### Naming Your Own NS Servers
-
-Without `ns`, the zone's apex NS answers with a placeholder name nothing
-resolves - harmless for a stub resolver, since it never reads an NS record, but
-wrong the moment the zone is transferred or delegated: a secondary publishes
-whatever NS set it was sent, and a resolver reaching this server by delegation
-has to be able to find it.
 
 ```bash
 incus project set shop user.label.dns.ns=ns1.example.org.,ns2.example.org.
 ```
 
-Same rule as `aliases`: a trailing dot is absolute, anything else is relative to
-the zone. Two projects resolving to one zone name union their `ns` sets, the
-same way they union into one zone.
-
-Naming this server itself only works where it is reachable from wherever the
-zone is answered - true for a routed address (BGP-announced, for instance), not
-for one behind a private bridge. There is no discovery: whoever transfers or
-delegates a zone has to already know its name servers, same as configuring any
-other authoritative DNS.
+A trailing dot denotes an absolute domain name; without a trailing dot, names
+are relative to the zone.
 
 ### Aliases Add Extra Names
 
 A name ending in a dot is absolute; anything else is relative to the instance's
-zone - the rule a zone file uses. `web` in project `shop` with the label above
-answers to `alias1.shop.incus.` and to `me.example.com.`, both as a CNAME onto
-`web.shop.incus.` with the address behind it in the same reply.
+zone. For example, `web` in project `shop` with
+`user.label.dns.aliases=alias1,me.example.com.` answers to `alias1.shop.incus.`
+and `me.example.com.`, both as a CNAME onto `web.shop.incus.`.
 
-An alias is visible exactly where its instance is, so it is no way around the
-per-querier filtering.
-
-`example.com.` is not a zone any project serves, so one is invented to hold that
-one name - and it claims **only** the names actually aliased. `www.example.com.`
-still goes to `--forward`, so aliasing into a domain does not take the rest of
-it away from the fleet.
-
-An alias is refused, silently, in three cases: a name an instance or service
-already answers to, a name two instances both claim, and a zone apex. Each would
-need a CNAME sharing a name with other records, which is not a record set a
-resolver may be handed.
+---
 
 ## Which Projects Are Served
 
-Three ways, in this order:
+`ic-dns` discovers eligible projects in this order:
 
-1. `--project` names them outright, and costs no marker lookup.
-2. Otherwise a project opts in by carrying `--project-marker`, which is
-   `user.label.dns.scope=global` unless changed. A bare key means `KEY=true`.
-3. With neither, every project the certificate can see is served - the only
-   answer that works on a plain Incus, which stamps nothing.
+1. `--project` names them explicitly on the CLI / environment.
+2. Otherwise, projects carrying `--project-marker` (default:
+   `user.label.dns.scope=global`) are opted in.
+3. If neither is specified, all projects visible to the certificate are served.
 
-```bash
-incus project set shop user.label.dns.scope=global   # read from now on
-incus project unset shop user.label.dns.scope        # no longer read
+---
+
+## Zone Transfers (AXFR / IXFR)
+
+`ic-dns` supports authoritative zone transfers via standard DNS protocols
+(**AXFR** for full transfer, **IXFR** for incremental transfer). This allows
+external secondary nameservers (such as BIND9, PowerDNS, Knot DNS, or public
+secondary DNS providers) to replicate and serve the project zone.
+
+```mermaid
+sequenceDiagram
+    participant Sec as Secondary DNS (BIND/PowerDNS)
+    participant DNS as ic-dns (:53 TCP)
+    participant Incus as Incus Fleet
+
+    Note over Sec,DNS: Gate 1: Peer IP matches --allow-transfer CIDRs<br/>Gate 2: Project has user.label.dns.transfer=true
+    Sec->>DNS: TCP AXFR / IXFR query for shop.example.org
+    DNS->>DNS: Validate peer IP against allowlist & verify zone transfer enabled
+    DNS-->>Sec: Stream zone records bracketed by SOA apex
+    Note over Sec: Secondary loads complete zone with current serial
 ```
 
-Un-scoping stops the project being **read**. It does not retire what is already
-held: a record goes when its instance is deleted or stops, and nothing prunes on
-a project merely ceasing to appear. Stop or delete the instances to take their
-names out of DNS.
+### The Two-Gate Security Model
 
-## Flags And Environment Variables
+Zone transfers are strictly opt-in and protected by two independent gates:
 
-Every flag has an environment variable. Defaults are what a deployment sees;
-each plugin's own internals are not configurable.
+1. **Listener Gate (`--allow-transfer`)**: The daemon must be started with
+   `--allow-transfer` (or `INCUS_COMPOSE_DNS_ALLOW_TRANSFER`) specifying the
+   CIDR prefixes of allowed secondary nameservers (e.g.
+   `192.168.1.0/24,10.0.0.53/32`). An empty list allows nobody and refuses all
+   transfer requests.
+2. **Zone Gate (`user.label.dns.transfer`)**: The Incus project owning the zone
+   must be explicitly opted in:
+   ```bash
+   incus project set shop user.label.dns.transfer=true
+   ```
 
-### Connecting To Incus
+Both gates must evaluate to true. If either gate is closed, transfer requests
+are refused (`REFUSED`).
 
-| Flag                             | Env                                             | Default              |                                                                             |
-| -------------------------------- | ----------------------------------------------- | -------------------- | --------------------------------------------------------------------------- |
-| `--incus`                        | `INCUS_COMPOSE_DNS_INCUS`                       |                      | URL of the Incus API                                                        |
-| `--token`                        | `INCUS_COMPOSE_DNS_TOKEN`                       |                      | one-time trust token; a token file under `--secrets-dir` is read when empty |
-| `--data-dir`                     | `INCUS_COMPOSE_DNS_DATA_DIR`                    | `/var/lib/dns-incus` | the enrolled certificate and what was last served; empty keeps neither      |
-| `--secrets-dir`                  | `INCUS_COMPOSE_DNS_SECRETS_DIR`                 | `/run/secrets`       | tmpfs directory holding the trust token                                     |
-| `--client-cert` / `--client-key` | `INCUS_COMPOSE_DNS_CLIENT_CERT` / `_KEY`        |                      | present a certificate instead of enrolling                                  |
-| `--restricted`                   | `INCUS_COMPOSE_DNS_RESTRICTED`                  | off                  | enroll confined to `--project`                                              |
-| `--remote` / `--use-remote`      | `INCUS_REMOTE` / `INCUS_COMPOSE_DNS_USE_REMOTE` |                      | connect as a remote from the Incus CLI configuration                        |
+When using `x-incus-compose.dns`, specifying `allow_transfer` automatically
+satisfies both gates: it starts the daemon with `--allow-transfer` and labels
+the Incus project with `user.label.dns.transfer=true`. When using a shared
+global DNS sidecar, individual projects can opt into transfers by specifying
+`transfer: true` in `x-incus-compose.dns`.
 
-### Choosing What To Serve
+### Transfer Characteristics
 
-| Flag               | Env                                | Default                       |                                         |
-| ------------------ | ---------------------------------- | ----------------------------- | --------------------------------------- |
-| `--suffix`         | `INCUS_COMPOSE_DNS_SUFFIX`         | `incus`                       | TLD every project's zone is built under |
-| `--project`        | `INCUS_COMPOSE_DNS_PROJECTS`       |                               | project(s) to serve                     |
-| `--project-marker` | `INCUS_COMPOSE_DNS_PROJECT_MARKER` | `user.label.dns.scope=global` | what opts a project in                  |
+- **TCP only**: Zone transfers require a stream of DNS messages. Transfer
+  requests arriving over UDP are rejected immediately.
+- **Full, unfiltered zone**: Standard client queries are split-horizon filtered
+  per network to enforce security isolation. In contrast, zone transfers
+  transmit the **complete, unfiltered zone view** so secondary nameservers
+  maintain accurate and consistent records under the zone serial.
+- **Incremental Transfers (IXFR)**: Requests are answered directly from the
+  current in-memory zone snapshot. If the requesting secondary's serial is older
+  than the current serial, the full zone is sent.
+- **Apex queries only**: Transfers must target the exact zone apex (e.g.,
+  `shop.example.org`). Requests for individual subdomains or invented shadowing
+  zones (such as absolute external aliases) are refused.
 
-### Where To Listen
+---
 
-| Flag        | Env                         | Default |                                                           |
-| ----------- | --------------------------- | ------- | --------------------------------------------------------- |
-| `--listen`  | `INCUS_COMPOSE_DNS_LISTEN`  | `:53`   | DNS, UDP and TCP both                                     |
-| `--http`    | `INCUS_COMPOSE_DNS_HTTP`    | `:9153` | `/metrics`, `/health`, `/ready`; empty disables           |
-| `--forward` | `INCUS_COMPOSE_DNS_FORWARD` |         | upstream(s) for names we do not serve; empty refuses them |
-
-### Tuning The Chain
-
-| Flag                    | Env                                     | Default |                                                                                                                                                                      |
-| ----------------------- | --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--ttl`                 | `INCUS_COMPOSE_DNS_TTL`                 | `5`     | seconds a record is served for, up to 3600                                                                                                                           |
-| `--debounce-window`     | `INCUS_COMPOSE_DNS_DEBOUNCE_WINDOW`     | `250ms` | quiet period before the last of a burst is handed on                                                                                                                 |
-| `--workers`             | `INCUS_COMPOSE_DNS_WORKERS`             | `16`    | Incus reads in flight at once                                                                                                                                        |
-| `--read-timeout`        | `INCUS_COMPOSE_DNS_READ_TIMEOUT`        | `10s`   | budget for one read of the daemon                                                                                                                                    |
-| `--sweep-project-delay` | `INCUS_COMPOSE_DNS_SWEEP_PROJECT_DELAY` | `30s`   | gap between one project of a round and the next                                                                                                                      |
-| `--sweep-read-delay`    | `INCUS_COMPOSE_DNS_SWEEP_READ_DELAY`    | `5s`    | gap between the reads inside one project                                                                                                                             |
-| `--echo-subnet`         | `INCUS_COMPOSE_DNS_ECHO_SUBNET`         | off     | echo the RFC 7871 client subnet back                                                                                                                                 |
-| `--exclude`             | `INCUS_COMPOSE_DNS_EXCLUDE`             |         | chain position(s) to leave out                                                                                                                                       |
-| `--log`                 | `INCUS_COMPOSE_DNS_LOG`                 |         | level the chain's log positions and the process itself print at: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`; empty leaves the positions out and the process at `INFO` |
-
-`--ttl` is short on purpose. A fleet moves, and a resolver that cached an
-address for an hour is one handing out an address that has been reassigned.
-
-`--exclude` takes `debounce`, `http` and the log positions. The enricher and
-`dns` may not go: without the enricher nothing is ever read, and the process
-would start, answer, and serve nothing.
-
-## HTTP Endpoints
-
-| Path       |                                                           |
-| ---------- | --------------------------------------------------------- |
-| `/metrics` | Prometheus, every plugin's                                |
-| `/health`  | the stream is connected, and something walked recently    |
-| `/ready`   | the fleet has been read whole, and the stream is still up |
-
-The two answer different questions on purpose. The only sensible response to
-`/health` failing is a restart, and a restart does not fix an Incus that is
-down - it throws away everything held and answers nothing until the fleet has
-been re-read. So **a lost stream is unready, never unhealthy.**
-
-A round does not make it unready. One is always running and the server answers
-from what it published last throughout, so `/ready` stays up and nothing pulls
-the process out of rotation for it.
-
-The fleet is read a name at a time rather than all at once, so those two delays
-are what decides how long a change nothing announced goes unnoticed: roughly
-`--sweep-read-delay` times how many instances there are. There is no safe
-direction. Long leaves a wider window for a quirk; short pays for the round and
-the event stream at the same time. The first round after a start or a reconnect
-ignores both and runs flat out, because nothing is served until it lands.
-
-## Restarts And Cold Start
-
-With `--data-dir` set, what was last served is on disk with its zone serials, so
-a restart answers before it has reached Incus - and a secondary polling the SOA
-does not see the serial go backwards. Restored records are served with a short
-TTL until every project has been re-read, and they are retired only when Incus
-says they are gone, never on a timer.
-
-## Zone Serials
-
-A zone's serial moves when that zone's records move, and at no other time.
-Republishing identical records leaves it alone, so a secondary re-transfers on a
-real change and on nothing else.
-
-## Management Commands
-
-The `dns` command group manages the `ic-dns` sidecar directly:
-
-| Subcommand        | Description                                           |
-| ----------------- | ----------------------------------------------------- |
-| `logs [--follow]` | Stream the ic-dns container log                       |
-| `status`          | Print the status, IP addresses, and metrics of ic-dns |
-| `up`              | Create or recreate the ic-dns sidecar                 |
-| `down [--force]`  | Stop and remove the ic-dns sidecar                    |
+## Detailed Management CLI Reference
 
 ### dns status
-
-`dns status` queries the sidecar's `/ready` HTTP endpoint (and `/metrics` if
-requested) via `incus port-forward` and reports its status and IP addresses.
 
 ```bash
 incus-compose dns status [options]
@@ -286,7 +347,9 @@ incus-compose dns status [options]
 | `--port`    | HTTP port to query on the sidecar               | `9153`  | `INCUS_COMPOSE_DNS_HTTP_PORT`      |
 | `--metrics` | Include Prometheus metrics in the status report | `false` | `INCUS_COMPOSE_DNS_STATUS_METRICS` |
 
-Text output format (default):
+#### Output Formats
+
+Default text format:
 
 ```text
 Status: ready
@@ -294,18 +357,7 @@ IPv4: 10.90.190.53
 IPv6: fd42::53
 ```
 
-When `--metrics` is passed:
-
-```text
-Status: ready
-IPv4: 10.90.190.53
-IPv6: fd42::53
-Metrics:
-# HELP ...
-...
-```
-
-JSON output format (`--format json`):
+JSON format (`--format json`):
 
 ```json
 {
@@ -315,17 +367,42 @@ JSON output format (`--format json`):
 }
 ```
 
-When `--metrics` is passed with `--format json`:
+### dns logs
 
-```json
-{
-  "status": "ready",
-  "ipv4": "10.90.190.53",
-  "ipv6": "fd42::53",
-  "metrics": "# HELP ...\n..."
-}
+```bash
+incus-compose dns logs [--follow]
 ```
+
+Streams or prints logs directly from the `ic-dns` sidecar instance.
+
+### dns up
+
+```bash
+incus-compose dns up [options]
+```
+
+Spins up or recreates the `ic-dns` sidecar instance, mounting necessary volumes
+and establishing certificates.
+
+| Option             | Description                                                    | Default | Environment Variable               |
+| ------------------ | -------------------------------------------------------------- | ------- | ---------------------------------- |
+| `--allow-transfer` | CIDR(s) that may ask for a zone transfer (empty allows nobody) |         | `INCUS_COMPOSE_DNS_ALLOW_TRANSFER` |
+
+### dns down
+
+```bash
+incus-compose dns down [--force]
+```
+
+Stops and deletes the `ic-dns` sidecar instance. When multiple projects share a
+global `ic-dns`, `--force` confirms removal without an interactive prompt.
+
+---
 
 ## Further Reading
 
-[[developer/ievent|ievent]] is the plugin chain this binary is composed from.
+- [[developer/dns|Developer Guide: DNS Architecture & Daemon Internals]]: Deep
+  dive into the ievent pipeline, CoreDNS plugin implementation, standalone
+  daemon flags, and HTTP monitoring endpoints.
+- [[cli-reference/extensions/index#dns|CLI Reference]]: Complete command-line
+  manual for `incus-compose dns`.

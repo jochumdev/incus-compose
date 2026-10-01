@@ -130,9 +130,10 @@ flowchart TD
 Only the first is a read of the event's own subject.
 
 **An instance action** reads that instance. **One read in flight per key** - a
-second event on the key joins the read already running, or cancels and supersedes
-it if the new event requires waiting for running state (such as `instance-started`).
-Coalescing saves the read, not the event: both still walk, carrying what it found.
+second event on the key joins the read already running, or cancels and
+supersedes it if the new event requires waiting for running state (such as
+`instance-started`). Coalescing saves the read, not the event: both still walk,
+carrying what it found.
 
 **A network action** patches the wire and re-reads everything sitting on it,
 because a subnet moving changes every record on that wire.
@@ -348,7 +349,7 @@ back: the next round reads it unchanged and emits nothing.
 have has gone. The enricher creates synthetic `instance-deleted` events for
 missing instances and passes them through `accept`, updating the model, dropping
 their archive entries, and releasing them downstream so plugins like
-[[developer/ievent/dns|dns]] and `checker` learn about the deletes.
+[[developer/dns|dns]] and `checker` learn about the deletes.
 
 **A listing that failed prunes nothing.** An empty answer and a daemon that
 would not answer arrive the same way, and one of them means every name in the

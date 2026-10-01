@@ -39,7 +39,9 @@ type dnsUpArgs struct {
 	Timeout       time.Duration
 	Workers       int
 	Debug         bool
+	Trace         bool
 	Writer        io.Writer
+	AllowTransfer []string
 }
 
 // resolveDNSScope returns the scope for the project, first match wins.
@@ -98,6 +100,11 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 
 	noMetrics := p.ClientConfig.DNS.NoMetrics || args.NoMetrics
 
+	allowTransfer := p.ClientConfig.DNS.AllowTransfer
+	if len(args.AllowTransfer) > 0 {
+		allowTransfer = args.AllowTransfer
+	}
+
 	var incus *url.URL
 	if args.Incus != "" {
 		incus, err = url.Parse(args.Incus)
@@ -125,6 +132,8 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 		projectMarker: args.ProjectMarker,
 		timeout:       args.Timeout,
 		stackWorkers:  args.Workers,
+		allowTransfer: allowTransfer,
+		trace:         args.Trace,
 	}
 
 	c.LogDebug("DNS",
@@ -187,6 +196,14 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 	if err != nil {
 		c.LogError("Marking the project's dns scope", "error", err)
 		return errLogged.Wrap(err)
+	}
+
+	if p.ClientConfig.DNS.Transfer || len(allowTransfer) > 0 {
+		err = c.Global().UpdateProjectConfig(p.Name, map[string]string{shared.DNSTransferKey: "true"})
+		if err != nil {
+			c.LogError("Marking the project's dns transfer", "error", err)
+			return errLogged.Wrap(err)
+		}
 	}
 
 	hc.IgnoreError(client.ActionStart, client.ErrRunning)
@@ -478,6 +495,8 @@ func dnsUpGlobal(ctx context.Context, gc *client.GlobalClient, args dnsUpArgs) e
 		projectMarker: args.ProjectMarker,
 		timeout:       args.Timeout,
 		stackWorkers:  args.Workers,
+		allowTransfer: args.AllowTransfer,
+		trace:         args.Trace,
 	}
 
 	release, err := upgradeGlobalProject(ctx, gc, args.Network)
@@ -713,6 +732,11 @@ func newDNSUpCommand() *cli.Command {
 				Value:   10 * time.Second,
 				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_TIMEOUT"),
 			},
+			&cli.StringSliceFlag{
+				Name:    "allow-transfer",
+				Usage:   "CIDR(s) that may ask for a zone transfer; empty allows nobody",
+				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_ALLOW_TRANSFER", "DNS_ALLOW_TRANSFER"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			globalClient, err := clientFromContext(ctx)
@@ -748,7 +772,9 @@ func newDNSUpCommand() *cli.Command {
 				Timeout:       cmd.Duration("timeout"),
 				Workers:       cmd.Root().Int("workers"),
 				Debug:         cmd.Root().Bool("debug"),
+				Trace:         cmd.Root().Bool("trace"),
 				Writer:        cmd.Root().Writer,
+				AllowTransfer: cmd.StringSlice("allow-transfer"),
 			}
 
 			if p == nil {

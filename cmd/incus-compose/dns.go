@@ -69,6 +69,8 @@ type dnsParams struct {
 	projectMarker     string
 	timeout           time.Duration
 	stackWorkers      int
+	allowTransfer     []string
+	trace             bool
 
 	global bool
 	xIncus map[string]string
@@ -92,6 +94,7 @@ const (
 	envDNSListen            = "environment.INCUS_COMPOSE_DNS_LISTEN"
 	envDNSHTTP              = "environment.INCUS_COMPOSE_DNS_HTTP"
 	envDNSForward           = "environment.INCUS_COMPOSE_DNS_FORWARD"
+	envDNSAllowTransfer     = "environment.INCUS_COMPOSE_DNS_ALLOW_TRANSFER"
 	envDNSSuffix            = "environment.INCUS_COMPOSE_DNS_SUFFIX"
 	envDNSTTL               = "environment.INCUS_COMPOSE_DNS_TTL"
 	envDNSDataDir           = "environment.INCUS_COMPOSE_DNS_DATA_DIR"
@@ -130,6 +133,9 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 		fw := strings.Join(params.forward, ",")
 		settings[envDNSForward] = fw
 	}
+	if len(params.allowTransfer) > 0 {
+		settings[envDNSAllowTransfer] = strings.Join(params.allowTransfer, ",")
+	}
 	if params.suffix != "" {
 		settings[envDNSSuffix] = params.suffix
 	}
@@ -142,7 +148,9 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 	} else {
 		settings[envDNSMetrics] = "true"
 	}
-	if debug {
+	if params.trace {
+		settings[envDNSLog] = "TRACE"
+	} else if debug {
 		settings[envDNSLog] = "DEBUG"
 	}
 

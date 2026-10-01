@@ -203,6 +203,7 @@ func TestDNSSettings(t *testing.T) {
 			listen:            ":5353",
 			http:              ":9154",
 			forward:           []string{"1.1.1.1", "8.8.8.8"},
+			allowTransfer:     []string{"10.0.0.0/24", "192.168.1.0/24"},
 			suffix:            "test.incus",
 			ttl:               10,
 			noMetrics:         true,
@@ -216,6 +217,7 @@ func TestDNSSettings(t *testing.T) {
 		assert.Equal(t, ":5353", settings[envDNSListen])
 		assert.Equal(t, ":9154", settings[envDNSHTTP])
 		assert.Equal(t, "1.1.1.1,8.8.8.8", settings[envDNSForward])
+		assert.Equal(t, "10.0.0.0/24,192.168.1.0/24", settings[envDNSAllowTransfer])
 		assert.Equal(t, "test.incus", settings[envDNSSuffix])
 		assert.Equal(t, "10", settings[envDNSTTL])
 		assert.Equal(t, "false", settings[envDNSMetrics])
@@ -236,6 +238,7 @@ func TestDNSSettings(t *testing.T) {
 		assert.Equal(t, "true", settings[envDNSRestricted])
 		assert.Equal(t, ":9153", settings[envDNSHTTP])
 		assert.Equal(t, "true", settings[envDNSMetrics])
+		assert.Empty(t, settings[envDNSAllowTransfer])
 	})
 
 	t.Run("multi-project scope settings", func(t *testing.T) {
@@ -251,6 +254,19 @@ func TestDNSSettings(t *testing.T) {
 		assert.Equal(t, shared.DNSScopeKey+"=alpha,beta", settings[envDNSProjectMarker])
 		assert.Empty(t, settings[envDNSProjects])
 		assert.Empty(t, settings[envDNSRestricted])
+	})
+
+	t.Run("trace logging", func(t *testing.T) {
+		t.Parallel()
+
+		params := dnsParams{
+			trace: true,
+			carry: map[string]string{},
+		}
+
+		settings := dnsSettings(params, "https://10.0.0.1:8443", false)
+
+		assert.Equal(t, "TRACE", settings[envDNSLog])
 	})
 }
 
