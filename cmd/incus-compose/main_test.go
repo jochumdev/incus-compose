@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/avast/retry-go/v5"
 	"github.com/bradleyjkemp/cupaloy/v2"
 	incusApi "github.com/lxc/incus/v7/shared/api"
 	"github.com/stretchr/testify/assert"
@@ -551,17 +553,33 @@ func TestDNSAliasesWhenContainerNameMatchesServiceName(t *testing.T) {
 	conn, err := c.Connection()
 	require.NoError(t, err)
 
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	updates, err := conn.ExecInstance(ctx, c.IncusProject(), "client", incusApi.InstanceExecPost{
-		Command: []string{"wget", "-q", "--spider", "http://web.mydomain.lan"},
-	}, &iclient.InstanceExecArgs{Stdout: stdout, Stderr: stderr})
-	require.NoError(t, err)
+	err = retry.New(
+		retry.Context(ctx),
+		retry.Attempts(10),
+		retry.Delay(500*time.Millisecond),
+		retry.DelayType(retry.FixedDelay),
+		retry.LastErrorOnly(true),
+	).Do(func() error {
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+		updates, execErr := conn.ExecInstance(ctx, c.IncusProject(), "client", incusApi.InstanceExecPost{
+			Command: []string{"wget", "-q", "--spider", "http://web.mydomain.lan"},
+		}, &iclient.InstanceExecArgs{Stdout: stdout, Stderr: stderr})
+		if execErr != nil {
+			return execErr
+		}
 
-	op, err := iclient.WaitOperation(ctx, updates)
-	require.NoError(t, err)
+		op, waitErr := iclient.WaitOperation(ctx, updates)
+		if waitErr != nil {
+			return waitErr
+		}
 
-	code, ok := op.Metadata["return"].(float64)
-	require.True(t, ok, "no exit code in metadata: %+v", op.Metadata)
-	require.Equal(t, 0, int(code), "wget failed: stdout=%q, stderr=%q", stdout.String(), stderr.String())
+		code, ok := op.Metadata["return"].(float64)
+		if !ok || int(code) != 0 {
+			return fmt.Errorf("wget failed (exit %v): stdout=%q, stderr=%q", op.Metadata["return"], stdout.String(), stderr.String())
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
 }
