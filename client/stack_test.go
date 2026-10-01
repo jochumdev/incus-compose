@@ -124,7 +124,8 @@ func TestStackIgnoreStack(t *testing.T) {
 	stack.Add(instNormal, instIgnored)
 
 	forActionEnsureStack := stack.ForAction(ActionEnsure)
-	require.Len(t, forActionEnsureStack.All(), 2)
+	require.Len(t, forActionEnsureStack.All(), 1)
+	require.Equal(t, "web-1", forActionEnsureStack.All()[0].Name())
 
 	forActionStack := stack.ForAction(ActionStart)
 	require.Len(t, forActionStack.All(), 1)

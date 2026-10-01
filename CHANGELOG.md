@@ -66,8 +66,8 @@ form.
   before healthcheck evaluation, supporting `command`, `user`, `privileged`,
   `working_dir`, and `environment`. (by @jochumdev)
 - Configurable tools volume, mount path, and sleep helper image options on
-  `client.Client` (`ClientToolsVolume`, `ClientToolsMount`, `ClientSleepImage`)
-  with runtime getters and setters. (by @jochumdev)
+  `client.GlobalClient` (`ClientToolsVolume`, `ClientToolsMount`,
+  `ClientSleepImage`). (by @jochumdev)
 
 ### Changed
 
@@ -83,8 +83,8 @@ form.
   `healthd reload` still forces a full resync. (by @jochumdev)
 
 - Refactor the `run` command in `cmd/incus-compose/run.go` to use
-  `client.Client` abstractions (`c.EnsureTools()`, `c.ToolsMount()`,
-  `c.SleepImage()`, and `c.Resource()`) instead of raw Incus API and `iclient`
+  `client.Client` abstractions (`c.EnsureTools()`, `c.Config().ToolsMount`,
+  `c.Config().SleepImage`, and `c.Resource()`) instead of raw Incus API and `iclient`
   calls. (by @jochumdev)
 
 ### Fixed

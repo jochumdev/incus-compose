@@ -283,7 +283,6 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 			continue
 		}
 
-		resources = append(resources, runnerInstance)
 		preRun = append(preRun, runnerInstance)
 	}
 

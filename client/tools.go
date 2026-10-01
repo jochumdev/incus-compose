@@ -35,69 +35,22 @@ const toolsLock = "install"
 // toolsLockStale bounds how long a crashed install keeps other runs waiting.
 const toolsLockStale = 2 * time.Minute
 
-// ToolsVolume returns the configured tools volume name, falling back to default.
-func (c *Client) ToolsVolume() string {
-	if c.config.ToolsVolume != "" && c.config.ToolsVolume != DefaultToolsVolume {
-		return c.config.ToolsVolume
-	}
-	if c.globalClient != nil && c.globalClient.config.ToolsVolume != "" && c.globalClient.config.ToolsVolume != DefaultToolsVolume {
-		return c.globalClient.config.ToolsVolume
-	}
-
-	return DefaultToolsVolume
-}
-
-// SetToolsVolume sets the tools volume name for this client.
-func (c *Client) SetToolsVolume(vol string) {
-	c.config.ToolsVolume = vol
-}
-
-// ToolsMount returns the configured tools mount path, falling back to default.
-func (c *Client) ToolsMount() string {
-	if c.config.ToolsMount != "" && c.config.ToolsMount != DefaultToolsMount {
-		return c.config.ToolsMount
-	}
-	if c.globalClient != nil && c.globalClient.config.ToolsMount != "" && c.globalClient.config.ToolsMount != DefaultToolsMount {
-		return c.globalClient.config.ToolsMount
-	}
-
-	return DefaultToolsMount
-}
-
-// SetToolsMount sets the tools mount path for this client.
-func (c *Client) SetToolsMount(mount string) {
-	c.config.ToolsMount = mount
-}
-
-// SleepImage returns the configured sleep image, falling back to default.
-func (c *Client) SleepImage() string {
-	if c.config.SleepImage != "" {
-		return c.config.SleepImage
-	}
-
-	return DefaultSleepImage
-}
-
-// SetSleepImage sets the sleep image for this client.
-func (c *Client) SetSleepImage(img string) {
-	c.config.SleepImage = img
-}
-
-func resolveImageVersion(image string) string {
-	return strings.ReplaceAll(image, "{version}", "latest")
-}
-
 // EnsureTools puts the helpers image's binary in the project's tools volume,
 // and returns that volume with the path an instance runs as its entrypoint.
 func (c *Client) EnsureTools(ctx context.Context) (*StorageVolume, string, error) {
-	toolsVol := c.ToolsVolume()
+	toolsVol := c.config.ToolsVolume
 	if toolsVol == "" || toolsVol == DefaultToolsVolume {
 		return nil, "", errors.New("tools volume is not configured")
 	}
 
-	toolsMount := c.ToolsMount()
+	toolsMount := c.config.ToolsMount
 	if toolsMount == "" || toolsMount == DefaultToolsMount || !strings.HasPrefix(toolsMount, "/") {
 		return nil, "", errors.New("tools mount is not configured")
+	}
+
+	imageName := c.config.SleepImage
+	if imageName == "" || imageName == DefaultSleepImage {
+		return nil, "", errors.New("sleep image is not configured")
 	}
 
 	globalProj := c.config.GlobalProject
@@ -114,8 +67,6 @@ func (c *Client) EnsureTools(ctx context.Context) (*StorageVolume, string, error
 	release()
 
 	defer sys.WarnError(sys.Done, "Failure during Client.Done() on the global project")
-
-	imageName := resolveImageVersion(c.SleepImage())
 
 	res, err := sys.Resource(KindImage, imageName, &ImageConfig{})
 	if err != nil {
@@ -165,7 +116,7 @@ func (c *Client) EnsureTools(ctx context.Context) (*StorageVolume, string, error
 
 // EnsureToolsVolume returns the client's tools volume, created when missing.
 func EnsureToolsVolume(ctx context.Context, c *Client) (*StorageVolume, error) {
-	volName := c.ToolsVolume()
+	volName := c.config.ToolsVolume
 	if volName == "" || volName == DefaultToolsVolume {
 		return nil, errors.New("tools volume is not configured")
 	}

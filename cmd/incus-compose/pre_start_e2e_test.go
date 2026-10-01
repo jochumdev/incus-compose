@@ -58,6 +58,17 @@ volumes:
 	exists, err = c.InstanceExists("web-1")
 	require.NoError(t, err)
 	assert.True(t, exists, "main service instance must exist")
+
+	listOut, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "list")
+	require.NoError(t, err)
+	assert.NotContains(t, listOut, "pre_start")
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "restart")
+	require.NoError(t, err)
+
+	exists, err = c.InstanceExists("web-pre_start-0")
+	require.NoError(t, err)
+	assert.False(t, exists, "runner container must be deleted on success after restart")
 }
 
 // TestE2EPreStartFailure verifies that a failing pre_start hook prevents the main

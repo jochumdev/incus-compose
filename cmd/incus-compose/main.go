@@ -381,12 +381,17 @@ func newRootCommand() *cli.Command {
 			// 	cacheProject = ""
 			// }
 
+			sleepImage := defaultSleepImage
+			if envSleep := os.Getenv("INCUS_COMPOSE_SLEEP_IMAGE"); envSleep != "" {
+				sleepImage = envSleep
+			}
+
 			opts := []client.ClientOption{
 				client.ClientGlobalProject(globalProject),
 				client.ClientLocksVolume(locksVolume),
 				client.ClientToolsVolume(toolsVolume),
 				client.ClientToolsMount(toolsMount),
-				client.ClientSleepImage(defaultSleepImage),
+				client.ClientSleepImage(resolveImageVersion(sleepImage)),
 				client.ClientDescriptionFormat("incus-compose: %s"),
 				client.ClientLogger(logger),
 				client.ClientStdout(cmd.Writer),

@@ -614,7 +614,7 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 			return fmt.Errorf("ensuring tools volume: %w", err)
 		}
 
-		toolsVol := r.client.ToolsVolume()
+		toolsVol := r.client.config.ToolsVolume
 		hasTools := false
 		for _, dev := range r.Config.Devices {
 			if dev.Name == toolsVol {
@@ -630,7 +630,7 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 					Disk: InstanceDeviceDiskConfig{
 						StorageVolumeConfig: &StorageVolumeConfig{Pool: vol.Config.Pool},
 						Source:              vol.IncusName(),
-						Path:                r.client.ToolsMount(),
+						Path:                r.client.config.ToolsMount,
 						ReadOnly:            true,
 					},
 				},
@@ -1038,7 +1038,7 @@ func (r *Instance) Run(ctx context.Context, opts ...Option) error {
 		return fmt.Errorf("ensuring tools volume: %w", err)
 	}
 
-	toolsVol := r.client.ToolsVolume()
+	toolsVol := r.client.config.ToolsVolume
 	hasTools := false
 	for _, dev := range r.Config.Devices {
 		if dev.Name == toolsVol {
@@ -1054,7 +1054,7 @@ func (r *Instance) Run(ctx context.Context, opts ...Option) error {
 				Disk: InstanceDeviceDiskConfig{
 					StorageVolumeConfig: &StorageVolumeConfig{Pool: vol.Config.Pool},
 					Source:              vol.IncusName(),
-					Path:                r.client.ToolsMount(),
+					Path:                r.client.config.ToolsMount,
 					ReadOnly:            true,
 				},
 			},

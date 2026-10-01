@@ -41,7 +41,8 @@ func start(ctx context.Context, p *project.Project, c *client.Client, args start
 	}
 
 	// Register the DNS Watcher after the progress renderer so progress waits for the dns changes.
-	if err := c.RegisterDNSWatcher(); err != nil {
+	err := c.RegisterDNSWatcher()
+	if err != nil {
 		c.LogError("Registering the DNS watcher", "project", p.Name, "error", err)
 		return errLogged.Wrap(err)
 	}
@@ -61,7 +62,7 @@ func start(ctx context.Context, p *project.Project, c *client.Client, args start
 	filterArgs := filterResourcesArgs{
 		OnlyServices:     args.Services,
 		WithDependencies: args.WithDeps,
-		ExcludeKinds:     []client.Kind{client.KindImage, client.KindStorageVolume},
+		ExcludeKinds:     []client.Kind{client.KindStorageVolume},
 	}
 	myResources := filterResources(p, resources, filterArgs)
 

@@ -71,10 +71,6 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 
 	c.IgnoreError(client.ActionEnsure, client.ErrNotFound)
 
-	if args.SleepImage != "" {
-		c.SetSleepImage(resolveImageVersion(args.SleepImage))
-	}
-
 	volume, entrypoint, err := c.EnsureTools(ctx)
 	if err != nil {
 		c.LogError("Preparing the tools volume", "error", err)
@@ -86,7 +82,7 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		Name:         args.Name,
 		Entrypoint:   entrypoint,
 		Volume:       volume,
-		Mount:        c.ToolsMount(),
+		Mount:        c.Config().ToolsMount,
 		ServicePorts: args.ServicePorts || len(args.Publish) > 0,
 	}
 
@@ -97,7 +93,7 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		WithDeps:        !args.NoDeps,
 		IgnoreBuildable: true,
 		HealthdImage:    DefaultHealthdImage,
-		SleepImage:      c.SleepImage(),
+		SleepImage:      c.Config().SleepImage,
 		DNSImage:        DefaultDNSImage,
 		Pull:            args.Pull,
 		Workers:         args.Workers,
