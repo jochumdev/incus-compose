@@ -67,7 +67,7 @@ services:
 	assert.Equal(t, "testzone.incus", inst.Config["oci.dns.search"], "instance must have oci.dns.search set to the zone")
 }
 
-func TestE2EDNSUpDisableDNSFlag(t *testing.T) {
+func TestE2EDNSUpNoDNSFlag(t *testing.T) {
 	testlib.SkipE2E(t)
 
 	ctx := t.Context()
@@ -89,7 +89,7 @@ services:
 
 	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
 
-	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd", "--disable-dns")
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd", "--no-dns")
 	require.NoError(t, err)
 
 	c := projectClient(ctx, t, pn)
@@ -97,7 +97,7 @@ services:
 	dnsName := dnsInstanceName(c.IncusProject(), false)
 	exists, err := c.InstanceExists(dnsName)
 	require.NoError(t, err)
-	assert.False(t, exists, "dns daemon must not exist when --disable-dns is passed")
+	assert.False(t, exists, "dns daemon must not exist when --no-dns is passed")
 
 	conn, err := c.Connection()
 	require.NoError(t, err)

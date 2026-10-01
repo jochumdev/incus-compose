@@ -19,7 +19,7 @@ beyond it is reachable from the same compose file, through three escape hatches:
 - **`x-incus`** - passes any Incus config key straight through to the instance,
   network or volume it sits on. incus-compose does not interpret these.
 - **`x-incus-compose`** - features incus-compose implements itself: devices,
-  volume placement and seeding, backups, and healthd tuning.
+  volume placement and seeding, backups, healthd, network, and DNS.
 
 For what the Compose spec itself supports, see
 [Compose Compatibility](/compose-compatibility).
@@ -372,3 +372,36 @@ networks:
     x-incus-compose:
       uplink: my-uplink
 ```
+
+### DNS
+
+Configure the ic-dns sidecar with the top-level `x-incus-compose.dns` extension:
+
+```yaml
+x-incus-compose:
+  dns:
+    disabled: false
+    scope: global
+    zone: shop.example.org
+    network: custom-net
+    ipv4_address: 10.0.0.2
+    ipv6_address: fd42::2
+    no_metrics: false
+
+services:
+  web:
+    image: docker.io/nginx:alpine
+```
+
+| Key            | Description                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`     | Set to `true` to disable DNS sidecar creation and DNS configuration for the project. Equivalent to `--no-dns` on `up`.             |
+| `scope`        | `global` (one shared daemon in the Incus `incus-compose` project, the default) or `project` (a sidecar dedicated to this project). |
+| `zone`         | Custom DNS zone domain for the project, replacing the default `<project>.incus`.                                                   |
+| `network`      | Network attachment for the DNS sidecar. Defaults to the project bridge/network.                                                    |
+| `ipv4_address` | Static IPv4 address assigned to the DNS sidecar instance.                                                                          |
+| `ipv6_address` | Static IPv6 address assigned to the DNS sidecar instance.                                                                          |
+| `no_metrics`   | Disable Prometheus metrics endpoint on the DNS sidecar.                                                                            |
+
+See [DNS (ic-dns)](/dns) for details on split-horizon resolution and DNS
+configuration.

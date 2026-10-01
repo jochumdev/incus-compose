@@ -135,9 +135,9 @@ func newUpCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_IMAGE"),
 			},
 			&cli.BoolFlag{
-				Name:    "disable-dns",
+				Name:    "no-dns",
 				Usage:   "Don't start or configure DNS for the project",
-				Sources: cli.EnvVars("INCUS_COMPOSE_DISABLE_DNS"),
+				Sources: cli.EnvVars("INCUS_COMPOSE_NO_DNS", "INCUS_COMPOSE_DISABLE_DNS"),
 			},
 			&cli.StringFlag{
 				Name:    "network-driver",
@@ -344,7 +344,7 @@ func newUpCommand() *cli.Command {
 			}
 
 			var dnsConfigs map[string]string
-			if cmd.Bool("disable-dns") {
+			if cmd.Bool("no-dns") {
 				p.ClientConfig.DNS.Disabled = true
 			}
 

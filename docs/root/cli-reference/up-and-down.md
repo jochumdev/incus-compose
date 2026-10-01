@@ -33,6 +33,8 @@ incus-compose up [SERVICE...]
 | `--timeout`            | Stop/start timeout (default: 1m)                                                                                                                                                                                                                   |
 | `--dependency-timeout` | Max time to wait for `service_healthy` depends_on (default: 5m; `0` = no limit)                                                                                                                                                                    |
 | `--scale`              | Scale service: `web=3` (repeatable)                                                                                                                                                                                                                |
+| `--no-dns`             | Don't start or configure DNS for the project                                                                                                                                                                                                       |
+| `--dns-image`          | ic-dns image (default: `ghcr.io/lxc/incus-compose/ic-dns:latest`)                                                                                                                                                                                  |
 | `--no-healthd`         | Don't create healthd sidecar for healthchecks                                                                                                                                                                                                      |
 | `--external-healthd`   | Use an existing (unmanaged) healthd; don't create or look one up                                                                                                                                                                                   |
 | `--healthd-image`      | Healthd OCI image; `{version}` is replaced with the incus-compose version                                                                                                                                                                          |
@@ -113,6 +115,8 @@ flags that deliberately have none.
 | `up`      | `INCUS_COMPOSE_UP_NO_DEPS`            | `--no-deps`            | Don't start linked services               |
 | `up`      | `INCUS_COMPOSE_UP_DETACH`             | `--detach`, `-d`       | Run containers in the background          |
 | `up/down` | `INCUS_COMPOSE_NO_HEALTHD`            | `--no-healthd`         | Don't create the healthd sidecar          |
+| `up`      | `INCUS_COMPOSE_NO_DNS`                | `--no-dns`             | Don't start or configure DNS              |
+| `up`      | `INCUS_COMPOSE_DNS_IMAGE`             | `--dns-image`          | ic-dns image                              |
 | `up`      | `INCUS_COMPOSE_EXTERNAL_HEALTHD`      | `--external-healthd`   | Use healthd but don't create/look it up   |
 | `up`      | `INCUS_COMPOSE_HEALTHD_IMAGE`         | `--healthd-image`      | Healthd OCI image                         |
 | `up`      | `INCUS_COMPOSE_HEALTHD_BINARY`        | `--healthd-binary`     | Local ic-healthd binary path              |

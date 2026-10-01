@@ -266,8 +266,10 @@ database-1  → specific instance (registered by Incus dnsmasq)
 ```
 
 This matches Docker Compose behavior. No configuration is required: records are
-written automatically to the project bridge network's `raw.dnsmasq` and updated
-whenever the scale changes.
+written automatically to the project bridge network's `raw.dnsmasq` (for bridge
+networks) or answered dynamically by `ic-dns` (for OVN networks), and updated
+whenever the scale changes. Pass `--no-dns` (or
+`x-incus-compose.dns.disabled: true`) to opt out.
 
 A service can also register extra DNS names for itself via `aliases`; see
 [Network Aliases](/compose-compatibility/networks#network-aliases).

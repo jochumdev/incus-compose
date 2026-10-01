@@ -352,19 +352,19 @@ func TestUpCommandDNSFlags(t *testing.T) {
 	cmd := newUpCommand()
 	require.NotNil(t, cmd)
 
-	var hasDisableDNS, hasDNSImage bool
+	var hasNoDNS, hasDNSImage bool
 	for _, f := range cmd.Flags {
 		for _, name := range f.Names() {
 			switch name {
-			case "disable-dns":
-				hasDisableDNS = true
+			case "no-dns":
+				hasNoDNS = true
 			case "dns-image":
 				hasDNSImage = true
 			}
 		}
 	}
 
-	assert.True(t, hasDisableDNS, "up command should have --disable-dns flag")
+	assert.True(t, hasNoDNS, "up command should have --no-dns flag")
 	assert.True(t, hasDNSImage, "up command should have --dns-image flag")
 }
 

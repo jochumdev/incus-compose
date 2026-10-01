@@ -185,8 +185,8 @@ destructive or a no-op instead of just changing cosmetic output:
 | `INCUS_COMPOSE_WORKERS` | `--workers` | Number of concurrent workers (default: `4`)                      |
 | `NO_COLOR`              | --          | Disable color output ([no-color.org](https://no-color.org/))     |
 
-`--builder` and `--healthd-*` are command flags (`up`, `build`, `pull`,
-`healthd up`, `healthd down`), not global ones - see
+`--builder`, `--healthd-*` and `--no-dns` / `--dns-image` are command flags
+(`up`, `build`, `pull`, `healthd up`, `healthd down`), not global ones - see
 [up and down](/cli-reference/up-and-down#environment-variables),
 [Images](/cli-reference/images#environment-variables) and
 [Extensions](/cli-reference/extensions#environment-variables) for their

@@ -192,16 +192,18 @@ services:
 ```
 
 Each alias becomes a `cname=<alias>,<instance>` record in the network's
-`raw.dnsmasq`, resolving straight to the instance, with no DHCP lease to wait
-for, unlike the IP-based service-name records described in
+`raw.dnsmasq` on bridge networks, or a `user.label.dns.aliases` label on the
+instance for OVN networks using `ic-dns`, resolving straight to the instance,
+with no DHCP lease to wait for, unlike the IP-based service-name records
+described in
 [DNS Resolution](/compose-compatibility/differences#dns-resolution). Aliases on
 networks shared by multiple projects (`external: true` / `name:`) coexist
 without clobbering each other's records, the same way service-name records do.
 
 :::warning Because a CNAME alias can only point at one target, `aliases` is for
-single-instance services. Declaring it on a service with more than one replica
-registers the same alias against every replica's instance name, which dnsmasq
-does not support (an alias must be unique) and produces undefined DNS behavior.
-Use the service name, which does round-robin, for scaled services instead. :::
+single-instance services. When a service is scaled, `incus-compose` assigns the
+alias only to the first replica (`<service>-1`), avoiding contested name
+collisions in `ic-dns` and `dnsmasq`. Use the service name, which does
+round-robin, for scaled services instead. :::
 
 _Since: v1.1.0_

@@ -25,12 +25,16 @@ form.
   `x-incus-compose.uplink` (or `parent`) extension to configure uplink networks.
   Existing projects and servers without OVN continue to use bridge networks. (by
   @jochumdev)
-- Service-name DNS resolution now works on OVN networks. incus-compose peers
-  each project network to the shared `ic-dns` and scopes it with a hidden
-  network ACL, so a service name like `database` resolves with no compose
-  change. OVN networks also get a default ACL posture matching docker compose:
-  instances on the same network reach each other, nothing else may initiate in,
-  outbound is allowed. (by @jochumdev)
+- Service-name and alias DNS resolution now works on OVN networks. incus-compose
+  peers each project network to the shared `ic-dns` and scopes it with a hidden
+  network ACL, so service names and network aliases resolve with no compose
+  change. Network aliases are assigned to the first replica when scaled to
+  prevent contested collisions in `ic-dns`. OVN networks also get a default ACL
+  posture matching docker compose: instances on the same network reach each
+  other, nothing else may initiate in, outbound is allowed. (by @jochumdev)
+- `--no-dns` / `INCUS_COMPOSE_NO_DNS` flag on `up` and
+  `x-incus-compose.dns.disabled` compose option to opt out of DNS sidecar
+  creation and configuration. (by @jochumdev)
 - `ic-dns`: A new split-horizon authoritative DNS daemon for Incus instances,
   built on the new `ievent` event framework and CoreDNS. Resolves instance names
   dynamically within per-project or shared zones (`.incus`), serving records
