@@ -28,6 +28,7 @@ type downArgs struct {
 	Writer     io.Writer
 	Reverse    bool
 	NoHealthd  bool
+	NoDNS      bool
 
 	// ReportErrors makes down return a teardown failure instead of only logging
 	// it. `up --recreate` sets it, because it calls down() before the ensure
@@ -109,6 +110,13 @@ func down(ctx context.Context, p *project.Project, c *client.Client, args downAr
 		hc, h, err := healthdResolve(p, c)
 		if err == nil && hc.IncusProject() == c.IncusProject() {
 			stack.Add(h)
+		}
+	}
+
+	if len(args.Services) == 0 && !args.NoDNS {
+		dc, d, err := dnsResolve(p, c)
+		if err == nil && dc.IncusProject() == c.IncusProject() {
+			stack.Add(d)
 		}
 	}
 
@@ -224,6 +232,11 @@ func newDownCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_NO_HEALTHD"),
 			},
 			&cli.BoolFlag{
+				Name:    "no-dns",
+				Usage:   "Don't stop/remove dns sidecar",
+				Sources: cli.EnvVars("INCUS_COMPOSE_NO_DNS", "INCUS_COMPOSE_DISABLE_DNS"),
+			},
+			&cli.BoolFlag{
 				Name:    "external-healthd",
 				Usage:   "Use healthd but do not try to lookup it",
 				Sources: cli.EnvVars("INCUS_COMPOSE_EXTERNAL_HEALTHD"),
@@ -270,6 +283,11 @@ func newDownCommand() *cli.Command {
 				usesHealthd = false
 			}
 
+			usesDNS := !cmd.Bool("no-dns")
+			if usesDNS && p.ClientConfig.DNS.Disabled {
+				usesDNS = false
+			}
+
 			// Get the per Project client early, gives early errors if the project does not exists
 			if cmd.Bool("external-healthd") {
 				p.ClientConfig.Healthd.External = true
@@ -305,6 +323,7 @@ func newDownCommand() *cli.Command {
 				Writer:     cmd.Root().Writer,
 				Reverse:    true,
 				NoHealthd:  !usesHealthd,
+				NoDNS:      !usesDNS,
 			})
 		},
 	}

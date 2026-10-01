@@ -32,9 +32,10 @@ form.
   prevent contested collisions in `ic-dns`. OVN networks also get a default ACL
   posture matching docker compose: instances on the same network reach each
   other, nothing else may initiate in, outbound is allowed. (by @jochumdev)
-- `--no-dns` / `INCUS_COMPOSE_NO_DNS` flag on `up` and
+- `--no-dns` / `INCUS_COMPOSE_NO_DNS` flag on `up` and `down`, and
   `x-incus-compose.dns.disabled` compose option to opt out of DNS sidecar
-  creation and configuration. (by @jochumdev)
+  creation/configuration on `up` and stop/removal of project-scoped sidecars on
+  `down`. (by @jochumdev)
 - `ic-dns`: A new split-horizon authoritative DNS daemon for Incus instances,
   built on the new `ievent` event framework and CoreDNS. Resolves instance names
   dynamically within per-project or shared zones (`.incus`), serving records

@@ -16,6 +16,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/project"
 	"github.com/lxc/incus-compose/shared"
 )
 
@@ -525,6 +526,41 @@ func dnsTeardown(ctx context.Context, c *client.Client, global bool, timeout tim
 	}
 
 	return errs
+}
+
+// dnsResolve returns the daemon serving p and the client of the project it
+// lives in, erroring when there is none or when the scope is not project-specific.
+func dnsResolve(p *project.Project, c *client.Client) (*client.Client, *client.Instance, error) {
+	projectConfig, err := c.Global().ProjectConfig(p.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	scope := resolveDNSScope(projectConfig, "", p.ClientConfig.DNS.Scope)
+	if scope != shared.DNSScopeProject {
+		return nil, nil, fmt.Errorf("dns scope is %q, not project", scope)
+	}
+
+	name := dnsInstanceName(c.IncusProject(), false)
+	exists, err := c.InstanceExists(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !exists {
+		return nil, nil, client.ErrNotFound.WithKindName(client.KindInstance, name)
+	}
+
+	res, err := c.Resource(client.KindInstance, name, &client.InstanceConfig{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	inst, ok := res.(*client.Instance)
+	if !ok {
+		return nil, nil, errors.New("unexpected resource type for dns")
+	}
+
+	return c, inst, nil
 }
 
 func newDNSCommand() *cli.Command {

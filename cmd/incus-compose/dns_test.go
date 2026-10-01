@@ -368,6 +368,24 @@ func TestUpCommandDNSFlags(t *testing.T) {
 	assert.True(t, hasDNSImage, "up command should have --dns-image flag")
 }
 
+func TestDownCommandDNSFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := newDownCommand()
+	require.NotNil(t, cmd)
+
+	var hasNoDNS bool
+	for _, f := range cmd.Flags {
+		for _, name := range f.Names() {
+			if name == "no-dns" {
+				hasNoDNS = true
+			}
+		}
+	}
+
+	assert.True(t, hasNoDNS, "down command should have --no-dns flag")
+}
+
 func TestDNSInstanceMarksWithZone(t *testing.T) {
 	t.Parallel()
 
