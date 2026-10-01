@@ -148,10 +148,10 @@ style: |
 ---
 
 # Incus & incus-compose
+
 ### Modern Linux Container & VM Orchestration Without Docker
 
-**Speaker:** René Jochum
-Linux Containers (`lxc`)
+**Speaker:** René Jochum Linux Containers (`lxc`)
 
 ---
 
@@ -159,12 +159,12 @@ Linux Containers (`lxc`)
 
 For over a decade, Linux virtualization and containerization has been split:
 
-* **Application Containers (OCI / Docker / Podman):**
-  * Great developer UX, `compose.yaml` standard
-  * Ephemeral microservices, layered image registries
-* **System Containers & Virtual Machines (LXC / Incus / KVM):**
-  * Full OS environments, systemd init, persistent servers
-  * Native ZFS/Btrfs/Linstor storage, real networking, high security
+- **Application Containers (OCI / Docker / Podman):**
+  - Great developer UX, `compose.yaml` standard
+  - Ephemeral microservices, layered image registries
+- **System Containers & Virtual Machines (LXC / Incus / KVM):**
+  - Full OS environments, systemd init, persistent servers
+  - Native ZFS/Btrfs/Linstor storage, real networking, high security
 
 **The developer reality:** The world adopted Compose for packaging stacks.
 
@@ -174,10 +174,13 @@ For over a decade, Linux virtualization and containerization has been split:
 
 When running Docker in production or development:
 
-* **The Root Daemon:** A monolithic daemon running with root privileges
-* **Network Masquerading:** Tangled `iptables` / `nftables` rules that bypass UFW and complicate routing
-* **Desktop Overhead:** On macOS and Windows, Docker Desktop requires a heavy, battery-draining virtual machine (or WSL2) just to run a daemon
-* **Storage Inefficiencies:** Overlayfs piled on top of host filesystems with fragile snapshotting and permissions headaches
+- **The Root Daemon:** A monolithic daemon running with root privileges
+- **Network Masquerading:** Tangled `iptables` / `nftables` rules that bypass
+  UFW and complicate routing
+- **Desktop Overhead:** On macOS and Windows, Docker Desktop requires a heavy,
+  battery-draining virtual machine (or WSL2) just to run a daemon
+- **Storage Inefficiencies:** Overlayfs piled on top of host filesystems with
+  fragile snapshotting and permissions headaches
 
 ---
 
@@ -197,19 +200,21 @@ People who love LXC / Incus often do this:
 +----------------------------------------------------+
 ```
 
-* **Two runtimes** doing one job
-* **Nested namespaces** add subtle failure modes
-* Often requires **privileged** containers or security concessions for nested overlayfs
-* Filesystem on top of filesystem wastes I/O and disk space
+- **Two runtimes** doing one job
+- **Nested namespaces** add subtle failure modes
+- Often requires **privileged** containers or security concessions for nested
+  overlayfs
+- Filesystem on top of filesystem wastes I/O and disk space
 
 ---
 
 ## Meet Incus: The Unified Linux Infrastructure Engine
 
-* **Community-driven fork of LXD** under the **Linux Containers** (`linuxcontainers.org`) project
-* **Apache 2.0 license**, fully open development
-* **One single daemon (`incusd`)**, one clean REST API
-* Runs **three workloads natively side-by-side**:
+- **Community-driven fork of LXD** under the **Linux Containers**
+  (`linuxcontainers.org`) project
+- **Apache 2.0 license**, fully open development
+- **One single daemon (`incusd`)**, one clean REST API
+- Runs **three workloads natively side-by-side**:
   1. **OCI Application Containers** (microservices, no nested daemon)
   2. **LXC System Containers** (full OS with systemd/OpenRC)
   3. **Hardware Virtual Machines** (KVM/QEMU)
@@ -218,13 +223,13 @@ People who love LXC / Incus often do this:
 
 ## Why Incus Excels
 
-| Capability | Classic OCI Engines (Docker) | Incus |
-| :--- | :--- | :--- |
-| **Isolation** | Namespaces + cgroups; daemon is root | **Unprivileged by default**, AppArmor + seccomp |
-| **Workloads** | Application containers only | **OCI apps, system containers, and KVM VMs** |
-| **Storage** | Layered overlayfs | **ZFS, Btrfs, Ceph, LVM, Linstor (DRBD)** |
-| **Networking** | iptables port mapping | **Real bridge/OVN IPs**, proxy devices, direct routing |
-| **Multi-tenancy** | Flat namespace | **Built-in Projects**, quotas, resource limits |
+| Capability        | Classic OCI Engines (Docker)         | Incus                                                  |
+| :---------------- | :----------------------------------- | :----------------------------------------------------- |
+| **Isolation**     | Namespaces + cgroups; daemon is root | **Unprivileged by default**, AppArmor + seccomp        |
+| **Workloads**     | Application containers only          | **OCI apps, system containers, and KVM VMs**           |
+| **Storage**       | Layered overlayfs                    | **ZFS, Btrfs, Ceph, LVM, Linstor (DRBD)**              |
+| **Networking**    | iptables port mapping                | **Real bridge/OVN IPs**, proxy devices, direct routing |
+| **Multi-tenancy** | Flat namespace                       | **Built-in Projects**, quotas, resource limits         |
 
 ---
 
@@ -246,23 +251,27 @@ Incus was designed from day one as a network-first API:
 +-----------------------------------+
 ```
 
-* The client is a **single cross-platform Go binary**
-* Talk to local or remote Incus servers directly over **TLS / HTTPS**
-* **Zero local VMs needed on macOS or Windows**
+- The client is a **single cross-platform Go binary**
+- Talk to local or remote Incus servers directly over **TLS / HTTPS**
+- **Zero local VMs needed on macOS or Windows**
 
 ---
 
 ## The Missing Link
 
 Incus has native OCI registry support:
-* It can pull images directly from `docker.io`, `ghcr.io`, or any registry
-* It can run an OCI container natively: unprivileged, with no nested Docker daemon
+
+- It can pull images directly from `docker.io`, `ghcr.io`, or any registry
+- It can run an OCI container natively: unprivileged, with no nested Docker
+  daemon
 
 **So why isn't everyone using it?**
 
-* Incus is an **infrastructure manager** (`incus launch`, `incus network create`)
-* It does not understand multi-service stacks, dependencies, or `.env` files
-* Writing 15 imperative `incus` commands to bring up a database, redis, and web app is tedious
+- Incus is an **infrastructure manager** (`incus launch`,
+  `incus network create`)
+- It does not understand multi-service stacks, dependencies, or `.env` files
+- Writing 15 imperative `incus` commands to bring up a database, redis, and web
+  app is tedious
 
 $\rightarrow$ **We needed Compose semantics on Incus.**
 
@@ -276,10 +285,12 @@ A drop-in replacement for `docker compose` powered by Incus.
 incus-compose up -d
 ```
 
-* **Standard Compose Spec:** Parsed using the official `compose-go` library (the same parser Docker Compose uses)
-* **Zero rewrites:** Point it at your existing `compose.yaml`
-* **Native Incus:** Translates services into unprivileged Incus OCI instances, managed networks, and native storage volumes
-* Part of the official **Linux Containers (`lxc`)** organization
+- **Standard Compose Spec:** Parsed using the official `compose-go` library (the
+  same parser Docker Compose uses)
+- **Zero rewrites:** Point it at your existing `compose.yaml`
+- **Native Incus:** Translates services into unprivileged Incus OCI instances,
+  managed networks, and native storage volumes
+- Part of the official **Linux Containers (`lxc`)** organization
 
 ---
 
@@ -296,7 +307,8 @@ incus-compose top               # Inspect running processes
 incus-compose down -v           # Stop and clean up (volumes optional)
 ```
 
-Plus: `start`, `stop`, `restart`, `pause`, `unpause`, `run`, `cp`, `build`, `config`.
+Plus: `start`, `stop`, `restart`, `pause`, `unpause`, `run`, `cp`, `build`,
+`config`.
 
 ---
 
@@ -333,27 +345,31 @@ Plus: `start`, `stop`, `restart`, `pause`, `unpause`, `run`, `cp`, `build`, `con
 
 How does `depends_on: { condition: service_healthy }` work?
 
-* **`ic-healthd`:** A lightweight sidecar daemon running on the Incus host
-* **Single Event Stream:** Connects to Incus via WebSocket events (`/1.0/events`)
-* **Zero Polling Overhead:**
-  * Detects when instances start, stop, or crash
-  * Runs defined `test:` commands inside the containers
-  * Updates `user.healthcheck.status` metadata
-  * Automatically restarts failed services per restart policy
-  * Signals `incus-compose` to unblock dependent services
+- **`ic-healthd`:** A lightweight sidecar daemon running on the Incus host
+- **Single Event Stream:** Connects to Incus via WebSocket events
+  (`/1.0/events`)
+- **Zero Polling Overhead:**
+  - Detects when instances start, stop, or crash
+  - Runs defined `test:` commands inside the containers
+  - Updates `user.healthcheck.status` metadata
+  - Automatically restarts failed services per restart policy
+  - Signals `incus-compose` to unblock dependent services
 
 ---
 
 ## Storage: Real Volumes & Seeding
 
-* **Native Storage Engine Backing:**
-  * In incus-compose, named volumes are **real Incus custom storage volumes** on **ZFS, Btrfs, Ceph, LVM, or Linstor (DRBD)**
-* **Image Seeding (Just Like Docker):**
-  * When an image declares a `VOLUME` or specifies a mount like `conf:/etc/nginx/conf.d`:
-  * `incus-compose` extracts the initial image data into the new volume on first run
-  * No more empty configs breaking your services
-* **UID/GID Shifting:**
-  * Clean translation between host and unprivileged container IDs
+- **Native Storage Engine Backing:**
+  - In incus-compose, named volumes are **real Incus custom storage volumes** on
+    **ZFS, Btrfs, Ceph, LVM, or Linstor (DRBD)**
+- **Image Seeding (Just Like Docker):**
+  - When an image declares a `VOLUME` or specifies a mount like
+    `conf:/etc/nginx/conf.d`:
+  - `incus-compose` extracts the initial image data into the new volume on first
+    run
+  - No more empty configs breaking your services
+- **UID/GID Shifting:**
+  - Clean translation between host and unprivileged container IDs
 
 ---
 
@@ -375,9 +391,9 @@ services:
         memory: 16GiB
 ```
 
-* Direct **GPU passthrough** (NVIDIA, AMD, Intel)
-* **Project-wide resource limits** enforced by the daemon
-* Custom device passthrough (USB devices, raw disk blocks, network interfaces)
+- Direct **GPU passthrough** (NVIDIA, AMD, Intel)
+- **Project-wide resource limits** enforced by the daemon
+- Custom device passthrough (USB devices, raw disk blocks, network interfaces)
 
 ---
 
@@ -385,12 +401,14 @@ services:
 
 Should you put system containers or VMs into `compose.yaml`? **No.**
 
-* **Compose is for Application Stacks (`incus-compose`):**
-  * OCI microservices, application ports, volume mappings, dependencies
-  * Forcing system containers (systemd init) or KVM VMs into Compose stretches the spec past its design
-* **Infrastructure as Code belongs in `incus-apply`:**
-  * Declarative management for **system containers, KVM VMs, profiles, networks, and storage pools**
-  * Keep infrastructure definition cleanly separated from application stacks
+- **Compose is for Application Stacks (`incus-compose`):**
+  - OCI microservices, application ports, volume mappings, dependencies
+  - Forcing system containers (systemd init) or KVM VMs into Compose stretches
+    the spec past its design
+- **Infrastructure as Code belongs in `incus-apply`:**
+  - Declarative management for **system containers, KVM VMs, profiles, networks,
+    and storage pools**
+  - Keep infrastructure definition cleanly separated from application stacks
 
 ---
 
@@ -398,8 +416,10 @@ Should you put system containers or VMs into `compose.yaml`? **No.**
 
 Building local container images on Incus without `incus-compose` is **painful**:
 
-* **Incus is a hypervisor, not a builder:** No native `Dockerfile` parser
-* **The Manual Chore:** Build locally $\rightarrow$ export image to a tarball $\rightarrow$ run `incus image import` $\rightarrow$ tag it $\rightarrow$ recreate the container manually. Every single code edit!
+- **Incus is a hypervisor, not a builder:** No native `Dockerfile` parser
+- **The Manual Chore:** Build locally $\rightarrow$ export image to a tarball
+  $\rightarrow$ run `incus image import` $\rightarrow$ tag it $\rightarrow$
+  recreate the container manually. Every single code edit!
 
 **With `incus-compose build`:**
 
@@ -414,9 +434,11 @@ services:
 incus-compose up --build
 ```
 
-* **Seamless pipeline:** Detects `buildah`, `podman`, or `docker` on your machine
-* **Direct Incus Import:** Builds the rootfs, streams it into the Incus project over the REST API, and restarts the service
-* Zero temporary registries, zero manual tarballs, zero friction
+- **Seamless pipeline:** Detects `buildah`, `podman`, or `docker` on your
+  machine
+- **Direct Incus Import:** Builds the rootfs, streams it into the Incus project
+  over the REST API, and restarts the service
+- Zero temporary registries, zero manual tarballs, zero friction
 
 ---
 
@@ -433,37 +455,39 @@ incus-compose backup list
 incus-compose backup restore 20260923-010000
 ```
 
-* Snapshots all named volumes and copies them into `<project>-backup`
-* Backups live in an **isolated Incus project**: safe from `down -v` accidents!
-* Includes `verify` and automated pruning (`--keep-last N`)
+- Snapshots all named volumes and copies them into `<project>-backup`
+- Backups live in an **isolated Incus project**: safe from `down -v` accidents!
+- Includes `verify` and automated pruning (`--keep-last N`)
 
 ---
 
 ## Superpower 4: Private Port Forwarding
 
-Ever had a database or internal admin panel that you didn't want to expose to the world?
+Ever had a database or internal admin panel that you didn't want to expose to
+the world?
 
 ```bash
 incus-compose port-forward db 5432
 ```
 
-* Listens on `localhost:5432` on your workstation
-* Tunnels TCP traffic securely through the **Incus HTTPS API** into the instance
-* The container port **never needs to be published** in `ports:` or exposed on the host!
-* Works from your Mac or Windows laptop to remote servers
+- Listens on `localhost:5432` on your workstation
+- Tunnels TCP traffic securely through the **Incus HTTPS API** into the instance
+- The container port **never needs to be published** in `ports:` or exposed on
+  the host!
+- Works from your Mac or Windows laptop to remote servers
 
 ---
 
 ## Air-Gapped and Fast Image Operations
 
-* **Two-stage Image Cache:**
-  * Pulls once, caches locally
-  * Survives `down` and `up` cycles
-  * Dodges Docker Hub / registry rate limits
-* **True Air-Gapped Operation:**
-  * `pull` is the *only* command that reaches out to the registry
-  * `incus-compose up --pull never` guarantees zero outbound calls
-  * Perfect for restricted enterprise networks, air-gapped environments, and CI
+- **Two-stage Image Cache:**
+  - Pulls once, caches locally
+  - Survives `down` and `up` cycles
+  - Dodges Docker Hub / registry rate limits
+- **True Air-Gapped Operation:**
+  - `pull` is the _only_ command that reaches out to the registry
+  - `incus-compose up --pull never` guarantees zero outbound calls
+  - Perfect for restricted enterprise networks, air-gapped environments, and CI
 
 ---
 
@@ -511,21 +535,26 @@ volumes:
       pool: ${UPLOAD_POOL}  # Place massive photo library on bulk ZFS pool
 ```
 
-* **No editing upstream compose files:** overrides merge cleanly
-* **Storage pool steering:** Fast NVMe for PostgreSQL, bulk ZFS HDD pool for photos
-* **Fixed IPs:** Direct static IP assignments on managed Incus bridges
+- **No editing upstream compose files:** overrides merge cleanly
+- **Storage pool steering:** Fast NVMe for PostgreSQL, bulk ZFS HDD pool for
+  photos
+- **Fixed IPs:** Direct static IP assignments on managed Incus bridges
 
 ---
 
 ## Live Demo: Immich in Action
 
 1. **Launch the stack:**
+
    ```bash
    incus-compose up -d
    ```
-   *(5 containers spin up in parallel; `ic-healthd` gates the API server until Postgres, Redis, and ML report healthy)*
+
+   _(5 containers spin up in parallel; `ic-healthd` gates the API server until
+   Postgres, Redis, and ML report healthy)_
 
 2. **Inspect & Verify:**
+
    ```bash
    incus-compose ps       # Shows compose health status
    incus list             # Shows unprivileged Incus containers with real IPs!
@@ -543,51 +572,65 @@ volumes:
 
 The Incus ecosystem is growing beyond the CLI:
 
-* **Dynamic Ingress: `incus-caddy-config`**
-  * Zero-touch reverse proxy for Caddy on Incus
-  * Subscribes to Incus lifecycle events via `ievent`
-  * Stages Caddyfiles via SFTP directly to the storage volume (`/config`), formats with `caddy fmt`, atomic swap, and `caddy reload`
-  * Auto-discovers and load-balances instances via labels:
+- **Dynamic Ingress: `incus-caddy-config`**
+  - Zero-touch reverse proxy for Caddy on Incus
+  - Subscribes to Incus lifecycle events via `ievent`
+  - Stages Caddyfiles via SFTP directly to the storage volume (`/config`),
+    formats with `caddy fmt`, atomic swap, and `caddy reload`
+  - Auto-discovers and load-balances instances via labels:
     `edge: "photos.example.com,upstream=2283"`
-* **Split-Horizon DNS: `ic-dns` (in `develop`)**
-  * Integrated authoritative DNS server (`incus-compose dns {up|down|status|logs}`)
-  * Resolves service names across compose projects and hosts cleanly via `x-incus-compose.dns`
+- **Split-Horizon DNS: `ic-dns` (in `develop`)**
+  - Integrated authoritative DNS server
+    (`incus-compose dns {up|down|status|logs}`)
+  - Resolves service names across compose projects and hosts cleanly via
+    `x-incus-compose.dns`
 
 ---
 
 ## Where Things Go: Clustering & An Operator?
 
-* **True Clustering Support (Predictable Workloads):**
-  * Native Incus cluster integration
-  * **Core principle:** Containers stay **pinned to their assigned node** for data locality, storage stability, and operational sanity
-  * **Never migrate or shuffle containers around** during normal operation—failover only occurs upon host crash
-* **`ic-healthd` as the Operator?:**
-  * Stacks only *declare* desired state and graph edges on instance metadata (`user.operator.*`)
-  * CLI becomes an **applier + watcher**; kill CLI mid-`up` and the stack still converges
-  * Daemon acts as **reconciler**: enforces topological boot ordering after host reboots (`boot.autostart: false`), cascading restarts (`restart: true`), and drift correction
+- **True Clustering Support (Predictable Workloads):**
+  - Native Incus cluster integration
+  - **Core principle:** Containers stay **pinned to their assigned node** for
+    data locality, storage stability, and operational sanity
+  - **Never migrate or shuffle containers around** during normal
+    operation—failover only occurs upon host crash
+- **`ic-healthd` as the Operator?:**
+  - Stacks only _declare_ desired state and graph edges on instance metadata
+    (`user.operator.*`)
+  - CLI becomes an **applier + watcher**; kill CLI mid-`up` and the stack still
+    converges
+  - Daemon acts as **reconciler**: enforces topological boot ordering after host
+    reboots (`boot.autostart: false`), cascading restarts (`restart: true`), and
+    drift correction
 
 ---
 
 ## When to Use What: An Honest Assessment
 
 **Stick with Docker / Podman when:**
-* You are deploying to managed Kubernetes clusters (EKS, GKE, K3s)
-* You depend on cloud provider proprietary container engines (AWS ECS, Google Cloud Run)
-* You rely on Docker Desktop GUI extensions on developer machines
+
+- You are deploying to managed Kubernetes clusters (EKS, GKE, K3s)
+- You depend on cloud provider proprietary container engines (AWS ECS, Google
+  Cloud Run)
+- You rely on Docker Desktop GUI extensions on developer machines
 
 **Choose Incus + incus-compose when:**
-* You run Linux servers: VPS, bare metal, homelabs, edge nodes
-* You care about **security by default** (unprivileged, AppArmor, seccomp)
-* You want **real storage** (ZFS, Btrfs, Ceph, Linstor DRBD copy-on-write snapshots)
-* You want a clean, unified platform for **OCI microservices, system containers, and VMs**
+
+- You run Linux servers: VPS, bare metal, homelabs, edge nodes
+- You care about **security by default** (unprivileged, AppArmor, seccomp)
+- You want **real storage** (ZFS, Btrfs, Ceph, Linstor DRBD copy-on-write
+  snapshots)
+- You want a clean, unified platform for **OCI microservices, system containers,
+  and VMs**
 
 ---
 
 ## Project Status & Community
 
-* **Destination:** Official Linux Containers project (`lxc/incus-compose`)
-* **Current Version:** `v1.3.x` (active, rapid development)
-* **Installation:**
+- **Destination:** Official Linux Containers project (`lxc/incus-compose`)
+- **Current Version:** `v1.3.x` (active, rapid development)
+- **Installation:**
   ```bash
   # Standalone installer
   curl -sSfL https://raw.githubusercontent.com/lxc/incus-compose/main/install.sh | sh -s -- -b ~/.local/bin
@@ -595,9 +638,10 @@ The Incus ecosystem is growing beyond the CLI:
   # Arch Linux AUR: incus-compose-bin
   # Debian/Ubuntu: incus-extra package via zabbly repository
   ```
-* **Documentation:** [incus-compose.org](https://incus-compose.org)
-* **GitHub:** [github.com/lxc/incus-compose](https://github.com/lxc/incus-compose)
-* **Forum:** [discuss.linuxcontainers.org](https://discuss.linuxcontainers.org)
+- **Documentation:** [incus-compose.org](https://incus-compose.org)
+- **GitHub:**
+  [github.com/lxc/incus-compose](https://github.com/lxc/incus-compose)
+- **Forum:** [discuss.linuxcontainers.org](https://discuss.linuxcontainers.org)
 
 ---
 
@@ -605,6 +649,6 @@ The Incus ecosystem is growing beyond the CLI:
 
 ### Thank you!
 
-* **GitHub:** `github.com/lxc/incus-compose`
-* **Docs:** `incus-compose.org`
-* **Community Forum:** `discuss.linuxcontainers.org`
+- **GitHub:** `github.com/lxc/incus-compose`
+- **Docs:** `incus-compose.org`
+- **Community Forum:** `discuss.linuxcontainers.org`

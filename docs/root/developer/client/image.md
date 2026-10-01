@@ -338,15 +338,16 @@ Hop A is guarded by a per-alias advisory lock, so two workers - or two separate
 `incus-compose` invocations - cannot pull or build the same alias into the store
 at once, and a force delete cannot race a reader.
 
-Image locking uses the unified [Advisory Locking](/developer/client/locking) system:
-it calls `r.client.Global().Lock(ctx, "image/"+r.cacheAlias(), imageLockStale)` on the global
-`LocksVolume` (`locks` in `globalProject`).
+Image locking uses the unified [Advisory Locking](/developer/client/locking)
+system: it calls
+`r.client.Global().Lock(ctx, "image/"+r.cacheAlias(), imageLockStale)` on the
+global `LocksVolume` (`locks` in `globalProject`).
 
-Before acquiring the image lock, `Global().Lock` waits on `LockGlobalProject` to ensure
-no infrastructure upgrade is in flight. Once the global project is clear, it acquires
-the lock on the image path with `stale = 2m`. The holder heartbeats while a slow pull
-or a long build runs, and a crashed holder is reaped rather than wedging the cache for
-everyone.
+Before acquiring the image lock, `Global().Lock` waits on `LockGlobalProject` to
+ensure no infrastructure upgrade is in flight. Once the global project is clear,
+it acquires the lock on the image path with `stale = 2m`. The holder heartbeats
+while a slow pull or a long build runs, and a crashed holder is reaped rather
+than wedging the cache for everyone.
 
 ```go
 func (r *Image) lockStore(ctx context.Context) (func(), error) {
@@ -357,6 +358,7 @@ func (r *Image) lockStore(ctx context.Context) (func(), error) {
     return r.client.Global().Lock(ctx, "image/"+r.cacheAlias(), imageLockStale)
 }
 ```
+
 One volume holds every lock; the per-alias granularity is one file per alias
 inside it under `image/<alias>`.
 

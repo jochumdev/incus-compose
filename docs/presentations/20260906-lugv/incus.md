@@ -148,27 +148,28 @@ style: |
 ---
 
 # Incus & Its Legacy
+
 ### A 5-Minute Crash Course on System Containers and the Incus Hypervisor
 
-**Speaker:** René Jochum
-Linux Containers (`lxc`)
+**Speaker:** René Jochum Linux Containers (`lxc`)
 
 ---
 
 ## 1. The Concept: System Containers
 
-Docker popularized **application containers** (one process, disposable).
-Incus comes from the **LXC** heritage of <span class="highlight">System Containers</span> (a complete Linux OS).
+Docker popularized **application containers** (one process, disposable). Incus
+comes from the **LXC** heritage of <span class="highlight">System
+Containers</span> (a complete Linux OS).
 
-* **It looks, feels, and acts like a Virtual Machine:**
-  * Runs a complete Linux distribution: Debian, Ubuntu, Alpine, Arch, Fedora
-  * Boots with a real init system (`systemd` or `OpenRC`) as PID 1
-  * You can SSH in, create users, install packages with `apt`, and run daemons
-* **...But with bare-metal speed:**
-  * **Boots in 200ms**, consumes **~25MB RAM** at idle
-  * Zero hypervisor overhead: runs directly on host cgroups & namespaces
-* **Security by default:**
-  * Unprivileged user namespaces (`UID 0` inside $\ne$ root on host) + AppArmor
+- **It looks, feels, and acts like a Virtual Machine:**
+  - Runs a complete Linux distribution: Debian, Ubuntu, Alpine, Arch, Fedora
+  - Boots with a real init system (`systemd` or `OpenRC`) as PID 1
+  - You can SSH in, create users, install packages with `apt`, and run daemons
+- **...But with bare-metal speed:**
+  - **Boots in 200ms**, consumes **~25MB RAM** at idle
+  - Zero hypervisor overhead: runs directly on host cgroups & namespaces
+- **Security by default:**
+  - Unprivileged user namespaces (`UID 0` inside $\ne$ root on host) + AppArmor
 
 ---
 
@@ -176,12 +177,13 @@ Incus comes from the **LXC** heritage of <span class="highlight">System Containe
 
 Incus is not just a container runner—it is a **unified infrastructure manager**:
 
-* **First-Class Storage:**
-  * Pluggable drivers for **ZFS, Btrfs, LVM, and Linstor (DRBD)**
-  * Instant sub-second copy-on-write snapshots, clones, and block-level quotas
-* **The Unified Hypervisor (Containers + VMs):**
-  * Need Windows, FreeBSD, or a custom kernel? Incus manages **KVM VMs** side-by-side
-  * **One API and CLI for both:**
+- **First-Class Storage:**
+  - Pluggable drivers for **ZFS, Btrfs, LVM, and Linstor (DRBD)**
+  - Instant sub-second copy-on-write snapshots, clones, and block-level quotas
+- **The Unified Hypervisor (Containers + VMs):**
+  - Need Windows, FreeBSD, or a custom kernel? Incus manages **KVM VMs**
+    side-by-side
+  - **One API and CLI for both:**
     ```bash
     incus launch images:debian/trixie my-container   # System Container
     incus launch images:debian/trixie my-vm --vm      # KVM Virtual Machine
@@ -206,7 +208,8 @@ August 2023: Incus is Born
       - 100% open source (Apache 2.0), no CLA, distro-independent
 ```
 
-* **Pronunciation:** LXD is <span class="highlight">"Lex-Dee"</span>; Incus is <span class="highlight">"In-kus"</span>
+- **Pronunciation:** LXD is <span class="highlight">"Lex-Dee"</span>; Incus is
+  <span class="highlight">"In-kus"</span>
 
 ---
 
@@ -214,11 +217,12 @@ August 2023: Incus is Born
 
 Incus modernized rapidly, solving the final puzzle piece:
 
-* **The Reality:** Developers package applications as **Docker/OCI images**
-* **Incus Native OCI:**
-  * Incus can now pull directly from `docker.io`, `ghcr.io`, or any OCI registry
-  * Runs application containers directly (natively, unprivileged, no nested Docker daemon)
-* **The Trifecta in One REST API:**
+- **The Reality:** Developers package applications as **Docker/OCI images**
+- **Incus Native OCI:**
+  - Incus can now pull directly from `docker.io`, `ghcr.io`, or any OCI registry
+  - Runs application containers directly (natively, unprivileged, no nested
+    Docker daemon)
+- **The Trifecta in One REST API:**
   1. **OCI Application Containers** (microservices)
   2. **LXC System Containers** (full OS userlands)
   3. **KVM Virtual Machines** (hardware virtualization)
@@ -229,13 +233,16 @@ Incus modernized rapidly, solving the final puzzle piece:
 
 We have the ultimate Linux hypervisor. **So what was missing?**
 
-* Developers have millions of `compose.yaml` files
-* Nobody wants to write 20 imperative CLI commands to launch a multi-service stack
+- Developers have millions of `compose.yaml` files
+- Nobody wants to write 20 imperative CLI commands to launch a multi-service
+  stack
 
 $\rightarrow$ **`incus-compose` is the drop-in bridge:**
-* Point it at your existing `compose.yaml` $\rightarrow$ `incus-compose up -d`
-* Runs directly on Incus with official `compose-go` parsing
-* Handles health checks, restart policies, and dependency gating via `ic-healthd`
-* Instant ZFS/Linstor volume backups and zero-touch ingress
+
+- Point it at your existing `compose.yaml` $\rightarrow$ `incus-compose up -d`
+- Runs directly on Incus with official `compose-go` parsing
+- Handles health checks, restart policies, and dependency gating via
+  `ic-healthd`
+- Instant ZFS/Linstor volume backups and zero-touch ingress
 
 **Now, let's look at the main presentation and see it in action!**

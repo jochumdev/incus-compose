@@ -61,8 +61,8 @@ Locks are managed over SFTP through
 ## Lock Architecture
 
 Locking methods belong directly on `GlobalClient` (accessible via `gc` or
-`c.Global()`) to keep global state manipulation explicit. There are no forwarding
-methods on `Client`.
+`c.Global()`) to keep global state manipulation explicit. There are no
+forwarding methods on `Client`.
 
 Locking is structured into three layers:
 
@@ -72,7 +72,8 @@ Locking is structured into three layers:
 func (c *GlobalClient) LockDirect(ctx context.Context, name string, stale time.Duration) (func(), error)
 ```
 
-`c.LockDirect` acquires the lock directly without waiting on the global project barrier:
+`c.LockDirect` acquires the lock directly without waiting on the global project
+barrier:
 
 - Resolves the global project client via
   `c.EnsureProject(c.config.GlobalProject)`.
@@ -126,8 +127,8 @@ project is in flux.
 #### Why Acquire "global" First?
 
 All advisory locks—including image locks, network locks, and custom resource
-locks—are stored as files on `LocksVolume` (`locks`), which itself resides inside
-the **global project** (`incus-client`).
+locks—are stored as files on `LocksVolume` (`locks`), which itself resides
+inside the **global project** (`incus-client`).
 
 During host upgrades (such as migrating legacy bridge networks to OVN via
 `upgradeGlobalProject`), the global project itself may be deleted, reconfigured,
@@ -149,9 +150,9 @@ and recreated. If everyday locks were allowed to connect directly:
 
 ## Image Locking
 
-Image operations use `c.Global().Lock` to prevent concurrent races—you cannot download
-the same image twice simultaneously (Incus rejects duplicate alias creation with
-an error):
+Image operations use `c.Global().Lock` to prevent concurrent races—you cannot
+download the same image twice simultaneously (Incus rejects duplicate alias
+creation with an error):
 
 ```go
 func (r *Image) lockStore(ctx context.Context) (func(), error) {
