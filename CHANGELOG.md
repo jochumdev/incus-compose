@@ -82,7 +82,15 @@ form.
   `c.SleepImage()`, and `c.Resource()`) instead of raw Incus API and `iclient`
   calls. (by @jochumdev)
 
-## [Unreleased-main]
+### Fixed
+
+- Network `aliases` are now flushed to `raw.dnsmasq` when all services in a
+  project set `container_name` equal to their service key. Previously, DNS alias
+  flushing was only triggered during instance address registration, which was
+  skipped when the container name matched the service name. (by @Tofil,
+  @jochumdev, #206)
+
+## [v1.3.4] - 2026-09-17
 
 ### Fixed
 

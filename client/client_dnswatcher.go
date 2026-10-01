@@ -135,18 +135,46 @@ func (c *Client) RegisterDNSWatcher() error {
 				return ErrDNSWatcher.WithText("resource is not an *Instance")
 			}
 
-			// No need to do anything if service and incus name are the same or service name is empty.
-			if inst.ServiceName() == inst.IncusName() || inst.ServiceName() == "" {
+			if inst.ServiceName() == "" {
 				return nil
 			}
 
-			svcKey := inst.ServiceName()
-			ownedSet[svcKey] = struct{}{}
+			hasCNames := false
+			for _, net := range networks {
+				if len(net.CNames) > 0 {
+					hasCNames = true
+					break
+				}
+			}
+
+			needIPs := inst.ServiceName() != inst.IncusName()
+			if !needIPs && !hasCNames {
+				return nil
+			}
+
+			if needIPs {
+				svcKey := inst.ServiceName()
+				ownedSet[svcKey] = struct{}{}
+			}
 
 			changed := false
 			switch action {
 			case ActionEnsure:
 				if !inst.Created() && inst.Running() {
+					if needIPs {
+						ips, ipErr := inst.WaitIPs(ctx, dnsIPWaitTimeout)
+						if ipErr != nil {
+							return ErrDNSWatcher.Wrap(ipErr)
+						}
+
+						instances[inst.IncusName()] = inst
+						instanceIPs[inst.IncusName()] = ips
+					}
+
+					changed = true
+				}
+			case ActionStart:
+				if needIPs {
 					ips, ipErr := inst.WaitIPs(ctx, dnsIPWaitTimeout)
 					if ipErr != nil {
 						return ErrDNSWatcher.Wrap(ipErr)
@@ -154,22 +182,14 @@ func (c *Client) RegisterDNSWatcher() error {
 
 					instances[inst.IncusName()] = inst
 					instanceIPs[inst.IncusName()] = ips
-
-					changed = true
 				}
-			case ActionStart:
-				ips, ipErr := inst.WaitIPs(ctx, dnsIPWaitTimeout)
-				if ipErr != nil {
-					return ErrDNSWatcher.Wrap(ipErr)
-				}
-
-				instances[inst.IncusName()] = inst
-				instanceIPs[inst.IncusName()] = ips
 
 				changed = true
 			case ActionStop:
-				delete(instances, inst.IncusName())
-				delete(instanceIPs, inst.IncusName())
+				if needIPs {
+					delete(instances, inst.IncusName())
+					delete(instanceIPs, inst.IncusName())
+				}
 
 				changed = true
 			default:
@@ -221,10 +241,18 @@ func (c *Client) RegisterDNSWatcher() error {
 					}
 				}
 
-				err = network.updateDNSAliases(ctx, owned, servicesIPs)
+				updated, err := network.updateDNSAliases(ctx, owned, servicesIPs)
+				if err != nil && strings.Contains(err.Error(), "ETag doesn't match") {
+					// Try a second time.
+					time.Sleep(100 * time.Millisecond)
+					updated, err = network.updateDNSAliases(ctx, owned, servicesIPs)
+				}
+
 				errs = errors.Join(errs, err)
 
-				lastRestart = time.Now()
+				if updated {
+					lastRestart = time.Now()
+				}
 			}
 
 			err = errors.Join(err, errs)

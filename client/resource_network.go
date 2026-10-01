@@ -502,14 +502,15 @@ func isConcurrencyConflict(err error) bool {
 // Non-bridge networks are skipped: raw.dnsmasq is a bridge-only option.
 // Setting raw.dnsmasq disables AppArmor for the dnsmasq process (not containers).
 // The update is idempotent: if the resulting config is unchanged, dnsmasq is not restarted.
-func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, newIPs map[string][]string) error {
+// It reports whether raw.dnsmasq was updated.
+func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, newIPs map[string][]string) (bool, error) {
 	if !r.IsEnsured() {
-		return nil
+		return false, nil
 	}
 
 	conn, err := r.client.GlobalConnection()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	err = retry.New(
@@ -615,10 +616,10 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("updating dnsmasq records for network %q: %w", r.Name(), err)
+		return false, fmt.Errorf("updating dnsmasq records for network %q: %w", r.Name(), err)
 	}
 
-	return nil
+	return true, nil
 }
 
 var (
