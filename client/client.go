@@ -102,6 +102,7 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool, pr
 
 	if c.IsDebugging() {
 		cp.logger = cp.logger.With("incus_project", incusName)
+		cp.LogDebug("Running on network type", "type", cp.NetworkType())
 	}
 
 	c.projects = append(c.projects, cp)
@@ -109,6 +110,14 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool, pr
 	if c.IsDebugging() {
 		// Debug logging hooks
 		c.AddHookBefore(func(_ context.Context, action Action, r Resource, args Options, err error) error {
+			if r.Kind() == KindNetwork {
+				net, ok := r.(*Network)
+				if ok {
+					c.LogDebug("Running", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "network_type", net.Config.Type)
+					return err
+				}
+			}
+
 			c.LogDebug("Running", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName())
 			return err
 		})
@@ -116,6 +125,14 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool, pr
 			if err != nil {
 				c.LogWarn("Result with error", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created(), "error", err)
 				return err
+			}
+
+			if r.Kind() == KindNetwork {
+				net, ok := r.(*Network)
+				if ok {
+					c.LogDebug("Run", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created(), "network_type", net.Config.Type)
+					return nil
+				}
 			}
 
 			c.LogDebug("Run", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created())
@@ -168,6 +185,15 @@ func (c *Client) Clone() *Client {
 // FeaturesNetworks reports whether the project has features.networks enabled.
 func (c *Client) FeaturesNetworks() bool {
 	return c.projectConfig["features.networks"] == "true"
+}
+
+// NetworkType reports the default network type for the project ("ovn" or "bridge").
+func (c *Client) NetworkType() string {
+	if c.FeaturesNetworks() {
+		return "ovn"
+	}
+
+	return "bridge"
 }
 
 // rangeResources runs f over this client's resources and every clone's.

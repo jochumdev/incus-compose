@@ -193,6 +193,8 @@ func newUpCommand() *cli.Command {
 				return errLogged.Wrap(err)
 			}
 
+			c.LogDebug("Running on network type", "type", c.NetworkType())
+
 			// The recreate client has own errors it ignores and it registers
 			// its own hooks (DNSWatcher).
 			rc := c.Clone()
