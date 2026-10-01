@@ -50,12 +50,6 @@ func newHealthdDownCommand() *cli.Command {
 		Name:  "down",
 		Usage: "Stop and remove the ic-healthd sidecar",
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "image",
-				Usage:   `Healthd OCI image to use; {version} is replaced with the incus-compose version`,
-				Value:   DefaultHealthdImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
-			},
 			&cli.BoolFlag{
 				Name:    "force",
 				Usage:   "Stop the shared ic-healthd without asking, even when other projects rely on it",

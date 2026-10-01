@@ -390,12 +390,6 @@ func newHealthdUpCommand() *cli.Command {
 		Usage: "Create or recreate the ic-healthd sidecar",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "image",
-				Usage:   `Healthd OCI image to use; {version} is replaced with the incus-compose version`,
-				Value:   DefaultHealthdImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
-			},
-			&cli.StringFlag{
 				Name:    "binary",
 				Usage:   "Path to local ic-healthd binary (uses images:alpine/edge instead of OCI image)",
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_BINARY"),
@@ -445,7 +439,7 @@ func newHealthdUpCommand() *cli.Command {
 
 			upArgs := healthdUpArgs{
 				Binary:  cmd.String("binary"),
-				Image:   cmd.String("image"),
+				Image:   healthdImage(),
 				Incus:   cmd.String("incus"),
 				Network: cmd.String("network"),
 				Scope:   cmd.String("scope"),

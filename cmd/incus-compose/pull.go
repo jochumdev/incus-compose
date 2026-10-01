@@ -24,10 +24,6 @@ type pullArgs struct {
 	IgnoreBuildable    bool
 	IgnorePullFailures bool
 
-	HealthdImage string
-	SleepImage   string
-	DNSImage     string
-
 	Pull    client.PullMode
 	Scale   map[string]int
 	Workers int
@@ -84,7 +80,7 @@ func pull(ctx context.Context, p *project.Project, c *client.Client, args pullAr
 		}
 	}
 
-	err = downloadTools(ctx, c, args.HealthdImage, args.SleepImage, args.DNSImage)
+	err = downloadTools(ctx, c)
 	if err != nil {
 		c.LogWarn("While downloading tools", "error", err)
 	}
@@ -209,24 +205,6 @@ func newPullCommand() *cli.Command {
 				Value:   "always",
 				Sources: cli.EnvVars("INCUS_COMPOSE_PULL_POLICY"),
 			},
-			&cli.StringFlag{
-				Name:    "healthd-image",
-				Usage:   `Healthd OCI image to use; {version} is replaced with the incus-compose version`,
-				Value:   DefaultHealthdImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
-			},
-			&cli.StringFlag{
-				Name:    "sleep-image",
-				Usage:   "Image the `run` helper comes from",
-				Value:   DefaultSleepImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
-			},
-			&cli.StringFlag{
-				Name:    "dns-image",
-				Usage:   "ic-dns image",
-				Value:   DefaultDNSImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_IMAGE"),
-			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			p, c, err := loadProject(ctx, cmd, client.EnsureProjectWithCreate())
@@ -261,9 +239,6 @@ func newPullCommand() *cli.Command {
 				WithDeps:           cmd.Bool("include-deps"),
 				IgnoreBuildable:    cmd.Bool("ignore-buildable"),
 				IgnorePullFailures: cmd.Bool("ignore-pull-failures"),
-				HealthdImage:       cmd.String("healthd-image"),
-				SleepImage:         cmd.String("sleep-image"),
-				DNSImage:           cmd.String("dns-image"),
 				Pull:               pullMode,
 				Workers:            cmd.Root().Int("workers"),
 				Debug:              cmd.Root().Bool("debug"),
@@ -273,27 +248,7 @@ func newPullCommand() *cli.Command {
 	}
 }
 
-func downloadTools(ctx context.Context, c *client.Client, healthdImage string, sleepImage string, dnsImage string) error {
-	var errs error
-	if healthdImage == "" {
-		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_HEALTHD_IMAGE is empty"))
-	}
-	healthdImage = resolveImageVersion(healthdImage)
-
-	if sleepImage == "" {
-		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_SLEEP_IMAGE is empty"))
-	}
-	sleepImage = resolveImageVersion(sleepImage)
-
-	if dnsImage == "" {
-		errs = errors.Join(errs, fmt.Errorf("INCUS_COMPOSE_DNS_IMAGE is empty"))
-	}
-	dnsImage = resolveImageVersion(dnsImage)
-
-	if errs != nil {
-		return errs
-	}
-
+func downloadTools(ctx context.Context, c *client.Client) error {
 	sysClient, err := c.Global().EnsureProject(globalProject, client.EnsureProjectWithCreate())
 	if err != nil {
 		return fmt.Errorf("failed to ensure the %q project: %w", globalProject, err)
@@ -305,7 +260,8 @@ func downloadTools(ctx context.Context, c *client.Client, healthdImage string, s
 	}
 	release()
 
-	for _, image := range []string{healthdImage, sleepImage, dnsImage} {
+	var errs error
+	for _, image := range []string{healthdImage(), c.Config().SleepImage, dnsImage()} {
 		res, err := sysClient.Resource(client.KindImage, image, &client.ImageConfig{})
 		if err != nil {
 			errs = errors.Join(errs, err)

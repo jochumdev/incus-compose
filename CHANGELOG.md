@@ -84,8 +84,12 @@ form.
 
 - Refactor the `run` command in `cmd/incus-compose/run.go` to use
   `client.Client` abstractions (`c.EnsureTools()`, `c.Config().ToolsMount`,
-  `c.Config().SleepImage`, and `c.Resource()`) instead of raw Incus API and `iclient`
-  calls. (by @jochumdev)
+  `c.Config().SleepImage`, and `c.Resource()`) instead of raw Incus API and
+  `iclient` calls. (by @jochumdev)
+
+- Remove `--healthd-image`, `--sleep-image`, and `--dns-image` CLI flags from
+  subcommands (`up`, `run`, `pull`, `healthd up`/`down`, `dns up`). Images are
+  resolved centrally on initialization. (by @jochumdev)
 
 ### Fixed
 

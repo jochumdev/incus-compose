@@ -642,12 +642,6 @@ func newDNSUpCommand() *cli.Command {
 		Usage: "Create or recreate the ic-dns sidecar",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "image",
-				Usage:   `DNS OCI image to use; {version} is replaced with the incus-compose version`,
-				Value:   DefaultDNSImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_IMAGE"),
-			},
-			&cli.StringFlag{
 				Name:    "incus",
 				Usage:   `Connection URL of the incus to connect to from inside the sidecar. Empty = detect the ip from the bridge we are connected to`,
 				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_INCUS"),
@@ -737,7 +731,7 @@ func newDNSUpCommand() *cli.Command {
 			}
 
 			upArgs := dnsUpArgs{
-				Image:         cmd.String("image"),
+				Image:         dnsImage(),
 				Incus:         cmd.String("incus"),
 				Network:       cmd.String("network"),
 				IPv4Address:   cmd.String("ipv4"),

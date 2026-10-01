@@ -182,6 +182,26 @@ func resolveImageVersion(image string) string {
 	return strings.ReplaceAll(image, "{version}", v)
 }
 
+func resolveImage(env, defaultImage string) string {
+	if env != "" {
+		return resolveImageVersion(env)
+	}
+
+	return resolveImageVersion(defaultImage)
+}
+
+func healthdImage() string {
+	return resolveImage(os.Getenv("INCUS_COMPOSE_HEALTHD_IMAGE"), DefaultHealthdImage)
+}
+
+func sleepImage() string {
+	return resolveImage(os.Getenv("INCUS_COMPOSE_SLEEP_IMAGE"), defaultSleepImage)
+}
+
+func dnsImage() string {
+	return resolveImage(os.Getenv("INCUS_COMPOSE_DNS_IMAGE"), DefaultDNSImage)
+}
+
 func clientFromContext(ctx context.Context) (*client.GlobalClient, error) {
 	ca := ctx.Value(clientKey{})
 	c, ok := ca.(*client.GlobalClient)
@@ -381,17 +401,12 @@ func newRootCommand() *cli.Command {
 			// 	cacheProject = ""
 			// }
 
-			sleepImage := defaultSleepImage
-			if envSleep := os.Getenv("INCUS_COMPOSE_SLEEP_IMAGE"); envSleep != "" {
-				sleepImage = envSleep
-			}
-
 			opts := []client.ClientOption{
 				client.ClientGlobalProject(globalProject),
 				client.ClientLocksVolume(locksVolume),
 				client.ClientToolsVolume(toolsVolume),
 				client.ClientToolsMount(toolsMount),
-				client.ClientSleepImage(resolveImageVersion(sleepImage)),
+				client.ClientSleepImage(sleepImage()),
 				client.ClientDescriptionFormat("incus-compose: %s"),
 				client.ClientLogger(logger),
 				client.ClientStdout(cmd.Writer),

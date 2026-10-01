@@ -42,7 +42,6 @@ type runArgs struct {
 	Group        string
 	Workdir      string
 	Name         string
-	SleepImage   string
 	Remove       bool
 	NoDeps       bool
 	Detach       bool
@@ -92,9 +91,6 @@ func run(ctx context.Context, p *project.Project, c *client.Client, args runArgs
 		Services:        []string{args.Service},
 		WithDeps:        !args.NoDeps,
 		IgnoreBuildable: true,
-		HealthdImage:    DefaultHealthdImage,
-		SleepImage:      c.Config().SleepImage,
-		DNSImage:        DefaultDNSImage,
 		Pull:            args.Pull,
 		Workers:         args.Workers,
 		Debug:           args.Debug,
@@ -508,12 +504,6 @@ func newRunCommand() *cli.Command {
 				Value:   "missing",
 				Sources: cli.EnvVars("INCUS_COMPOSE_RUN_PULL"),
 			},
-			&cli.StringFlag{
-				Name:    "sleep-image",
-				Usage:   "Image the blocking helper comes from",
-				Value:   DefaultSleepImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
-			},
 			&cli.DurationFlag{
 				Name:    "timeout",
 				Usage:   "Timeout for creating and stopping the one-off",
@@ -582,7 +572,6 @@ func newRunCommand() *cli.Command {
 				Group:        cmd.String("group"),
 				Workdir:      cmd.String("workdir"),
 				Name:         name,
-				SleepImage:   cmd.String("sleep-image"),
 				Remove:       cmd.Bool("rm"),
 				NoDeps:       cmd.Bool("no-deps"),
 				Detach:       cmd.Bool("detach"),

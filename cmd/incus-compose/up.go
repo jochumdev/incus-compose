@@ -97,18 +97,6 @@ func newUpCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_EXTERNAL_HEALTHD"),
 			},
 			&cli.StringFlag{
-				Name:    "healthd-image",
-				Usage:   `Healthd OCI image to use; {version} is replaced with the incus-compose version`,
-				Value:   DefaultHealthdImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_IMAGE"),
-			},
-			&cli.StringFlag{
-				Name:    "sleep-image",
-				Usage:   "Image the `run` helper comes from",
-				Value:   DefaultSleepImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_SLEEP_IMAGE"),
-			},
-			&cli.StringFlag{
 				Name:    "healthd-binary",
 				Usage:   "Path to local ic-healthd binary (uses images:alpine/edge instead of OCI image)",
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_BINARY"),
@@ -127,12 +115,6 @@ func newUpCommand() *cli.Command {
 				Name:    "healthd-scope",
 				Usage:   "Which healthd watches this project: `global` (shared, in its own project) or `project` (a sidecar of its own); loses to a scope the project already carries",
 				Sources: cli.EnvVars("INCUS_COMPOSE_HEALTHD_SCOPE"),
-			},
-			&cli.StringFlag{
-				Name:    "dns-image",
-				Usage:   "ic-dns image",
-				Value:   DefaultDNSImage,
-				Sources: cli.EnvVars("INCUS_COMPOSE_DNS_IMAGE"),
 			},
 			&cli.BoolFlag{
 				Name:    "no-dns",
@@ -275,9 +257,6 @@ func newUpCommand() *cli.Command {
 				Services:        cmd.Args().Slice(),
 				WithDeps:        !cmd.Bool("no-deps"),
 				IgnoreBuildable: true,
-				HealthdImage:    cmd.String("healthd-image"),
-				SleepImage:      cmd.String("sleep-image"),
-				DNSImage:        cmd.String("dns-image"),
 				Pull:            pullMode,
 				Scale:           scale,
 				Workers:         cmd.Root().Int("workers"),
@@ -325,7 +304,7 @@ func newUpCommand() *cli.Command {
 			if usesHealthd && !cmd.Bool("external-healthd") {
 				err = healthdUp(ctx, p, c, healthdUpArgs{
 					Binary:  cmd.String("healthd-binary"),
-					Image:   cmd.String("healthd-image"),
+					Image:   healthdImage(),
 					Incus:   cmd.String("healthd-incus"),
 					Network: cmd.String("healthd-network"),
 					Scope:   cmd.String("healthd-scope"),
@@ -349,7 +328,7 @@ func newUpCommand() *cli.Command {
 			usesDNS := !p.ClientConfig.DNS.Disabled
 			if usesDNS {
 				err = dnsUp(ctx, p, c, dnsUpArgs{
-					Image:   cmd.String("dns-image"),
+					Image:   dnsImage(),
 					Pull:    cmd.String("pull"),
 					Timeout: cmd.Duration("timeout"),
 					Workers: cmd.Root().Int("workers"),
