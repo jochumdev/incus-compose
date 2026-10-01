@@ -1,10 +1,10 @@
 ---
-date: 2026-08-28T05:01:42.000Z
-dateCreated: 2026-08-27T23:47:20.000Z
+date: 2026-08-28T05:01:42Z
+dateCreated: 2026-08-27T23:47:20Z
 leafwiki_id: UtxvxnQDg
 leafwiki_title: Air-gapped and Proxied Installs
-leafwiki_created_at: "2026-08-27T23:47:20.549895448Z"
-leafwiki_updated_at: "2026-08-28T05:01:42.000000000Z"
+leafwiki_created_at: "2026-08-27T23:47:20Z"
+leafwiki_updated_at: "2026-08-28T05:01:42Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---

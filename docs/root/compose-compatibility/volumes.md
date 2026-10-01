@@ -1,10 +1,10 @@
 ---
-date: 2026-08-28T00:10:32.000Z
-dateCreated: 2026-08-27T23:33:35.000Z
+date: 2026-08-28T00:10:32Z
+dateCreated: 2026-08-27T23:33:35Z
 leafwiki_id: dW8AJnQDg
 leafwiki_title: Volumes
-leafwiki_created_at: "2026-08-27T23:33:35.208177683Z"
-leafwiki_updated_at: "2026-08-28T00:10:32.000000000Z"
+leafwiki_created_at: "2026-08-27T23:33:35Z"
+leafwiki_updated_at: "2026-08-28T00:10:32Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---

@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:39:02.000Z
+date: 2026-08-27T23:39:02Z
 dateCreated: 2026-07-05T01:03:24.052Z
 description: Why run Incus - one daemon and one REST API running OCI application containers, LXC system containers and full virtual machines side by side.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: Why Incus?
 leafwiki_id: GDzu3_fDR
 leafwiki_title: Why Incus?
-leafwiki_created_at: "2026-07-05T03:54:00.356119734Z"
-leafwiki_updated_at: "2026-08-27T23:39:02.000000000Z"
+leafwiki_created_at: "2026-07-05T03:54:00Z"
+leafwiki_updated_at: "2026-08-27T23:39:02Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: public-editor
 ---

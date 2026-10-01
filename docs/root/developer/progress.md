@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:33:11.000Z
+date: 2026-08-27T23:33:11Z
 dateCreated: 2026-07-05T01:03:26.331Z
 description: Live progress reporting for image pulls and instance lifecycle - the client emits events, and a renderer turns them into terminal output.
 editor: markdown
@@ -8,8 +8,8 @@ tags: null
 title: Progress
 leafwiki_id: pazuq_fvg
 leafwiki_title: Progress
-leafwiki_created_at: "2026-07-05T03:54:00.685195744Z"
-leafwiki_updated_at: "2026-08-27T23:33:11.000000000Z"
+leafwiki_created_at: "2026-07-05T03:54:00Z"
+leafwiki_updated_at: "2026-08-27T23:33:11Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

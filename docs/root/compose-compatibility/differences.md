@@ -1,10 +1,10 @@
 ---
-date: 2026-08-28T04:18:09.000Z
-dateCreated: 2026-08-27T23:33:35.000Z
+date: 2026-08-28T04:18:09Z
+dateCreated: 2026-08-27T23:33:35Z
 leafwiki_id: PmU0J7wDRz
 leafwiki_title: Behavioral Differences
-leafwiki_created_at: "2026-08-27T23:33:35.161177185Z"
-leafwiki_updated_at: "2026-08-28T04:18:09.000000000Z"
+leafwiki_created_at: "2026-08-27T23:33:35Z"
+leafwiki_updated_at: "2026-08-28T04:18:09Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---

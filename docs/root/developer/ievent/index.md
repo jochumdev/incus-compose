@@ -1,11 +1,11 @@
 ---
-date: 2026-08-28T01:33:50.000Z
+date: 2026-08-28T01:33:50Z
 dateCreated: 2026-08-14T11:46:35Z
 tags: []
 leafwiki_id: EazkEp8DR
 leafwiki_title: ievent
 leafwiki_created_at: "2026-08-14T11:46:35Z"
-leafwiki_updated_at: "2026-08-28T01:33:50.000000000Z"
+leafwiki_updated_at: "2026-08-28T01:33:50Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: public-editor
 ---

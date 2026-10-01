@@ -1,10 +1,10 @@
 ---
-date: 2026-08-28T01:33:50.000Z
+date: 2026-08-28T01:33:50Z
 dateCreated: 2026-08-14T11:46:35Z
 leafwiki_id: lMZ6Yt8vg
 leafwiki_title: enricher
 leafwiki_created_at: "2026-08-14T11:46:35Z"
-leafwiki_updated_at: "2026-08-28T01:33:50.000000000Z"
+leafwiki_updated_at: "2026-08-28T01:33:50Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---
@@ -33,13 +33,106 @@ It is a plugin at a position rather than something ahead of the chain, which is
 what lets [[developer/ievent/debounce|debounce]] sit before and collapse a burst
 before it costs a read.
 
+## Internal Flow
+
+```mermaid
+flowchart TD
+    subgraph Inputs["Event Sources"]
+        Inbox["inbox (Event Stream)"]
+        Sweeps["sweeper (Fleet Round)"]
+        RetryTimer["retries.timer (Fast / Slow Retries)"]
+    end
+
+    subgraph RunLoop["Run Goroutine (State & Queue Owner)"]
+        Accept{"accept(event)"}
+
+        subgraph ReadsDeferred["deferred (In-Flight Read Manager)"]
+            CheckFlight{"In-flight read for key?"}
+            CancelOld["d.cancel: Abort context & transfer waiting items"]
+            Coalesce["out.join: Coalesce items into in-flight read"]
+            HoldCold["Hold cold / pendingProject"]
+            SubmitPool["d.submit to worker pool"]
+        end
+
+        subgraph Queue["q (Arrival-Order Ring Queue)"]
+            QPush["q.push: placeholder item"]
+            QSettle["q.settle: attach enriched event"]
+            QTrash["q.trash: mark skipped"]
+            QRelease["q.release: drain contiguous settled head"]
+        end
+
+        subgraph Settle["settleRead"]
+            CheckCurrent{"res.call == d.calls[key]?"}
+            DevNull["/dev/null (Discard obsolete result)"]
+            DoneCall["d.done: cleanup calls & cancels"]
+            PatchState["patchState: update model"]
+            ArchiveCheck{"archive.changed?"}
+        end
+
+        subgraph StateStore["state (In-Memory Fleet Cache)"]
+            StateModel[("Instances, Networks, Projects")]
+        end
+    end
+
+    subgraph Workers["ants.Pool (Async Pool Workers)"]
+        WorkerExec["incusReader: GetInstance & GetInstanceState"]
+        PollLoop{"waitForRunning or wantInterfaces?"}
+        PollWorker["Poll until Running & IP assigned"]
+        SendResult["Send to d.results channel"]
+    end
+
+    Downstream["args.Next(event)"]
+
+    %% Event Ingestion
+    Inbox --> Accept
+    Sweeps --> Accept
+    RetryTimer --> Accept
+
+    %% Accept routing
+    Accept -->|"Non-instance or delete"| PatchState
+    Accept -->|"Needs instance read"| QPush
+    QPush --> CheckFlight
+
+    %% Deferred read decision
+    CheckFlight -->|"Newer start supersedes"| CancelOld
+    CancelOld --> SubmitPool
+    CheckFlight -->|"Compatible read"| Coalesce
+    CheckFlight -->|"Cold or project pending"| HoldCold
+    CheckFlight -->|"No read in flight"| SubmitPool
+
+    %% Worker Execution
+    SubmitPool --> WorkerExec
+    WorkerExec --> PollLoop
+    PollLoop -->|"Yes"| PollWorker
+    PollLoop -->|"No"| SendResult
+    PollWorker --> SendResult
+
+    %% Result Settlement
+    SendResult --> CheckCurrent
+    CheckCurrent -->|"Cancelled / Superseded"| DevNull
+    CheckCurrent -->|"Active read"| DoneCall
+    DoneCall --> PatchState
+    PatchState --> StateModel
+    PatchState --> ArchiveCheck
+
+    %% Deduplication and Queue Settlement
+    ArchiveCheck -->|"No change"| QTrash
+    ArchiveCheck -->|"Changed"| QSettle
+
+    %% Output
+    QSettle --> QRelease
+    QTrash --> QRelease
+    QRelease --> Downstream
+```
+
 ## Four Things Happen Here
 
 Only the first is a read of the event's own subject.
 
 **An instance action** reads that instance. **One read in flight per key** - a
-second event on the key joins the read already running. Coalescing saves the
-read, not the event: both still walk, carrying what it found.
+second event on the key joins the read already running, or cancels and supersedes
+it if the new event requires waiting for running state (such as `instance-started`).
+Coalescing saves the read, not the event: both still walk, carrying what it found.
 
 **A network action** patches the wire and re-reads everything sitting on it,
 because a subnet moving changes every record on that wire.

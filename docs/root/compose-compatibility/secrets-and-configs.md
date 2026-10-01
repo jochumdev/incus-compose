@@ -1,10 +1,10 @@
 ---
-date: 2026-08-27T23:48:20.000Z
-dateCreated: 2026-08-27T23:33:35.000Z
+date: 2026-08-27T23:48:20Z
+dateCreated: 2026-08-27T23:33:35Z
 leafwiki_id: gW8017wvg
 leafwiki_title: Secrets and configs
-leafwiki_created_at: "2026-08-27T23:33:35.187177461Z"
-leafwiki_updated_at: "2026-08-27T23:48:20.000000000Z"
+leafwiki_created_at: "2026-08-27T23:33:35Z"
+leafwiki_updated_at: "2026-08-27T23:48:20Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---

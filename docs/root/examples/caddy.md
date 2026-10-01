@@ -1,5 +1,5 @@
 ---
-date: 2026-08-28T05:02:10.000Z
+date: 2026-08-28T05:02:10Z
 dateCreated: 2026-07-12T02:05:37.588Z
 description: Two Caddy instances on Incus - one publishing the host ports, one for the local network - sharing a single certificate store on one volume.
 editor: markdown
@@ -7,8 +7,8 @@ tags: []
 title: Caddy
 leafwiki_id: fC-tQcYDg
 leafwiki_title: Caddy
-leafwiki_created_at: "2026-07-12T02:05:37.588008658Z"
-leafwiki_updated_at: "2026-08-28T05:02:10.000000000Z"
+leafwiki_created_at: "2026-07-12T02:05:37Z"
+leafwiki_updated_at: "2026-08-28T05:02:10Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

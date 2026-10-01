@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:33:35.000Z
+date: 2026-08-27T23:33:35Z
 dateCreated: 2026-07-05T01:03:21.729Z
 description: Translate between Docker Compose, Incus and incus-compose vocabulary - what a project, volume, network or bind mount means in each.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: Terminology
 leafwiki_id: 3WzXqlfDg
 leafwiki_title: Terminology
-leafwiki_created_at: "2026-07-05T03:54:00.191003304Z"
-leafwiki_updated_at: "2026-08-27T23:33:35.000000000Z"
+leafwiki_created_at: "2026-07-05T03:54:00Z"
+leafwiki_updated_at: "2026-08-27T23:33:35Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

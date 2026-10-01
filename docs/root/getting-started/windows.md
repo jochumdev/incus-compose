@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:33:35.000Z
+date: 2026-08-27T23:33:35Z
 dateCreated: 2026-07-09T00:49:29.567Z
 description: Run incus-compose on Windows as a client driving a remote Incus server over HTTPS - no Docker and no WSL required.
 editor: markdown
@@ -7,8 +7,8 @@ tags: []
 title: Windows
 leafwiki_id: 6qk9CMLDg
 leafwiki_title: Windows
-leafwiki_created_at: "2026-07-09T00:49:29.56776699Z"
-leafwiki_updated_at: "2026-08-27T23:33:35.000000000Z"
+leafwiki_created_at: "2026-07-09T00:49:29Z"
+leafwiki_updated_at: "2026-08-27T23:33:35Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

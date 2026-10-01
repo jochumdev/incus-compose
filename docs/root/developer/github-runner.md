@@ -1,5 +1,5 @@
 ---
-date: 2026-08-28T00:00:24.000Z
+date: 2026-08-28T00:00:24Z
 dateCreated: 2026-07-05T01:03:14.978Z
 description: Set up a self-hosted GitHub Actions runner for incus-compose inside a privileged Incus container running its own nested Incus daemon.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: GitHub Actions runner
 leafwiki_id: mlRXqlfDR
 leafwiki_title: GitHub Actions runner
-leafwiki_created_at: "2026-07-05T03:53:59.874373509Z"
-leafwiki_updated_at: "2026-08-28T00:00:24.000000000Z"
+leafwiki_created_at: "2026-07-05T03:53:59Z"
+leafwiki_updated_at: "2026-08-28T00:00:24Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: public-editor
 ---

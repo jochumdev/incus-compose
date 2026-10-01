@@ -1,11 +1,11 @@
 ---
-date: 2026-09-09T11:37:56.000Z
+date: 2026-09-09T11:37:56Z
 dateCreated: 2026-08-14T11:46:35Z
 tags: []
 leafwiki_id: j-kkPt8Dgz
 leafwiki_title: DNS (ic-dns)
 leafwiki_created_at: "2026-08-14T11:46:35Z"
-leafwiki_updated_at: "2026-09-09T11:37:56.000000000Z"
+leafwiki_updated_at: "2026-09-09T11:37:56Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: public-editor
 ---

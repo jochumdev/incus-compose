@@ -1,10 +1,10 @@
 ---
-date: 2026-08-28T04:18:09.000Z
-dateCreated: 2026-08-27T23:56:29.000Z
+date: 2026-08-28T04:18:09Z
+dateCreated: 2026-08-27T23:56:29Z
 leafwiki_id: 488Qx7QvgM
 leafwiki_title: Extensions
 leafwiki_created_at: "2026-08-27T23:56:29.231878374Z"
-leafwiki_updated_at: "2026-08-28T04:18:09.000000000Z"
+leafwiki_updated_at: "2026-08-28T04:18:09Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---

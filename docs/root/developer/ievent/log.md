@@ -1,10 +1,10 @@
 ---
-date: 2026-08-28T01:33:50.000Z
+date: 2026-08-28T01:33:50Z
 dateCreated: 2026-08-14T11:46:35Z
 leafwiki_id: I7ZeYt8vgz
 leafwiki_title: log
 leafwiki_created_at: "2026-08-14T11:46:35Z"
-leafwiki_updated_at: "2026-08-28T01:33:50.000000000Z"
+leafwiki_updated_at: "2026-08-28T01:33:50Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: system
 ---

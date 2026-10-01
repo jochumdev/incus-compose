@@ -1,11 +1,11 @@
 ---
-date: 2026-08-28T00:09:08.000Z
-dateCreated: 2026-08-27T23:33:35.000Z
+date: 2026-08-28T00:09:08Z
+dateCreated: 2026-08-27T23:33:35Z
 tags: []
 leafwiki_id: yk8A1nQvR
 leafwiki_title: Exec, Run and CP
-leafwiki_created_at: "2026-08-27T23:33:35.086176391Z"
-leafwiki_updated_at: "2026-08-28T00:09:08.000000000Z"
+leafwiki_created_at: "2026-08-27T23:33:35Z"
+leafwiki_updated_at: "2026-08-28T00:09:08Z"
 leafwiki_creator_id: system
 leafwiki_last_author_id: public-editor
 ---

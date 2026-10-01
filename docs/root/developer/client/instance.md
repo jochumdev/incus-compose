@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:33:35.000Z
+date: 2026-08-27T23:33:35Z
 dateCreated: 2026-07-05T01:03:40.172Z
 description: The instance resource in depth - pre- and post-creation devices, why an instance is written twice, and how UID/GID shifting keeps volume files owned correctly.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: Instance Details
 leafwiki_id: 10iXqlfvg
 leafwiki_title: Instance Details
-leafwiki_created_at: "2026-07-05T03:54:01.617008851Z"
-leafwiki_updated_at: "2026-08-27T23:33:35.000000000Z"
+leafwiki_created_at: "2026-07-05T03:54:01Z"
+leafwiki_updated_at: "2026-08-27T23:33:35Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

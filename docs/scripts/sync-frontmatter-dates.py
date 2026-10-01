@@ -37,7 +37,6 @@ DOCS = Path(__file__).resolve().parent.parent
 
 UPDATED = ("date", "leafwiki_updated_at")
 CREATED = ("dateCreated", "leafwiki_created_at")
-QUOTED = ("leafwiki_created_at", "leafwiki_updated_at")
 # Insertion order for keys a file is missing entirely.
 ORDER = ("date", "dateCreated", "leafwiki_created_at", "leafwiki_updated_at")
 DATE_LINE = re.compile(r"^[+-](%s):" % "|".join(ORDER))
@@ -51,9 +50,7 @@ def fmt(dt, key):
     resolution.
     """
     stamp = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    if key in QUOTED:
-        return '"%s.000000000Z"' % stamp
-    return "%s.000Z" % stamp
+    return "%sZ" % stamp
 
 
 def parse(value):
@@ -67,12 +64,17 @@ def parse(value):
 
 def git(*args):
     return subprocess.run(
-        ["git", *args], cwd=DOCS, capture_output=True, text=True,
+        ["git", *args],
+        cwd=DOCS,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
 
 def first_commit(path):
-    out = git("log", "--diff-filter=A", "--follow", "--format=%aI", "-1", "--", str(path))
+    out = git(
+        "log", "--diff-filter=A", "--follow", "--format=%aI", "-1", "--", str(path)
+    )
     return datetime.fromisoformat(out) if out else None
 
 
@@ -87,16 +89,27 @@ def changed_paths():
     A diff confined to the date keys does not count, so re-running before the
     stamp is committed does not stamp it again with a later time.
     """
-    if subprocess.run(["git", "rev-parse", "--verify", "HEAD"],
-                      cwd=DOCS, capture_output=True).returncode != 0:
+    if (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"], cwd=DOCS, capture_output=True
+        ).returncode
+        != 0
+    ):
         return None
 
-    paths = {DOCS / p for p in git(
-        "ls-files", "--others", "--exclude-standard", "--", "root").splitlines()}
+    paths = {
+        DOCS / p
+        for p in git(
+            "ls-files", "--others", "--exclude-standard", "--", "root"
+        ).splitlines()
+    }
 
     for rel in git("diff", "HEAD", "--name-only", "--", "root").splitlines():
-        lines = [line for line in git("diff", "HEAD", "-U0", "--", rel).splitlines()
-                 if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+        lines = [
+            line
+            for line in git("diff", "HEAD", "-U0", "--", rel).splitlines()
+            if line[:1] in "+-" and not line.startswith(("+++", "---"))
+        ]
         if any(not DATE_LINE.match(line) for line in lines):
             paths.add(DOCS / rel)
 
@@ -110,7 +123,7 @@ def split_frontmatter(text):
     end = text.find("\n---\n", 3)
     if end == -1:
         return None, text
-    return text[4:end + 1].splitlines(), text[end + 5:]
+    return text[4 : end + 1].splitlines(), text[end + 5 :]
 
 
 def sync(path, apply, changed):
@@ -158,7 +171,7 @@ def sync(path, apply, changed):
                 out[i] = new
         else:
             touched.append("+%s" % key)
-            before = [k for k in ORDER[:ORDER.index(key)] if k in present]
+            before = [k for k in ORDER[: ORDER.index(key)] if k in present]
             at = present[before[-1]][0] + 1 if before else 0
             out.insert(at, new)
             present = {k: (i + 1 if i >= at else i, v) for k, (i, v) in present.items()}
@@ -175,9 +188,12 @@ def sync(path, apply, changed):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--apply", action="store_true", help="write the files (default: dry run)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--apply", action="store_true", help="write the files (default: dry run)"
+    )
     args = ap.parse_args()
 
     changed = changed_paths()
@@ -192,7 +208,10 @@ def main():
         for t in touched:
             print("    %s" % t)
 
-    print("\n%d file(s) %s" % (count, "updated" if args.apply else "would change (dry run)"))
+    print(
+        "\n%d file(s) %s"
+        % (count, "updated" if args.apply else "would change (dry run)")
+    )
 
 
 if __name__ == "__main__":

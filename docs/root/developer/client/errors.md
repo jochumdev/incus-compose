@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:33:11.000Z
+date: 2026-08-27T23:33:11Z
 dateCreated: 2026-07-05T01:03:31.019Z
 description: Sentinel-based errors in the incus-compose client - match them with errors.Is, and get the failing resource, kind and action attached automatically.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: Errors
 leafwiki_id: _kmuq_BDR
 leafwiki_title: Errors
-leafwiki_created_at: "2026-07-05T03:54:01.146252167Z"
-leafwiki_updated_at: "2026-08-27T23:33:11.000000000Z"
+leafwiki_created_at: "2026-07-05T03:54:01Z"
+leafwiki_updated_at: "2026-08-27T23:33:11Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

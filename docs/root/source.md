@@ -8,8 +8,8 @@ tags: []
 title: Source
 leafwiki_id: 9dRX3lBvS
 leafwiki_title: Source
-leafwiki_created_at: "2026-08-04T07:42:31.388277193Z"
-leafwiki_updated_at: "2026-08-28T00:19:23.897628124Z"
+leafwiki_created_at: "2026-08-04T07:42:31Z"
+leafwiki_updated_at: "2026-08-28T00:19:23Z"
 leafwiki_creator_id: c3RhcHBlcnMK
 leafwiki_last_author_id: D93XDmQvR
 ---

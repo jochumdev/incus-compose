@@ -1,5 +1,5 @@
 ---
-date: 2026-08-28T00:10:31.000Z
+date: 2026-08-28T00:10:31Z
 dateCreated: 2026-07-05T01:03:05.46Z
 description: Every incus-compose command and flag, with the state diagram showing which command leaves your services created, running or stopped.
 editor: markdown
@@ -9,7 +9,7 @@ title: CLI Reference
 leafwiki_id: v4RXqlfDg
 leafwiki_title: CLI Reference
 leafwiki_created_at: "2026-07-05T03:53:59.241448744Z"
-leafwiki_updated_at: "2026-08-28T00:10:31.000000000Z"
+leafwiki_updated_at: "2026-08-28T00:10:31Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: public-editor
 ---

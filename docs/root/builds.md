@@ -1,5 +1,5 @@
 ---
-date: 2026-08-27T23:33:35.000Z
+date: 2026-08-27T23:33:35Z
 dateCreated: 2026-07-05T01:03:03.24Z
 description: Building service images from a Compose build block - incus-compose shells out to podman, docker or buildah, then imports the result into your Incus project.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: Builds
 leafwiki_id: wkgXq_fDR
 leafwiki_title: Builds
-leafwiki_created_at: "2026-07-05T03:53:59.09728476Z"
-leafwiki_updated_at: "2026-08-27T23:33:35.000000000Z"
+leafwiki_created_at: "2026-07-05T03:53:59Z"
+leafwiki_updated_at: "2026-08-27T23:33:35Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---

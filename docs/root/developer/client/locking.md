@@ -1,12 +1,16 @@
 ---
-date: 2026-09-17T01:30:00.000Z
-dateCreated: 2026-09-17T01:30:00.000Z
-leafwiki_created_at: "2026-09-17T01:30:00.000000000Z"
-leafwiki_updated_at: "2026-10-01T05:26:27.000000000Z"
+date: 2026-09-17T01:30:00Z
+dateCreated: 2026-09-17T01:30:00Z
 description: Advisory locking architecture in incus-compose - global project barrier, resource locks, and image serialization.
 editor: markdown
 tags: []
 title: Advisory Locking
+leafwiki_id: 69fubeuDRN
+leafwiki_title: Advisory Locking
+leafwiki_created_at: "2026-09-17T01:30:00Z"
+leafwiki_updated_at: "2026-10-01T05:26:27Z"
+leafwiki_creator_id: system
+leafwiki_last_author_id: system
 ---
 
 # Advisory Locking

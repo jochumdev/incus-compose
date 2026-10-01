@@ -1,5 +1,5 @@
 ---
-date: 2026-08-28T12:00:00.000Z
+date: 2026-08-28T12:00:00Z
 dateCreated: 2026-07-05T01:03:17.224Z
 description: Health checks and restart policies on Incus, which has neither natively - how the ic-healthd sidecar watches your services and restarts what fails.
 editor: markdown
@@ -8,8 +8,8 @@ tags: []
 title: Health Checking (ic-healthd)
 leafwiki_id: HqRuqlfvR
 leafwiki_title: Health Checking (ic-healthd)
-leafwiki_created_at: "2026-07-05T03:54:00.008474718Z"
-leafwiki_updated_at: "2026-08-28T12:00:00.000000000Z"
+leafwiki_created_at: "2026-07-05T03:54:00Z"
+leafwiki_updated_at: "2026-08-28T12:00:00Z"
 leafwiki_creator_id: vOmfrlBDg
 leafwiki_last_author_id: vOmfrlBDg
 ---
