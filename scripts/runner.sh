@@ -173,7 +173,7 @@ up() {
         incus start "${RUNNER}" || true
     else
         step "Restoring ${RUNNER} from the 'runner' image"
-        incus launch runner "${RUNNER}" --storage "${POOL}" \
+        incus launch runner "${RUNNER}" \
             -c security.nesting=true \
             -c security.privileged=true
     fi
