@@ -1,9 +1,9 @@
 module github.com/lxc/incus-compose/benchmarks/ic-dns/ecs_view
 
-go 1.27.2
+go 1.27.3
 
 require (
-	github.com/coredns/coredns v1.14.7
+	github.com/coredns/coredns v1.15.0
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0
 	github.com/lxc/incus-compose v0.0.0
 	github.com/miekg/dns v1.1.73

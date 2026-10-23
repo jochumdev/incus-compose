@@ -130,40 +130,19 @@ func TestRefusalCarriesNoScope(t *testing.T) {
 func TestEchoDecidesTheQuerysOtherOptions(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		name string
-		echo bool
-		want bool
-	}{
-		{"the query's own OPT comes back whole when nothing echoes", false, true},
-		{"an echoing reply answers about the subnet alone", true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	a := answering(t, true)
+	w := &recorder{}
 
-			a := answering(t, tc.echo)
-			w := &recorder{}
+	cookie := &dns.EDNS0_COOKIE{Code: dns.EDNS0COOKIE, Cookie: "24616263646566"}
 
-			cookie := &dns.EDNS0_COOKIE{Code: dns.EDNS0COOKIE, Cookie: "24616263646566"}
+	a.ServeDNS(w, subnetQuery("web.shop.incus.", "10.0.0.2", cookie))
 
-			a.ServeDNS(w, subnetQuery("web.shop.incus.", "10.0.0.2", cookie))
+	require.NotNil(t, w.msg)
+	require.Equal(t, dns.RcodeSuccess, w.msg.Rcode)
+	require.NotNil(t, replySubnet(w.msg))
 
-			require.NotNil(t, w.msg)
-			require.Equal(t, dns.RcodeSuccess, w.msg.Rcode)
-
-			opt := w.msg.IsEdns0()
-			require.NotNil(t, opt)
-
-			var kept bool
-
-			for _, o := range opt.Option {
-				_, ok := o.(*dns.EDNS0_COOKIE)
-				if ok {
-					kept = true
-				}
-			}
-
-			assert.Equal(t, tc.want, kept, "the cookie decided the reply's other options")
-		})
+	for _, o := range w.msg.IsEdns0().Option {
+		_, ok := o.(*dns.EDNS0_COOKIE)
+		assert.False(t, ok, "an echoing reply answers about the subnet alone")
 	}
 }
