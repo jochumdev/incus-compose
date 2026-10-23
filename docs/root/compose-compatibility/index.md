@@ -22,7 +22,7 @@ what works and what doesn't, one page per top-level compose key.
 | Page                                        | Covers                                                                               |
 | ------------------------------------------- | ------------------------------------------------------------------------------------ |
 | [Services](services/)                       | `image`, `command`, `entrypoint`, `user`, `labels`, `dns`, `sysctls`, `restart`, ... |
-| [Networks](networks/)                       | external networks, DHCP ranges, static IPs, aliases                                  |
+| [Networks](networks/)                       | external networks, DHCP ranges, static IPs, aliases, ACLs                            |
 | [Volumes](volumes/)                         | named volumes, bind mounts, image volumes, prefetching                               |
 | [Secrets and configs](secrets-and-configs/) | `secrets:`, `configs:`, overwriting image files                                      |
 | [Behavioral Differences](differences/)      | where incus-compose does the same thing differently                                  |

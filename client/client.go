@@ -103,42 +103,42 @@ func (c *GlobalClient) newProjectClient(name, incusName string, created bool, pr
 	if c.IsDebugging() {
 		cp.logger = cp.logger.With("incus_project", incusName)
 		cp.LogDebug("Running on network type", "type", cp.NetworkType())
-	}
 
-	c.projects = append(c.projects, cp)
-
-	if c.IsDebugging() {
 		// Debug logging hooks
-		c.AddHookBefore(func(_ context.Context, action Action, r Resource, args Options, err error) error {
+		cp.AddHookBefore(func(_ context.Context, action Action, r Resource, args Options, err error) error {
 			if r.Kind() == KindNetwork {
 				net, ok := r.(*Network)
 				if ok {
-					c.LogDebug("Running", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "network_type", net.Config.Type)
+					cp.LogDebug("Running", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "network_type", net.Config.Type)
 					return err
 				}
 			}
 
-			c.LogDebug("Running", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName())
+			cp.LogDebug("Running", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName())
 			return err
 		})
-		c.AddHookAfter(func(_ context.Context, action Action, r Resource, args Options, err error) error {
+		cp.AddHookAfter(func(_ context.Context, action Action, r Resource, args Options, err error) error {
 			if err != nil {
-				c.LogWarn("Result with error", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created(), "error", err)
+				cp.LogWarn("Result with error", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created(), "error", err)
 				return err
 			}
 
 			if r.Kind() == KindNetwork {
 				net, ok := r.(*Network)
 				if ok {
-					c.LogDebug("Run", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created(), "network_type", net.Config.Type)
+					cp.LogDebug("Run", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created(), "network_type", net.Config.Type)
 					return nil
 				}
 			}
 
-			c.LogDebug("Run", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created())
+			cp.LogDebug("Run", "action", action, "kind", r.Kind(), "name", r.Name(), "incus_name", r.IncusName(), "created", r.Created())
 			return nil
 		})
 	}
+
+	c.mu.Lock()
+	c.projects = append(c.projects, cp)
+	c.mu.Unlock()
 
 	return cp, nil
 }

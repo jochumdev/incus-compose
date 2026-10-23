@@ -155,6 +155,11 @@ Valid DNS names, max 63 chars, long names hashed to 32 hex chars.
 Linux interface limit (13 chars), uses hash for long names: `backend` ->
 `app-backend` or `ic-a1b2c3d4e5`
 
+### Network Peers
+
+Valid Incus peer names (hostname rules, max 63 chars), combining target project
+and network name with a hash fallback when longer than 63 chars.
+
 ## Error Handling
 
 See [Errors](/developer/client/errors) for sentinel errors and context

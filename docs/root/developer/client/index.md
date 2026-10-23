@@ -78,7 +78,7 @@ Resources also implement action interfaces as needed:
 
 - `EnsureAble` - can be created/fetched
 - `DeleteAble` - can be deleted
-- `StartAble` - can be started (Instance only)
+- `StartAble` - can be started (Network, StorageVolume, Instance)
 - `StopAble` - can be stopped (Instance only)
 - `PauseAble` / `UnpauseAble` - can be frozen and thawed (Instance only)
 

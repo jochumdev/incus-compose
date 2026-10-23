@@ -843,11 +843,14 @@ func (c *GlobalClient) EnsureProject(name string, opts ...EnsureProjectOption) (
 	}
 
 	// Check if already known
+	c.mu.Lock()
 	for _, p := range c.projects {
 		if p != nil && p.project == name {
+			c.mu.Unlock()
 			return p, nil
 		}
 	}
+	c.mu.Unlock()
 
 	p, err := c.getProject(name)
 	if err == nil {
@@ -932,31 +935,29 @@ func (c *GlobalClient) DeleteProject(name string, force bool) error {
 		return err
 	}
 
-	// Delete networks - they are global, not project-scoped
-	for _, p := range c.projects {
+	var projClient *Client
+	c.mu.Lock()
+	for i, p := range c.projects {
 		if p.project == name {
-			// Delete networks first - they are global, not project-scoped
-			networks, err := ByKind[*Network](p.resources.all(), KindNetwork)
-			if err != nil {
-				c.LogWarn("Deleting networks", "error", err)
-				continue
-			}
+			projClient = p
+			c.projects = append(c.projects[:i], c.projects[i+1:]...)
+			break
+		}
+	}
+	c.mu.Unlock()
 
+	// Delete networks - they are global, not project-scoped
+	if projClient != nil {
+		networks, err := ByKind[*Network](projClient.resources.all(), KindNetwork)
+		if err != nil {
+			c.LogWarn("Deleting networks", "error", err)
+		} else {
 			for _, n := range networks {
 				err = RunAction(c.ctx, n, ActionDelete, OptionForce())
 				if err != nil {
 					c.LogWarn("Deleting network", "network", n, "error", err)
 				}
 			}
-			break
-		}
-	}
-
-	// Remove from cache
-	for i, p := range c.projects {
-		if p.project == name {
-			c.projects = append(c.projects[:i], c.projects[i+1:]...)
-			break
 		}
 	}
 

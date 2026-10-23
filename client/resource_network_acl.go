@@ -95,7 +95,7 @@ func (r *Network) defaultACL() incusApi.NetworkACLsPost {
 
 // ensureACLs creates or updates the network's ACLs and attaches them. An OVN
 // network always gets the default posture; Config.ACL adds the caller's rules.
-func (r *Network) ensureACLs(ctx context.Context) error {
+func (r *Network) ensureACLs(ctx context.Context, resolved map[string]string) error {
 	if !r.client.Global().HasExtension(shared.Incus75Extension) {
 		return nil
 	}
@@ -121,6 +121,21 @@ func (r *Network) ensureACLs(ctx context.Context) error {
 
 		acl := *r.Config.ACL
 		acl.Name = SanitizeIncusName(acl.Name, -1)
+		if len(resolved) > 0 {
+			acl.Ingress = slices.Clone(r.Config.ACL.Ingress)
+			for i := range acl.Ingress {
+				if sub, ok := resolved[acl.Ingress[i].Source]; ok {
+					acl.Ingress[i].Source = sub
+				}
+			}
+
+			acl.Egress = slices.Clone(r.Config.ACL.Egress)
+			for i := range acl.Egress {
+				if sub, ok := resolved[acl.Egress[i].Destination]; ok {
+					acl.Egress[i].Destination = sub
+				}
+			}
+		}
 		acls = append(acls, acl)
 	}
 
@@ -204,18 +219,23 @@ func (r *Network) ensureACLs(ctx context.Context) error {
 			put.Config = map[string]string{}
 		}
 
-		// The posture is a default, not a policy: a value the user set (through
-		// x-incus or by hand) is left alone.
-		if currentNet.Type == "ovn" {
-			if put.Config["security.acls.default.ingress.action"] == "" {
-				put.Config["security.acls.default.ingress.action"] = "reject"
+		for _, key := range []string{"security.acls.default.ingress.action", "security.acls.default.egress.action"} {
+			if val := r.Config.Extensions[key]; val != "" && put.Config[key] != val {
+				put.Config[key] = val
 				changed = true
 			}
+		}
 
-			if put.Config["security.acls.default.egress.action"] == "" {
-				put.Config["security.acls.default.egress.action"] = "allow"
-				changed = true
-			}
+		// The posture is a default, not a policy: a value the user set (through
+		// x-incus, x-incus-compose.acl.default, or by hand) is left alone.
+		if put.Config["security.acls.default.ingress.action"] == "" {
+			put.Config["security.acls.default.ingress.action"] = "reject"
+			changed = true
+		}
+
+		if put.Config["security.acls.default.egress.action"] == "" {
+			put.Config["security.acls.default.egress.action"] = "allow"
+			changed = true
 		}
 
 		if !changed {
@@ -338,6 +358,8 @@ func (r *Network) detachACLs(ctx context.Context, names []string) error {
 
 		if len(rest) == 0 {
 			delete(put.Config, "security.acls")
+			delete(put.Config, "security.acls.default.ingress.action")
+			delete(put.Config, "security.acls.default.egress.action")
 		} else {
 			put.Config["security.acls"] = strings.Join(rest, ", ")
 		}
@@ -443,8 +465,9 @@ func (r *Network) RemovePeer(ctx context.Context, name string) error {
 
 // ensurePeers creates each configured peer relationship on the network. A peer
 // whose other side does not exist yet stays pending until it does.
-func (r *Network) ensurePeers(ctx context.Context) error {
-	if r.Type(ctx) != "ovn" || len(r.Config.Peers) == 0 {
+func (r *Network) ensurePeers(ctx context.Context, extra ...incusApi.NetworkPeersPost) error {
+	peers := append(slices.Clone(r.Config.Peers), extra...)
+	if r.Type(ctx) != "ovn" || len(peers) == 0 {
 		return nil
 	}
 
@@ -453,26 +476,43 @@ func (r *Network) ensurePeers(ctx context.Context) error {
 		return nil
 	}
 
+	project := r.incusProject()
+	var errs error
+
+	for _, peer := range peers {
+		err := r.ensurePeerOn(ctx, project, r.incusName, peer)
+		if err != nil {
+			errs = errors.Join(errs, err)
+		}
+	}
+
+	return errs
+}
+
+func (r *Network) ensurePeerOn(ctx context.Context, hostProject, hostNetwork string, peer incusApi.NetworkPeersPost) error {
 	conn, err := r.client.GlobalConnection()
 	if err != nil {
 		return err
 	}
 
-	project := r.incusProject()
+	peer.Name = SanitizeIncusName(peer.Name, -1)
 
-	existing, err := conn.GetNetworkPeers(ctx, project, r.incusName)
-	if err != nil {
-		if strings.Contains(err.Error(), "does not support") {
-			return nil
+	err = retry.New(
+		retry.Context(ctx),
+		retry.Attempts(10),
+		retry.Delay(100*time.Millisecond),
+		retry.DelayType(retry.FixedDelay),
+		retry.LastErrorOnly(true),
+		retry.RetryIf(isConcurrencyConflict),
+	).Do(func() error {
+		existing, getErr := conn.GetNetworkPeers(ctx, hostProject, hostNetwork)
+		if getErr != nil {
+			if incusApi.StatusErrorCheck(getErr, http.StatusNotFound) || strings.Contains(getErr.Error(), "does not support") {
+				return nil
+			}
+
+			return getErr
 		}
-
-		return err
-	}
-
-	var errs error
-
-	for _, peer := range r.Config.Peers {
-		peer.Name = SanitizeIncusName(peer.Name, -1)
 
 		var haveName *incusApi.NetworkPeer
 		var haveTarget *incusApi.NetworkPeer
@@ -486,55 +526,41 @@ func (r *Network) ensurePeers(ctx context.Context) error {
 			}
 		}
 
-		if haveName != nil && haveTarget != nil && haveName.Name == haveTarget.Name {
-			continue
+		if haveName != nil && haveTarget != nil && haveName.Name == haveTarget.Name && haveName.Status != incusApi.NetworkStatusErrored {
+			return nil
 		}
 
 		if haveTarget != nil && (haveName == nil || haveName.Name != haveTarget.Name) {
-			err := conn.DeleteNetworkPeer(ctx, project, r.incusName, haveTarget.Name)
-			if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
-				errs = errors.Join(errs, fmt.Errorf("removing conflicting network peer %q: %w", haveTarget.Name, err))
-
-				continue
+			delErr := conn.DeleteNetworkPeer(ctx, hostProject, hostNetwork, haveTarget.Name)
+			if delErr != nil && !incusApi.StatusErrorCheck(delErr, http.StatusNotFound) {
+				return fmt.Errorf("removing conflicting network peer %q: %w", haveTarget.Name, delErr)
 			}
-			existing = slices.DeleteFunc(existing, func(p incusApi.NetworkPeer) bool {
-				return p.Name == haveTarget.Name
-			})
 		}
 
 		if haveName != nil {
-			// A peer of the same name pointing elsewhere is stale (its target
-			// network was recreated); replace it.
-			err := conn.DeleteNetworkPeer(ctx, project, r.incusName, peer.Name)
-			if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) {
-				errs = errors.Join(errs, fmt.Errorf("replacing network peer %q: %w", peer.Name, err))
-
-				continue
-			}
-			existing = slices.DeleteFunc(existing, func(p incusApi.NetworkPeer) bool {
-				return p.Name == peer.Name
-			})
-		}
-
-		err = conn.CreateNetworkPeer(ctx, project, r.incusName, peer)
-		if err != nil && (incusApi.StatusErrorCheck(err, http.StatusConflict) || strings.Contains(err.Error(), "already exists")) {
-			p, _, getErr := conn.GetNetworkPeer(ctx, project, r.incusName, peer.Name)
-			if getErr == nil && p.TargetProject == peer.TargetProject && p.TargetNetwork == peer.TargetNetwork {
-				err = nil
+			// A peer of the same name pointing elsewhere (or in Errored state after
+			// its target was recreated) is stale; replace it.
+			delErr := conn.DeleteNetworkPeer(ctx, hostProject, hostNetwork, peer.Name)
+			if delErr != nil && !incusApi.StatusErrorCheck(delErr, http.StatusNotFound) {
+				return fmt.Errorf("replacing network peer %q: %w", peer.Name, delErr)
 			}
 		}
-		if err != nil {
-			errs = errors.Join(errs, fmt.Errorf("creating network peer %q: %w", peer.Name, err))
-		} else {
-			existing = append(existing, incusApi.NetworkPeer{
-				Name:          peer.Name,
-				TargetProject: peer.TargetProject,
-				TargetNetwork: peer.TargetNetwork,
-			})
+
+		createErr := conn.CreateNetworkPeer(ctx, hostProject, hostNetwork, peer)
+		if createErr != nil && (incusApi.StatusErrorCheck(createErr, http.StatusConflict) || strings.Contains(createErr.Error(), "already exists")) {
+			p, _, pErr := conn.GetNetworkPeer(ctx, hostProject, hostNetwork, peer.Name)
+			if pErr == nil && p.TargetProject == peer.TargetProject && p.TargetNetwork == peer.TargetNetwork && p.Status != incusApi.NetworkStatusErrored {
+				return nil
+			}
 		}
+
+		return createErr
+	})
+	if err != nil {
+		return fmt.Errorf("creating network peer %q: %w", peer.Name, err)
 	}
 
-	return errs
+	return nil
 }
 
 // deletePeers removes each configured peer relationship from the network.
@@ -559,12 +585,26 @@ func (r *Network) deletePeers(ctx context.Context) error {
 		return err
 	}
 
+	recipName := SanitizePeerName(project, r.incusName)
 	var errs error
 
 	for _, peer := range existing {
+		targetProject := peer.TargetProject
+		targetNetwork := peer.TargetNetwork
+
 		err := conn.DeleteNetworkPeer(ctx, project, r.incusName, peer.Name)
 		if err != nil && !incusApi.StatusErrorCheck(err, http.StatusNotFound) && !strings.Contains(err.Error(), "does not support") {
 			errs = errors.Join(errs, fmt.Errorf("deleting network peer %q: %w", peer.Name, err))
+		}
+
+		if targetProject != "" && targetNetwork != "" {
+			recipErr := conn.DeleteNetworkPeer(ctx, targetProject, targetNetwork, recipName)
+			if recipErr != nil &&
+				!incusApi.StatusErrorCheck(recipErr, http.StatusNotFound) &&
+				!strings.Contains(recipErr.Error(), "does not support") &&
+				!strings.Contains(recipErr.Error(), "in use") {
+				errs = errors.Join(errs, fmt.Errorf("deleting reciprocal network peer %q on %s/%s: %w", recipName, targetProject, targetNetwork, recipErr))
+			}
 		}
 	}
 
