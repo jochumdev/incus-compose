@@ -137,6 +137,10 @@ form.
 
 ### Fixed
 
+- `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
+  the in-scope services (including scaled replicas) and reject unknown service
+  names. (by @jochumdev, #231)
+
 - On a server without OVN, `up` and the `healthd`/`dns` commands no longer spend
   about two seconds detecting that, several times per command, and OVN networks
   in projects other than `default` are now found. (by @tallica)

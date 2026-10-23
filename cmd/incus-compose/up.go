@@ -511,7 +511,7 @@ func newUpCommand() *cli.Command {
 			defer stopNotify()
 
 			_ = logs(logsCtx, c, logsArgs{
-				Instances: projectInstances(c, p),
+				Instances: projectInstances(c, p, slices.Sorted(maps.Keys(myResources))...),
 				Follow:    true,
 				Writer:    cmd.Root().Writer,
 			})
