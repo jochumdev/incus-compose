@@ -130,6 +130,12 @@ form.
   (`shared.HealthIgnoreKey`) tag and check; instance watching is strictly opt-in
   via `user.healthcheck.enabled`. (by @jochumdev)
 
+### Fixed
+
+- `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
+  the in-scope services (including scaled replicas) and reject unknown service
+  names. (by @jochumdev, #231)
+
 ## [v1.3.5] - 2026-10-17
 
 ### Fixed

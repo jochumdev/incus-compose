@@ -58,10 +58,9 @@ View container output.
 incus-compose logs [SERVICE...]
 ```
 
-| Option           | Description                                                                |
-| ---------------- | -------------------------------------------------------------------------- |
-| `-f`, `--follow` | Follow output                                                              |
-| `--with-deps`    | Also show logs from linked services (depends_on) - incus-compose extension |
+| Option           | Description   |
+| ---------------- | ------------- |
+| `-f`, `--follow` | Follow output |
 
 Missing instances are skipped with a warning; logs from available instances are
 still shown.

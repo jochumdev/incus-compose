@@ -1211,3 +1211,44 @@ networks:
 	require.NoError(t, err)
 	assert.Equal(t, incusApi.NetworkStatusCreated, recip.Status)
 }
+
+// TestE2ELogsServiceFilter verifies that `logs [SERVICE...]` filters to the
+// named services (including scaled replicas) and rejects unknown service names.
+func TestE2ELogsServiceFilter(t *testing.T) {
+	t.Parallel()
+	testlib.SkipE2E(t)
+
+	ctx := t.Context()
+	pn := t.Name()
+
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `services:
+  web:
+    image: docker.io/library/busybox:1.36-glibc
+    entrypoint: ["/bin/sh", "-c", "echo web-log-line && exec sh"]
+  db:
+    image: docker.io/library/busybox:1.36-glibc
+    entrypoint: ["/bin/sh", "-c", "echo db-log-line && exec sh"]
+`,
+	})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd", "--no-dns", "--scale=web=2")
+	require.NoError(t, err)
+
+	webLogs, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "logs", "web")
+	require.NoError(t, err)
+	assert.Contains(t, webLogs, "web-1 | web-log-line")
+	assert.Contains(t, webLogs, "web-2 | web-log-line")
+	assert.NotContains(t, webLogs, "db-log-line")
+
+	dbLogs, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "logs", "db")
+	require.NoError(t, err)
+	assert.Contains(t, dbLogs, "db-1 | db-log-line")
+	assert.NotContains(t, dbLogs, "web-log-line")
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "logs", "nonexistent")
+	require.Error(t, err)
+}
