@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,82 @@ func TestBindMountErrorsOnRemote(t *testing.T) {
 
 	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach")
 	require.Error(t, err)
+}
+
+func TestBindMountRemote(t *testing.T) {
+	t.Parallel()
+	testlib.SkipLocal(t)
+
+	ctx := t.Context()
+
+	gc, err := client.NewTestClient(ctx)
+	if err != nil {
+		t.Skip(err.Error())
+	}
+
+	if gc.SameHost() == nil {
+		t.Skip("this test requires the incus server to be on a remote host")
+	}
+
+	t.Run("x-incus-compose-remote", func(t *testing.T) {
+		t.Parallel()
+		pn := t.Name()
+		dir := testlib.WriteTempFiles(t, map[string]string{
+			"compose.yaml": `services:
+  web:
+    image: docker.io/library/busybox:glibc
+    x-incus:
+      limits.cpu: 1
+      oci.entrypoint: sh
+    volumes:
+      - type: bind
+        source: /etc/os-release
+        target: /mnt/os-release
+        read_only: true
+        x-incus-compose:
+          remote: true
+`,
+		})
+		compose := filepath.Join(dir, "compose.yaml")
+
+		testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+		_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd")
+		require.NoError(t, err)
+
+		err = pollServiceExec(ctx, t, pn, compose, "web", []string{"cat", "/mnt/os-release"}, "ID=", 60*time.Second)
+		require.NoError(t, err)
+	})
+
+	t.Run("allow-remote-mounts flag", func(t *testing.T) {
+		t.Parallel()
+		pn := t.Name()
+		dir := testlib.WriteTempFiles(t, map[string]string{
+			"compose.yaml": `services:
+  web:
+    image: docker.io/library/busybox:glibc
+    x-incus:
+      limits.cpu: 1
+      oci.entrypoint: sh
+    volumes:
+      - /etc/os-release:/mnt/os-release:ro
+`,
+		})
+		compose := filepath.Join(dir, "compose.yaml")
+
+		// Without the flag, remote bind mounts are rejected.
+		_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-healthd")
+		require.Error(t, err)
+
+		testlib.CleanupCompose(t, pn, "--allow-remote-mounts", "-f", compose, "down", "--project")
+
+		_, err = testlib.RunCompose(ctx, t, pn, "", nil, "--allow-remote-mounts", "-f", compose, "up", "--detach", "--no-healthd")
+		require.NoError(t, err)
+
+		out, err := testlib.RunCompose(ctx, t, pn, "", []string{"INCUS_COMPOSE_ALLOW_REMOTE_MOUNTS=true"}, "-f", compose, "exec", "--no-tty", "web", "--", "cat", "/mnt/os-release")
+		require.NoError(t, err)
+		require.Contains(t, out, "ID=")
+	})
 }
 
 func TestSeededBindMounts(t *testing.T) {

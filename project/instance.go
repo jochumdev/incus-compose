@@ -1061,9 +1061,11 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 
 	for _, cVol := range service.Volumes {
 		seed := false
+		remote := false
 		if cVol.Extensions != nil {
 			var ext struct {
-				Seed bool `mapstructure:"seed"`
+				Seed   bool `mapstructure:"seed"`
+				Remote bool `mapstructure:"remote"`
 			}
 			ok, err := cVol.Extensions.Get("x-incus-compose", &ext)
 			if err != nil {
@@ -1072,6 +1074,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 
 			if ok {
 				seed = ext.Seed
+				remote = ext.Remote
 			}
 		}
 
@@ -1204,15 +1207,17 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 					devices = append(devices, client.InstanceDevice{Name: devName, Config: devConfig})
 				}
 			} else {
-				// Refuse bind without seed on remote hosts.
-				err := c.Global().SameHost()
-				if err != nil {
-					return nil, nil, nil, fmt.Errorf("failed to add a bind-mount for service %v: %w", service.Name, err)
-				}
+				if !remote && !c.Config().AllowRemoteMounts {
+					// Refuse bind without seed on remote hosts.
+					err := c.Global().SameHost()
+					if err != nil {
+						return nil, nil, nil, fmt.Errorf("failed to add a bind-mount for service %v: %w", service.Name, err)
+					}
 
-				_, err = os.Stat(cVol.Source)
-				if err != nil {
-					return nil, nil, nil, client.ErrUnknown.WithKindName(client.KindInstance, service.Name).Wrap(err)
+					_, err = os.Stat(cVol.Source)
+					if err != nil {
+						return nil, nil, nil, client.ErrUnknown.WithKindName(client.KindInstance, service.Name).Wrap(err)
+					}
 				}
 
 				devName := "bind-" + client.SanitizeIncusName(cVol.Source, client.MaxIncusNameLen-5)

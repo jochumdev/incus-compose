@@ -296,6 +296,30 @@ Seeding is off by default: bind mounts are plain pass-through unless you ask.
 
 _Since: v1.0.0_
 
+### Remote bind mounts
+
+Pass-through bind mounts are normally refused when the Incus server is on a
+remote host, because the source path is resolved on the Incus server rather than
+on the client machine. When the path already exists on the remote Incus host,
+set `x-incus-compose.remote: true` inline on the volume entry (or pass the
+global `--allow-remote-mounts` / `INCUS_COMPOSE_ALLOW_REMOTE_MOUNTS` flag) to
+skip the same-host and local `os.Stat` checks:
+
+```yaml
+services:
+  web:
+    image: docker.io/library/busybox:glibc
+    volumes:
+      - type: bind
+        source: /srv/shared/data
+        target: /data
+        read_only: true
+        x-incus-compose:
+          remote: true
+```
+
+_Since: v1.3.5_
+
 ### Backup
 
 Configure `incus-compose backup` with the top-level `x-incus-compose.backup`

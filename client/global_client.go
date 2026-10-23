@@ -92,6 +92,9 @@ type ClientConfig struct {
 
 	// ToolsMount is the mount path for helper tools.
 	ToolsMount string
+
+	// AllowRemoteMounts permits pass-through bind mounts on a remote Incus server.
+	AllowRemoteMounts bool
 }
 
 // ClientOption is a functional option for configuring the Client.
@@ -167,6 +170,11 @@ func ClientGlobalProject(n string) ClientOption {
 // ClientLocksVolume sets the storage volume name holding advisory locks in GlobalProject.
 func ClientLocksVolume(n string) ClientOption {
 	return func(c *ClientConfig) { c.LocksVolume = n }
+}
+
+// ClientAllowRemoteMounts permits pass-through bind mounts on a remote Incus server.
+func ClientAllowRemoteMounts(allow bool) ClientOption {
+	return func(c *ClientConfig) { c.AllowRemoteMounts = allow }
 }
 
 // GlobalClient provides a high-level interface to Incus operations.
@@ -365,8 +373,8 @@ func NewTestClient(ctx context.Context) (*GlobalClient, error) {
 
 // NewOfflineClient creates a disconnected project client for resource planning.
 // It can create in-memory resources, but cannot run Incus operations.
-func NewOfflineClient(ctx context.Context, projectName string) *Client {
-	gc := New(ctx)
+func NewOfflineClient(ctx context.Context, projectName string, opts ...ClientOption) *Client {
+	gc := New(ctx, opts...)
 	gc.unix = true
 	config := gc.config
 	config.DescriptionFormat = fmt.Sprintf(config.DescriptionFormat, projectName) + ":%s"
