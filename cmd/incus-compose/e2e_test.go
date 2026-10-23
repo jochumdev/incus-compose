@@ -532,9 +532,8 @@ func TestE2ELifecycleSimple(t *testing.T) {
 			args: []string{"-f", compose, "start", "web"},
 		},
 		{
-			name:     "exec dry run",
-			args:     []string{"-f", compose, "exec", "--dry-run", "web", "echo", "hello"},
-			snapshot: true,
+			name: "exec",
+			args: []string{"-f", compose, "exec", "web", "echo", "hello"},
 		},
 		{
 			name: "restart service",
