@@ -481,14 +481,18 @@ func newUpCommand() *cli.Command {
 			}
 
 			// Start
-			if !cmd.Bool("no-start") {
-				startFilter := func(r client.Resource) bool { return r.IsEnsured() }
-
-				err := stack.ForActionF(client.ActionStart, startFilter).Run(ctx, client.ActionStart, startOptions...)
-				if err != nil {
-					c.LogError("Starting resources", "error", err)
-					return errLogged.Wrap(err)
+			startFilter := func(r client.Resource) bool {
+				if cmd.Bool("no-start") && r.Kind() == client.KindInstance {
+					return false
 				}
+
+				return r.IsEnsured()
+			}
+
+			err = stack.ForActionF(client.ActionStart, startFilter).Run(ctx, client.ActionStart, startOptions...)
+			if err != nil {
+				c.LogError("Starting resources", "error", err)
+				return errLogged.Wrap(err)
 			}
 
 			// Nothing was started, so there is nothing to stream logs from.

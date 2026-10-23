@@ -12,6 +12,7 @@ import (
 
 	"github.com/lxc/incus-compose/client"
 	"github.com/lxc/incus-compose/internal/testlib"
+	"github.com/lxc/incus-compose/shared"
 )
 
 func cleanLines(t *testing.T, in string) []string {
@@ -1131,4 +1132,172 @@ func TestE2EUpRecreateChanged(t *testing.T) {
 	require.NotEmpty(t, web.Config[client.ConfigHashKey])
 	assert.NotEqual(t, webHash, web.Config[client.ConfigHashKey], "the recreated instance carries the new hash")
 	assert.Equal(t, "web "+web.Config[client.ConfigHashKey]+"\n", hashes)
+}
+
+func TestE2ENetworkACL_Bridge(t *testing.T) {
+	t.Parallel()
+	testlib.SkipE2E(t)
+	testlib.SkipNoExtension(t, shared.Incus75Extension, "Network ACLs require incus 7.5")
+
+	ctx := t.Context()
+	pn := t.Name()
+
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `services:
+  web:
+    image: docker.io/library/busybox:1.36-glibc
+    x-incus:
+      oci.entrypoint: sh
+    networks:
+      - frontend
+  db:
+    image: docker.io/library/busybox:1.36-glibc
+    x-incus:
+      oci.entrypoint: sh
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    x-incus-compose:
+      acl:
+        ingress:
+          - from: frontend
+            ports: ["5432"]
+        egress:
+          - to: any
+            ports: ["53/udp", "443/tcp"]
+`,
+	})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-start", "--no-healthd", "--network-driver=bridge")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	frontIncusName := client.SanitizeNetworkName(strings.ToLower(pn), "ic-", "frontend")
+	backIncusName := client.SanitizeNetworkName(strings.ToLower(pn), "ic-", "backend")
+
+	frontNW, _, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, frontIncusName)
+	require.NoError(t, err)
+
+	var subnets []string
+	for _, key := range []string{"ipv4.address", "ipv6.address"} {
+		if v := frontNW.Config[key]; v != "" && v != "none" {
+			subnets = append(subnets, v)
+		}
+	}
+	require.NotEmpty(t, subnets)
+
+	backNW, _, err := conn.GetNetwork(ctx, incusApi.ProjectDefaultName, backIncusName)
+	require.NoError(t, err)
+	assert.Contains(t, backNW.Config["security.acls"], backIncusName)
+
+	acl, _, err := conn.GetNetworkACL(ctx, incusApi.ProjectDefaultName, backIncusName)
+	require.NoError(t, err)
+	require.Len(t, acl.Ingress, 1)
+	assert.Equal(t, "5432", acl.Ingress[0].DestinationPort)
+	assert.Equal(t, "tcp", acl.Ingress[0].Protocol)
+	assert.NotEmpty(t, acl.Ingress[0].Source)
+
+	require.Len(t, acl.Egress, 2)
+	assert.Equal(t, "udp", acl.Egress[0].Protocol)
+	assert.Equal(t, "53", acl.Egress[0].DestinationPort)
+	assert.Equal(t, "tcp", acl.Egress[1].Protocol)
+	assert.Equal(t, "443", acl.Egress[1].DestinationPort)
+}
+
+func TestE2ENetworkACL_OVN(t *testing.T) {
+	t.Parallel()
+	testlib.SkipE2E(t)
+	testlib.SkipNoExtension(t, shared.Incus75Extension, "Network ACLs require incus 7.5")
+
+	ctx := t.Context()
+
+	gc, err := client.NewTestClient(ctx)
+	require.NoError(t, err)
+
+	ovn, err := gc.DetectOVN()
+	require.NoError(t, err)
+	if !ovn {
+		t.Skip("no OVN on this server")
+	}
+
+	pn := t.Name()
+
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `services:
+  web:
+    image: docker.io/library/busybox:1.36-glibc
+    x-incus:
+      oci.entrypoint: sh
+    networks:
+      - frontend
+  db:
+    image: docker.io/library/busybox:1.36-glibc
+    x-incus:
+      oci.entrypoint: sh
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: ovn
+  backend:
+    driver: ovn
+    x-incus-compose:
+      acl:
+        default:
+          ingress: drop
+          egress: reject
+        ingress:
+          - from: frontend
+            ports: ["5432"]
+`,
+	})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err = testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--no-start", "--no-healthd")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	incusProj := c.IncusProject()
+	frontIncusName := client.SanitizeNetworkName(strings.ToLower(pn), "ic-", "frontend")
+	backIncusName := client.SanitizeNetworkName(strings.ToLower(pn), "ic-", "backend")
+
+	backNW, _, err := conn.GetNetwork(ctx, incusProj, backIncusName)
+	require.NoError(t, err)
+	assert.Equal(t, "drop", backNW.Config["security.acls.default.ingress.action"])
+	assert.Equal(t, "reject", backNW.Config["security.acls.default.egress.action"])
+	assert.Contains(t, backNW.Config["security.acls"], backIncusName)
+
+	wantPeer := client.SanitizePeerName(incusProj, frontIncusName)
+	wantRecip := client.SanitizePeerName(incusProj, backIncusName)
+
+	acl, _, err := conn.GetNetworkACL(ctx, incusProj, backIncusName)
+	require.NoError(t, err)
+	require.Len(t, acl.Ingress, 1)
+	assert.Equal(t, "@"+backIncusName+"/"+wantPeer, acl.Ingress[0].Source)
+	assert.Equal(t, "5432", acl.Ingress[0].DestinationPort)
+
+	peer, _, err := conn.GetNetworkPeer(ctx, incusProj, backIncusName, wantPeer)
+	require.NoError(t, err)
+	assert.Equal(t, incusApi.NetworkStatusCreated, peer.Status)
+
+	recip, _, err := conn.GetNetworkPeer(ctx, incusProj, frontIncusName, wantRecip)
+	require.NoError(t, err)
+	assert.Equal(t, incusApi.NetworkStatusCreated, recip.Status)
 }

@@ -112,7 +112,7 @@ func TestEnricherReturnsIPOnInstanceStarted(t *testing.T) {
 	stack := client.NewStack(c)
 	stack.Add(networkRes, image, inst)
 	require.NoError(t, stack.ForAction(client.ActionEnsure).Run(ctx, client.ActionEnsure, client.OptionCreate()))
-	require.NoError(t, client.RunAction(ctx, inst, client.ActionStart, client.OptionNoHealthd()))
+	require.NoError(t, stack.ForAction(client.ActionStart).Run(ctx, client.ActionStart, client.OptionNoHealthd()))
 
 	// Wait for the instance-started event from enricher.
 	var startedEvent *iutil.Event

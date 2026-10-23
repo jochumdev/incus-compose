@@ -261,6 +261,9 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 
 		err = client.RunAction(ctx, resolverNet, client.ActionEnsure, client.OptionCreate())
 		if err == nil {
+			err = client.RunAction(ctx, resolverNet, client.ActionStart)
+		}
+		if err == nil {
 			for _, net := range projectNets {
 				peer := fmt.Sprintf("%s-%s-dns", p.Name, net.IncusName())
 				hadPeer := slices.ContainsFunc(net.Config.Peers, func(p incusApi.NetworkPeersPost) bool { return p.Name == peer })
@@ -273,6 +276,9 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 				}
 
 				err = client.RunAction(ctx, net, client.ActionEnsure, client.OptionCreate())
+				if err == nil {
+					err = client.RunAction(ctx, net, client.ActionStart)
+				}
 				if !hadPeer {
 					net.Config.Peers = slices.DeleteFunc(net.Config.Peers, func(p incusApi.NetworkPeersPost) bool { return p.Name == peer })
 				}

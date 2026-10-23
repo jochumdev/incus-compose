@@ -38,3 +38,14 @@ func SanitizeIncusName(name string, maxLength int) string {
 
 	return safe
 }
+
+// SanitizePeerName converts a project and network name to a valid Incus
+// network peer name (1-63 alphanumeric or hyphen characters).
+func SanitizePeerName(projectName, networkName string) string {
+	full := networkName
+	if projectName != "" {
+		full = projectName + "-" + networkName
+	}
+
+	return SanitizeIncusName(full, MaxIncusNameLen)
+}
