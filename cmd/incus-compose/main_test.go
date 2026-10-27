@@ -583,3 +583,67 @@ func TestDNSAliasesWhenContainerNameMatchesServiceName(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+// TestDNSBridgeServiceAAAALocal verifies that on an IPv4-only bridge network,
+// AAAA lookups (via getent ahosts / AF_UNSPEC) for both a service name
+// (address=/) and a network alias (cname=) are answered locally by dnsmasq
+// rather than forwarded to an unresponsive upstream resolver (#236).
+func TestDNSBridgeServiceAAAALocal(t *testing.T) {
+	testlib.SkipLocal(t)
+	t.Parallel()
+
+	ctx := t.Context()
+	pn := t.Name()
+
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `services:
+  db:
+    image: docker.io/library/busybox:glibc
+    x-incus:
+      oci.entrypoint: sh
+    networks:
+      default:
+        aliases:
+          - db-alias
+
+  client:
+    image: docker.io/library/busybox:glibc
+    x-incus:
+      oci.entrypoint: sh
+
+networks:
+  default:
+    x-incus:
+      ipv6.address: none
+      raw.dnsmasq: |
+        no-resolv
+        server=192.0.2.1
+`,
+	})
+	compose := filepath.Join(dir, "compose.yaml")
+
+	testlib.CleanupCompose(t, pn, "-f", compose, "down", "--project")
+
+	_, err := testlib.RunCompose(ctx, t, pn, "", nil, "-f", compose, "up", "--detach", "--network-driver", "bridge", "--no-dns")
+	require.NoError(t, err)
+
+	c := projectClient(ctx, t, pn)
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	for _, host := range []string{"db.", "db-alias."} {
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+		updates, execErr := conn.ExecInstance(ctx, c.IncusProject(), "client-1", incusApi.InstanceExecPost{
+			Command: []string{"timeout", "2", "nslookup", "-type=aaaa", host},
+		}, &iclient.InstanceExecArgs{Stdout: stdout, Stderr: stderr})
+		require.NoError(t, execErr)
+
+		op, waitErr := iclient.WaitOperation(ctx, updates)
+		require.NoError(t, waitErr)
+
+		code, ok := op.Metadata["return"].(float64)
+		require.True(t, ok)
+		require.Equal(t, 0, int(code), "AAAA lookup for %q timed out or failed: stdout=%q, stderr=%q", host, stdout.String(), stderr.String())
+	}
+}

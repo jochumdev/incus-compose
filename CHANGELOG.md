@@ -137,6 +137,11 @@ form.
 
 ### Fixed
 
+- Bridge network `raw.dnsmasq` now includes `local=/<service>/` alongside
+  `address=/<service>/<ip>` entries so `AAAA` lookups for IPv4-only service
+  names are answered locally with `NODATA` instead of being forwarded upstream
+  and timing out. (by @jlutran, @jochumdev, #236)
+
 - `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
   the in-scope services (including scaled replicas) and reject unknown service
   names. (by @jochumdev, #231)

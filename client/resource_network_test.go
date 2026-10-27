@@ -146,24 +146,29 @@ func TestDNSmasqRecords(t *testing.T) {
 			expected:   "",
 		},
 		{
+			name:       "empty slice for service",
+			serviceIPs: map[string][]string{"database": {}},
+			expected:   "",
+		},
+		{
 			name:       "single service single ip",
 			serviceIPs: map[string][]string{"database": {"10.0.0.2"}},
-			expected:   "address=/database/10.0.0.2\n",
+			expected:   "address=/database/10.0.0.2\nlocal=/database/\n",
 		},
 		{
 			name:       "single service round-robin",
 			serviceIPs: map[string][]string{"web": {"10.0.0.3", "10.0.0.4"}},
-			expected:   "address=/web/10.0.0.3\naddress=/web/10.0.0.4\n",
+			expected:   "address=/web/10.0.0.3\naddress=/web/10.0.0.4\nlocal=/web/\n",
 		},
 		{
 			name:       "multiple services sorted",
 			serviceIPs: map[string][]string{"web": {"10.0.0.3"}, "app": {"10.0.0.5"}},
-			expected:   "address=/app/10.0.0.5\naddress=/web/10.0.0.3\n",
+			expected:   "address=/app/10.0.0.5\nlocal=/app/\naddress=/web/10.0.0.3\nlocal=/web/\n",
 		},
 		{
 			name:       "dual stack",
 			serviceIPs: map[string][]string{"db": {"10.0.0.2", "fd42::2"}},
-			expected:   "address=/db/10.0.0.2\naddress=/db/fd42::2\n",
+			expected:   "address=/db/10.0.0.2\naddress=/db/fd42::2\nlocal=/db/\n",
 		},
 	}
 
@@ -173,6 +178,31 @@ func TestDNSmasqRecords(t *testing.T) {
 			require.Equal(t, tt.expected, dnsmasqRecords(tt.serviceIPs))
 		})
 	}
+}
+
+func TestDNSmasqParse(t *testing.T) {
+	t.Parallel()
+
+	raw := strings.Join([]string{
+		"address=/db/10.0.0.2",
+		"local=/db/",
+		"address=/web/10.0.0.3",
+		"address=/web/10.0.0.4",
+		"local=/web/",
+		"cname=db.mydomain.lan,db-1",
+		"local=/corp.example.com/10.0.0.53",
+		"domain-needed",
+	}, "\n")
+
+	addresses, cnames, extra := DNSmasqParse(raw)
+	require.Equal(t, map[string][]string{
+		"db":  {"10.0.0.2"},
+		"web": {"10.0.0.3", "10.0.0.4"},
+	}, addresses)
+	require.Equal(t, map[string][]string{
+		"db-1": {"db.mydomain.lan"},
+	}, cnames)
+	require.Equal(t, "local=/corp.example.com/10.0.0.53\ndomain-needed\n", extra)
 }
 
 func TestDNSWatcher_SkipsOVNNetwork(t *testing.T) {
