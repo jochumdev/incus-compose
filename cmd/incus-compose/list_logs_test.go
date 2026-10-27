@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -120,4 +121,26 @@ func TestLogFormatterColor(t *testing.T) {
 	assert.True(t, strings.Contains(output, "\033["))
 	assert.Contains(t, output, "web | ")
 	assert.Contains(t, output, "hello\n")
+}
+
+func TestProjectInstances(t *testing.T) {
+	t.Parallel()
+
+	c := client.NewOfflineClient(t.Context(), "logs-filter")
+	p := newProject(&types.Project{
+		Name: "logs-filter",
+		Services: types.Services{
+			"web": {Name: "web"},
+			"db":  {Name: "db"},
+		},
+	})
+
+	all := projectInstances(c, p)
+	require.Len(t, all, 2)
+	assert.Equal(t, "db-1", all[0].Name())
+	assert.Equal(t, "web-1", all[1].Name())
+
+	onlyWeb := projectInstances(c, p, "web")
+	require.Len(t, onlyWeb, 1)
+	assert.Equal(t, "web-1", onlyWeb[0].Name())
 }

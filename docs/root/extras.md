@@ -19,8 +19,8 @@ beyond it is reachable from the same compose file, through three escape hatches:
 - **`x-incus`** - passes any Incus config key straight through to the instance,
   network or volume it sits on. incus-compose does not interpret these.
 - **`x-incus-compose`** - features incus-compose implements itself: custom
-  builders, devices, volume placement and seeding, backups, healthd, network,
-  and DNS.
+  builders, devices, volume placement and seeding, backups, healthd, networks
+  and ACLs, and DNS.
 
 For what the Compose spec itself supports, see
 [Compose Compatibility](/compose-compatibility).
@@ -296,6 +296,30 @@ Seeding is off by default: bind mounts are plain pass-through unless you ask.
 
 _Since: v1.0.0_
 
+### Remote bind mounts
+
+Pass-through bind mounts are normally refused when the Incus server is on a
+remote host, because the source path is resolved on the Incus server rather than
+on the client machine. When the path already exists on the remote Incus host,
+set `x-incus-compose.remote: true` inline on the volume entry (or pass the
+global `--allow-remote-mounts` / `INCUS_COMPOSE_ALLOW_REMOTE_MOUNTS` flag) to
+skip the same-host and local `os.Stat` checks:
+
+```yaml
+services:
+  web:
+    image: docker.io/library/busybox:glibc
+    volumes:
+      - type: bind
+        source: /srv/shared/data
+        target: /data
+        read_only: true
+        x-incus-compose:
+          remote: true
+```
+
+_Since: v1.3.5_
+
 ### Backup
 
 Configure `incus-compose backup` with the top-level `x-incus-compose.backup`
@@ -401,6 +425,89 @@ networks:
     x-incus-compose:
       uplink: my-uplink
 ```
+
+### Network ACLs
+
+Configure firewall rules on a compose network with the per-network
+`x-incus-compose.acl` extension (requires Incus 7.5+ or 7.0.2 LTS):
+
+```yaml
+services:
+  web:
+    image: docker.io/nginx:alpine
+    networks:
+      - frontend
+
+  api:
+    image: docker.io/myorg/api:latest
+    networks:
+      - frontend
+      - backend
+
+  db:
+    image: docker.io/postgres:16-alpine
+    networks:
+      - backend
+
+networks:
+  frontend:
+
+  backend:
+    x-incus-compose:
+      description: "internal database network"
+      acl:
+        default:
+          ingress: reject # OVN only: allow, reject (default), or drop
+          egress: reject  # OVN only: allow (default), reject, or drop
+        ingress:
+          - from: frontend
+            ports: ["5432"]
+          - from: billing:public
+            ports: ["443/tcp"]
+            description: "billing webhook callback"
+        egress:
+          - to: any
+            ports: ["53/udp", "53/tcp", "443/tcp"]
+```
+
+When `acl` is present on a network, incus-compose creates an Incus Network ACL
+with the same sanitized name as the network, attaches it via `security.acls`,
+and deletes it on `down`. On OVN networks without an `acl` block, incus-compose
+attaches a `<network>-default` ACL that allows intra-network (`@internal`) and
+egress traffic while rejecting unsolicited ingress from other networks. When
+`acl` is configured on an OVN network, `@internal` ingress and egress rules are
+still added automatically unless a rule explicitly targets `@internal`.
+
+| Rule Key      | Description                                                                                                                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `from` / `to` | Source (`ingress`) or destination (`egress`): a compose network name, `<project>:<network>`, `any` (or omitted), a CIDR/IP/range, or `@internal`/`@external` (OVN only).                                                                                           |
+| `ports`       | Port/protocol entries: `"5432"` (defaults to `tcp`), `"53/udp"`, `"8000-8010/tcp"`, `"*/icmp4"`, `"*/icmp6"`, `"*/tcp"`, `"*/udp"`. Multiple ports for the same protocol are combined into a single comma-separated rule; omitted matches all protocols and ports. |
+| `action`      | `allow` (default), `reject`, `drop`, or `allow-stateless` (`reject`, `drop`, and `allow-stateless` require OVN).                                                                                                                                                   |
+| `state`       | `enabled` (default), `logged`, or `disabled` (`logged` and `disabled` require OVN).                                                                                                                                                                                |
+| `description` | Optional rule description. Defaults to an auto-generated `incus-compose:` description.                                                                                                                                                                             |
+
+**Target resolution:**
+
+- **OVN-to-OVN** (same-project or `<project>:<network>`): incus-compose creates
+  mutual OVN network peers on both networks and compiles the rule subject to
+  `@<network>/<peer>`. Both peers are removed on `down`.
+- **Bridge** (when either network uses the bridge driver): incus-compose
+  resolves the target network's allocated IPv4/IPv6 subnets (`ipv4.address` /
+  `ipv6.address`).
+
+**Default actions:**
+
+- Unmatched ingress defaults to `reject`; unmatched egress defaults to `allow`.
+- Override the unmatched action on OVN networks via `acl.default.ingress` and
+  `acl.default.egress` (`allow`, `reject`, or `drop`), which set
+  `security.acls.default.ingress.action` and
+  `security.acls.default.egress.action` on the network.
+- incus-compose does not silently switch default actions when `acl` is
+  configured. Instead, it logs a warning when `acl.egress` is empty and
+  `acl.default.egress` is not `reject` or `drop`, or when `acl.ingress` is empty
+  and `acl.default.ingress` is `allow`.
+
+_Since: v1.4.0_
 
 ### DNS
 

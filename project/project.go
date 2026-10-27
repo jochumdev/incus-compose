@@ -417,10 +417,23 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 	return p, nil
 }
 
-// InstanceNames returns the Incus instance names for all services.
-func (p *Project) InstanceNames() []string {
+// InstanceNames returns the Incus instance names for the named services, or all
+// services when none are given.
+func (p *Project) InstanceNames(c *client.Client, services ...string) []string {
+	if len(services) == 0 {
+		services = p.ServiceNames()
+	}
+
+	seen := make(map[string]struct{}, len(services))
+
 	var names []string
-	for _, svcName := range p.ServiceNames() {
+	for _, svcName := range services {
+		_, ok := seen[svcName]
+		if ok {
+			continue
+		}
+		seen[svcName] = struct{}{}
+
 		service, err := p.GetService(svcName)
 		if err != nil {
 			continue
@@ -429,6 +442,17 @@ func (p *Project) InstanceNames() []string {
 		replicas := 1
 		if service.Deploy != nil && service.Deploy.Replicas != nil {
 			replicas = *service.Deploy.Replicas
+		}
+
+		if c != nil {
+			for {
+				exists, err := c.InstanceExists(instanceName(service, replicas+1, replicas+1))
+				if err != nil || !exists {
+					break
+				}
+
+				replicas++
+			}
 		}
 
 		for i := 1; i <= replicas; i++ {

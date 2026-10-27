@@ -50,6 +50,10 @@ type NetworkConfig struct {
 	// ACL, when set, is created and attached to this network.
 	ACL *incusApi.NetworkACLsPost
 
+	// ACLNetworks maps network references in ACL rules to their target Network
+	// resources so Start can resolve them to peers or CIDRs after Ensure.
+	ACLNetworks map[string]*Network
+
 	// Peers are the peer relationships to create on this network.
 	Peers []incusApi.NetworkPeersPost
 }
@@ -227,14 +231,7 @@ func (r *Network) Ensure(ctx context.Context, opts ...Option) error {
 	}
 
 	if err == nil {
-		if options.Create {
-			err = r.ensurePeers(ctx)
-			if err == nil {
-				err = r.ensureACLs(ctx)
-			}
-		}
-
-		err = r.client.hookAfter(ctx, ActionEnsure, r, options, err)
+		err = r.client.hookAfter(ctx, ActionEnsure, r, options, nil)
 
 		return err
 	}
@@ -259,16 +256,105 @@ func (r *Network) Ensure(ctx context.Context, opts ...Option) error {
 		err = nil
 	}
 
-	if err == nil && options.Create {
-		err = r.ensurePeers(ctx)
-		if err == nil {
-			err = r.ensureACLs(ctx)
-		}
-	}
-
 	err = r.client.hookAfter(ctx, ActionEnsure, r, options, err)
 
 	return err
+}
+
+// Start resolves ACL rules and configures peers and ACLs on the network.
+func (r *Network) Start(ctx context.Context, opts ...Option) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	options := NewOptions(opts...)
+
+	err := r.client.hookBefore(ctx, ActionStart, r, options, nil)
+	if err != nil {
+		return err
+	}
+
+	if !r.IsEnsured() {
+		return r.client.hookAfter(ctx, ActionStart, r, options, ErrNotEnsured)
+	}
+
+	if r.Config.External {
+		return r.client.hookAfter(ctx, ActionStart, r, options, nil)
+	}
+
+	var resolved map[string]string
+	var extraPeers []incusApi.NetworkPeersPost
+
+	if r.Config.ACL != nil && len(r.Config.ACLNetworks) > 0 {
+		resolved = make(map[string]string, len(r.Config.ACLNetworks))
+		localOVN := r.Type(ctx) == "ovn"
+
+		for ref, target := range r.Config.ACLNetworks {
+			if !target.IsEnsured() {
+				ensureErr := target.Ensure(ctx, OptionCreate())
+				if ensureErr != nil {
+					err = fmt.Errorf("network %q: resolving ACL target %q: %w", r.Name(), ref, ensureErr)
+
+					return r.client.hookAfter(ctx, ActionStart, r, options, err)
+				}
+			}
+
+			if localOVN && target.Type(ctx) == "ovn" {
+				peerName := SanitizePeerName(target.incusProject(), target.IncusName())
+				peer := incusApi.NetworkPeersPost{
+					Name:          peerName,
+					TargetProject: target.incusProject(),
+					TargetNetwork: target.IncusName(),
+				}
+
+				if !slices.ContainsFunc(r.Config.Peers, func(p incusApi.NetworkPeersPost) bool {
+					return p.TargetProject == peer.TargetProject && p.TargetNetwork == peer.TargetNetwork
+				}) && !slices.ContainsFunc(extraPeers, func(p incusApi.NetworkPeersPost) bool {
+					return p.TargetProject == peer.TargetProject && p.TargetNetwork == peer.TargetNetwork
+				}) {
+					extraPeers = append(extraPeers, peer)
+				}
+
+				recip := incusApi.NetworkPeersPost{
+					Name:          SanitizePeerName(r.incusProject(), r.IncusName()),
+					TargetProject: r.incusProject(),
+					TargetNetwork: r.IncusName(),
+				}
+
+				recipErr := r.ensurePeerOn(ctx, target.incusProject(), target.IncusName(), recip)
+				if recipErr != nil {
+					err = fmt.Errorf("network %q: creating reciprocal peer on %s/%s: %w", r.Name(), target.incusProject(), target.IncusName(), recipErr)
+
+					return r.client.hookAfter(ctx, ActionStart, r, options, err)
+				}
+
+				resolved[ref] = "@" + r.IncusName() + "/" + peerName
+			} else {
+				subnets, subErr := target.Subnets(ctx)
+				if subErr != nil {
+					err = fmt.Errorf("network %q: reading subnets of %q: %w", r.Name(), ref, subErr)
+
+					return r.client.hookAfter(ctx, ActionStart, r, options, err)
+				}
+
+				if len(subnets) == 0 {
+					err = fmt.Errorf("network %q: target network %q has no IPv4 or IPv6 subnet", r.Name(), ref)
+
+					return r.client.hookAfter(ctx, ActionStart, r, options, err)
+				}
+
+				resolved[ref] = strings.Join(subnets, ",")
+			}
+		}
+	}
+
+	err = r.ensurePeers(ctx, extraPeers...)
+	if err != nil {
+		return r.client.hookAfter(ctx, ActionStart, r, options, err)
+	}
+
+	err = r.ensureACLs(ctx, resolved)
+
+	return r.client.hookAfter(ctx, ActionStart, r, options, err)
 }
 
 func (r *Network) incusProject() string {
@@ -681,6 +767,7 @@ func (r *Network) updateDNSAliases(ctx context.Context, ownedServices []string, 
 var (
 	_ Resource   = (*Network)(nil)
 	_ EnsureAble = (*Network)(nil)
+	_ StartAble  = (*Network)(nil)
 	_ DeleteAble = (*Network)(nil)
 )
 

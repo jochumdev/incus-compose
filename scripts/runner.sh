@@ -30,10 +30,10 @@ RUNNER_INCUS_PROJECT="${RUNNER_INCUS_PROJECT:-ic-runner}"
 
 # Each entry is the instance name followed by its setup-nested-incus.sh flags.
 ICTS=(
-    "ict-stable -r stable"
+    "ict-stable -r stable -o"
     "ict-custom -r stable -p local -b vmbr0"
-    "ict-lts -r lts-7.0"
-    "ict-daily -r daily"
+    "ict-lts -r lts-7.0 -o"
+    "ict-daily -r daily -o"
 )
 
 step() { echo "==> $*" >&2; }
@@ -153,7 +153,7 @@ up() {
     fi
 
     setup_nested=("${SCRIPT_DIR}/setup-nested-incus.sh"
-        -c "$(realpath "${CERT}")" -o -s "${ICT_POOL}" -f "${apt_opts[@]}")
+        -c "$(realpath "${CERT}")" -s "${ICT_POOL}" -f "${apt_opts[@]}")
 
     for ict in "${ICTS[@]}"; do
         read -ra spec <<<"${ict}"
@@ -173,7 +173,7 @@ up() {
         incus start "${RUNNER}" || true
     else
         step "Restoring ${RUNNER} from the 'runner' image"
-        incus launch runner "${RUNNER}" --storage "${POOL}" \
+        incus launch runner "${RUNNER}" \
             -c security.nesting=true \
             -c security.privileged=true
     fi

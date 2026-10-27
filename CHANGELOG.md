@@ -20,6 +20,12 @@ form.
   hash of the current file, and `ps` marks changed instances (`config_changed`
   in JSON). (by @tallica)
 
+- Support for declarative Network ACLs (firewall rules between compose networks)
+  via `networks.<name>.x-incus-compose.acl` (`default`, `ingress`, and `egress`
+  rules). Supports OVN-to-OVN network peer resolution (`@<network>/<peer>`) as
+  well as bridge subnet CIDR resolution across same-project and cross-project
+  (`<project>:<network>`) network references. (by @jochumdev, #98)
+
 - Disk and tmpfs mount targets that are symlinks in the container rootfs (common
   in `nix-containers` images such as `/etc/caddy` pointing into `/nix/store`)
   are now materialized as real directories or files before starting the
@@ -130,6 +136,10 @@ form.
   via `user.healthcheck.enabled`. (by @jochumdev)
 
 ### Fixed
+
+- `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
+  the in-scope services (including scaled replicas) and reject unknown service
+  names. (by @jochumdev, #231)
 
 - On a server without OVN, `up` and the `healthd`/`dns` commands no longer spend
   about two seconds detecting that, several times per command, and OVN networks

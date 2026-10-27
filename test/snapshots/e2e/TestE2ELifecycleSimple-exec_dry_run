@@ -1,1 +1,0 @@
-/usr/bin/incus exec --user 0 --group 0 web-1 -- echo hello

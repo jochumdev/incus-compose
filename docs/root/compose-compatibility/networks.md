@@ -16,6 +16,8 @@ leafwiki_last_author_id: system
 - DNS resolution by service name and by instance name
 - Extra DNS names per service via `aliases` (see below)
 - External networks (pre-existing Incus networks)
+- Network ACLs (firewall rules between networks) via `x-incus-compose.acl` (see
+  [Extras](/extras#network-acls))
 - `x-incus` extension - pass any Incus network config key directly (see
   [Extras](/extras#networks))
 - Automatic DHCP range configuration on creation (see below)
@@ -215,3 +217,32 @@ collisions in `ic-dns` and `dnsmasq`. Use the service name, which does
 round-robin, for scaled services instead. :::
 
 _Since: v1.1.0_
+
+## Network ACLs
+
+By default, each OVN network gets a `<network>-default` ACL that allows traffic
+between instances on the same network (`@internal`) and outbound egress, while
+rejecting unsolicited ingress from other networks.
+
+To define custom ingress and egress firewall rules between compose networks,
+cross-project networks (`<project>:<network>`), or external CIDRs, use the
+`x-incus-compose.acl` extension on a network definition:
+
+```yaml
+networks:
+  frontend:
+
+  backend:
+    x-incus-compose:
+      acl:
+        ingress:
+          - from: frontend
+            ports: ["5432"]
+```
+
+On OVN-to-OVN rules, incus-compose automatically sets up mutual network peers
+and uses `@<network>/<peer>` subjects; when a bridge network is involved, it
+resolves the target network's allocated IPv4/IPv6 subnets. See
+[Extras - Network ACLs](/extras#network-acls) for the full schema and options.
+
+_Since: v1.4.0_

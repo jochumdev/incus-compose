@@ -12,8 +12,9 @@ leafwiki_last_author_id: system
 # Volumes
 
 - Named volumes (Incus custom storage volumes)
-- Bind mounts - pass-through when incusd runs on your machine, or copied in with
-  `x-incus-compose.seed` against any server (see
+- Bind mounts - pass-through when incusd runs on your machine (or against a
+  remote server with `x-incus-compose.remote: true` / `--allow-remote-mounts`),
+  or copied in with `x-incus-compose.seed` against any server (see
   [Extras](/extras#volume-seeding))
 - Read-only volumes
 - Automatic UID/GID shifting
@@ -24,6 +25,8 @@ leafwiki_last_author_id: system
   [Extras](/extras#volume-pool))
 - `x-incus-compose.seed` - copy a bind mount's source into the instance (see
   [Extras](/extras#volume-seeding))
+- `x-incus-compose.remote` - allow a pass-through bind mount on a remote Incus
+  server (see [Extras](/extras#remote-bind-mounts))
 - Image volumes - a path the image declares as `VOLUME` gets one of its own (see
   below)
 - Prefetching - a volume starts from what the image ships at its target (see

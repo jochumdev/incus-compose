@@ -1096,3 +1096,36 @@ func TestResourcesNetworkDriverFallsBackToBridgeWithout75Extension(t *testing.T)
 		assert.Equal(t, "bridge", p.ClientConfig.Network.Driver)
 	})
 }
+
+func TestInstanceNames(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	t.Run("simple", func(t *testing.T) {
+		t.Parallel()
+
+		p, err := New().Load(ctx, LoadWorkingDir(fixturePath("simple")))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"web-1"}, p.InstanceNames(nil))
+	})
+
+	t.Run("container_name", func(t *testing.T) {
+		t.Parallel()
+
+		p, err := New().Load(ctx, LoadWorkingDir(fixturePath("with-container-name")))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"my-nginx"}, p.InstanceNames(nil))
+	})
+
+	t.Run("replicas and service filter", func(t *testing.T) {
+		t.Parallel()
+
+		p, err := New().Load(ctx, LoadWorkingDir(fixturePath("scale")))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"web-1", "web-2", "web2-1"}, p.InstanceNames(nil))
+		assert.Equal(t, []string{"web2-1"}, p.InstanceNames(nil, "web2"))
+		assert.Equal(t, []string{"web2-1", "web-1", "web-2"}, p.InstanceNames(nil, "web2", "web", "web2"))
+		assert.Empty(t, p.InstanceNames(nil, "unknown"))
+	})
+}

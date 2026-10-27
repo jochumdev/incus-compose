@@ -63,6 +63,7 @@ also be set via an environment variable - see
 | `--ansi`                    | Color output: never/always/auto                                                                                                    |
 | `--image-cache`             | Incus project used as image cache (default: `incus-compose-cache`); set `""` to disable caching and pull straight into the project |
 | `--storage-pool`            | Default storage pool for volumes (default: `detect` for auto-detection)                                                            |
+| `--allow-remote-mounts`     | Allow pass-through bind mounts on a remote Incus server (since v1.3.5)                                                             |
 | `--workers`                 | Number of concurrent workers (default: `4`)                                                                                        |
 | `--debug`                   | Debug logging                                                                                                                      |
 

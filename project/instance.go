@@ -714,104 +714,10 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 
 	ethIdx := 0
 	for name, sNet := range service.Networks {
-		netConfig := &client.NetworkConfig{}
-
-		gateway4, gateway6 := "none", "none"
-
-		networkDef, defOk := p.Networks[name]
-		if defOk {
-			netConfig.External = bool(networkDef.External)
-			exts, err := networkExtensions(networkDef)
-			if err != nil {
-				errs = errors.Join(errs, fmt.Errorf("network %q: %w", name, err))
-				continue
-			}
-			netConfig.Extensions = exts
-			if netConfig.Extensions == nil {
-				netConfig.Extensions = map[string]string{}
-			}
-			if networkDef.Driver != "" {
-				netConfig.Type = networkDef.Driver
-			}
-			isOVN := netConfig.Type == "ovn" || ((netConfig.Type == "" || netConfig.Type == "auto") && c.FeaturesNetworks())
-			if (isOVN || netConfig.Type == "ovn" || netConfig.Type == "auto") && !c.Global().HasExtension(shared.Incus75Extension) {
-				if netConfig.Type == "ovn" {
-					c.LogWarn(
-						"For ovn on a network you need at least incus 7.5 or 7.0.2 LTS",
-						"service", service.Name,
-						"network", name,
-					)
-				}
-				netConfig.Type = "bridge"
-				isOVN = false
-			}
-			if isOVN && netConfig.Extensions["network"] == "" && uplink != "" {
-				netConfig.Extensions["network"] = uplink
-			}
-			if !isOVN {
-				delete(netConfig.Extensions, "network")
-			}
-			_, hasACL := netConfig.Extensions["security.acls"]
-			if hasACL && !c.Global().HasExtension(shared.Incus75Extension) {
-				c.LogWarn(
-					"For `security.acls` on a network you need at least incus 7.5 or 7.0.2 LTS",
-					"service", service.Name,
-					"network", name,
-				)
-				delete(netConfig.Extensions, "security.acls")
-			}
-			// compose-go always fills Name in, with the key for an external network
-			// and {project}_{key} otherwise; anything else is a `name:` the user
-			// wrote, and it beats the extension.
-			defaultName := name
-			if !netConfig.External {
-				defaultName = p.Name + "_" + name
-			}
-
-			netConfig.OverrideName = xICInstanceNetwork(networkDef)
-			if networkDef.Name != "" && networkDef.Name != defaultName {
-				netConfig.OverrideName = networkDef.Name
-			}
-
-			// Incus documents "auto" for ipv4.address/ipv6.address, but it is
-			// broken upstream (fix pending), so leave the key unset instead.
-			// Keep treating the empty value as the auto case afterwards too,
-			// for backward compatibility.
-			if !networkDef.Internal {
-				v, ok := netConfig.Extensions["ipv4.address"]
-				if ok && v != "none" && v != "" {
-					ip, _, err := net.ParseCIDR(v)
-					if err != nil {
-						errs = errors.Join(
-							errs,
-							fmt.Errorf("failed to parse the gateway IPv4 for network %q: %w", name, err),
-						)
-						continue
-					}
-					gateway4 = ip.String()
-				}
-				v, ok = netConfig.Extensions["ipv6.address"]
-				if ok && v != "none" && v != "" {
-					ip, _, err := net.ParseCIDR(v)
-					if err != nil {
-						errs = errors.Join(
-							errs,
-							fmt.Errorf("failed to parse the gateway IPv6 for network %q: %w", name, err),
-						)
-						continue
-					}
-					gateway6 = ip.String()
-				}
-
-				_, ok = netConfig.Extensions["ipv4.nat"]
-				if !ok {
-					netConfig.Extensions["ipv4.nat"] = "true"
-				}
-				_, ok = netConfig.Extensions["ipv6.nat"]
-				if !ok {
-					netConfig.Extensions["ipv6.nat"] = "true"
-				}
-			}
+		network, netConfig, gateway4, gateway6, err := ensureProjectNetwork(c, p, name, service.Name, uplink)
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
 		}
 
 		extensions := map[string]string{}
@@ -900,63 +806,13 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		// Whatever we set before, `x-incus` overrides it.
 		maps.Copy(extensions, userExtensions)
 
-		// An external `<project>:<network>` names a managed network of another
-		// compose project, whose Incus name only that project's client derives.
-		netClient := c
-		netName := name
-
-		if netConfig.External && strings.Contains(netConfig.OverrideName, ":") {
-			owner, network, _ := strings.Cut(netConfig.OverrideName, ":")
-			if owner == "" || network == "" || strings.Contains(network, ":") {
-				errs = errors.Join(
-					errs,
-					fmt.Errorf("network %q: %q must be `<project>:<network>` or a plain network name", name, netConfig.OverrideName),
-				)
-				continue
-			}
-
-			owned, err := c.Global().EnsureProject(owner)
-			if err != nil {
-				errs = errors.Join(errs, fmt.Errorf("network %q: %w", name, err))
-				continue
-			}
-
-			netClient = owned
-			netName = network
-			netConfig.OverrideName = ""
-		}
-
-		if netConfig.ACL != nil && !c.Global().HasExtension(shared.Incus75Extension) {
-			c.LogWarn(
-				"For a network ACL you need at least incus 7.5 or 7.0.2 LTS",
-				"service", service.Name,
-				"network", name,
-			)
-			netConfig.ACL = nil
-		}
-
-		rNetwork, err := netClient.Resource(client.KindNetwork, netName, netConfig)
-		if err != nil {
-			errs = errors.Join(errs, err)
-			continue
-		}
-
 		if sNet != nil && len(sNet.Aliases) > 0 {
-			network, ok := rNetwork.(*client.Network)
-			if !ok {
-				errs = errors.Join(
-					errs,
-					fmt.Errorf("failed to get network: %q", name),
-				)
-				continue
-			}
-
 			network.CNames[instanceName] = sNet.Aliases
 		}
 
 		nicConfig := client.InstanceDeviceConfig{
 			DeviceType: client.InstanceDeviceTypeNic,
-			Network:    rNetwork,
+			Network:    network,
 			Extensions: extensions,
 		}
 
@@ -966,10 +822,147 @@ func instanceNetworkDevices(c *client.Client, p *types.Project, service types.Se
 		})
 		ethIdx++
 
-		resources = append(resources, rNetwork)
+		resources = append(resources, network)
 	}
 
 	return devices, resources, errs
+}
+
+func ensureProjectNetwork(c *client.Client, p *types.Project, name, serviceName, uplink string) (*client.Network, *client.NetworkConfig, string, string, error) {
+	netConfig := &client.NetworkConfig{}
+	gateway4, gateway6 := "none", "none"
+
+	var networkDef types.NetworkConfig
+	var defOk bool
+	if p != nil {
+		networkDef, defOk = p.Networks[name]
+	}
+
+	if defOk {
+		netConfig.External = bool(networkDef.External)
+		exts, err := networkExtensions(networkDef)
+		if err != nil {
+			return nil, nil, "", "", fmt.Errorf("network %q: %w", name, err)
+		}
+		netConfig.Extensions = exts
+		if netConfig.Extensions == nil {
+			netConfig.Extensions = map[string]string{}
+		}
+		if networkDef.Driver != "" {
+			netConfig.Type = networkDef.Driver
+		}
+		isOVN := netConfig.Type == "ovn" || ((netConfig.Type == "" || netConfig.Type == "auto") && c.FeaturesNetworks())
+		if (isOVN || netConfig.Type == "ovn" || netConfig.Type == "auto") && !c.Global().HasExtension(shared.Incus75Extension) {
+			if netConfig.Type == "ovn" {
+				c.LogWarn(
+					"For ovn on a network you need at least incus 7.5 or 7.0.2 LTS",
+					"service", serviceName,
+					"network", name,
+				)
+			}
+			netConfig.Type = "bridge"
+			isOVN = false
+		}
+		if isOVN && netConfig.Extensions["network"] == "" && uplink != "" {
+			netConfig.Extensions["network"] = uplink
+		}
+		if !isOVN {
+			delete(netConfig.Extensions, "network")
+		}
+		_, hasACL := netConfig.Extensions["security.acls"]
+		if hasACL && !c.Global().HasExtension(shared.Incus75Extension) {
+			c.LogWarn(
+				"For `security.acls` on a network you need at least incus 7.5 or 7.0.2 LTS",
+				"service", serviceName,
+				"network", name,
+			)
+			delete(netConfig.Extensions, "security.acls")
+		}
+		// compose-go always fills Name in, with the key for an external network
+		// and {project}_{key} otherwise; anything else is a `name:` the user
+		// wrote, and it beats the extension.
+		defaultName := name
+		if !netConfig.External {
+			defaultName = p.Name + "_" + name
+		}
+
+		netConfig.OverrideName = xICInstanceNetwork(networkDef)
+		if networkDef.Name != "" && networkDef.Name != defaultName {
+			netConfig.OverrideName = networkDef.Name
+		}
+
+		// Incus documents "auto" for ipv4.address/ipv6.address, but it is
+		// broken upstream (fix pending), so leave the key unset instead.
+		// Keep treating the empty value as the auto case afterwards too,
+		// for backward compatibility.
+		if !networkDef.Internal {
+			v, ok := netConfig.Extensions["ipv4.address"]
+			if ok && v != "none" && v != "" {
+				ip, _, err := net.ParseCIDR(v)
+				if err != nil {
+					return nil, nil, "", "", fmt.Errorf("failed to parse the gateway IPv4 for network %q: %w", name, err)
+				}
+				gateway4 = ip.String()
+			}
+			v, ok = netConfig.Extensions["ipv6.address"]
+			if ok && v != "none" && v != "" {
+				ip, _, err := net.ParseCIDR(v)
+				if err != nil {
+					return nil, nil, "", "", fmt.Errorf("failed to parse the gateway IPv6 for network %q: %w", name, err)
+				}
+				gateway6 = ip.String()
+			}
+
+			_, ok = netConfig.Extensions["ipv4.nat"]
+			if !ok {
+				netConfig.Extensions["ipv4.nat"] = "true"
+			}
+			_, ok = netConfig.Extensions["ipv6.nat"]
+			if !ok {
+				netConfig.Extensions["ipv6.nat"] = "true"
+			}
+		}
+	}
+
+	// An external `<project>:<network>` names a managed network of another
+	// compose project, whose Incus name only that project's client derives.
+	netClient := c
+	netName := name
+
+	if netConfig.External && strings.Contains(netConfig.OverrideName, ":") {
+		owner, network, _ := strings.Cut(netConfig.OverrideName, ":")
+		if owner == "" || network == "" || strings.Contains(network, ":") {
+			return nil, nil, "", "", fmt.Errorf("network %q: %q must be `<project>:<network>` or a plain network name", name, netConfig.OverrideName)
+		}
+
+		owned, err := c.Global().EnsureProject(owner)
+		if err != nil {
+			return nil, nil, "", "", fmt.Errorf("network %q: %w", name, err)
+		}
+
+		netClient = owned
+		netName = network
+		netConfig.OverrideName = ""
+	}
+
+	rNetwork, err := netClient.Resource(client.KindNetwork, netName, netConfig)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+
+	network, ok := rNetwork.(*client.Network)
+	if !ok {
+		return nil, nil, "", "", fmt.Errorf("failed to get network: %q", name)
+	}
+
+	if defOk && network.Config.ACL == nil {
+		err := configureNetworkACL(c, p, name, serviceName, uplink, networkDef, network)
+		if err != nil {
+			return nil, nil, "", "", fmt.Errorf("network %q: %w", name, err)
+		}
+	}
+
+	return network, netConfig, gateway4, gateway6, nil
 }
 
 // instanceProxyDevices builds proxy devices for every published port.
@@ -1070,9 +1063,11 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 
 	for _, cVol := range service.Volumes {
 		seed := false
+		remote := false
 		if cVol.Extensions != nil {
 			var ext struct {
-				Seed bool `mapstructure:"seed"`
+				Seed   bool `mapstructure:"seed"`
+				Remote bool `mapstructure:"remote"`
 			}
 			ok, err := cVol.Extensions.Get("x-incus-compose", &ext)
 			if err != nil {
@@ -1081,6 +1076,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 
 			if ok {
 				seed = ext.Seed
+				remote = ext.Remote
 			}
 		}
 
@@ -1213,15 +1209,17 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 					devices = append(devices, client.InstanceDevice{Name: devName, Config: devConfig})
 				}
 			} else {
-				// Refuse bind without seed on remote hosts.
-				err := c.Global().SameHost()
-				if err != nil {
-					return nil, nil, nil, fmt.Errorf("failed to add a bind-mount for service %v: %w", service.Name, err)
-				}
+				if !remote && !c.Config().AllowRemoteMounts {
+					// Refuse bind without seed on remote hosts.
+					err := c.Global().SameHost()
+					if err != nil {
+						return nil, nil, nil, fmt.Errorf("failed to add a bind-mount for service %v: %w", service.Name, err)
+					}
 
-				_, err = os.Stat(cVol.Source)
-				if err != nil {
-					return nil, nil, nil, client.ErrUnknown.WithKindName(client.KindInstance, service.Name).Wrap(err)
+					_, err = os.Stat(cVol.Source)
+					if err != nil {
+						return nil, nil, nil, client.ErrUnknown.WithKindName(client.KindInstance, service.Name).Wrap(err)
+					}
 				}
 
 				devName := "bind-" + client.SanitizeIncusName(cVol.Source, client.MaxIncusNameLen-5)
@@ -1638,10 +1636,7 @@ func networkExtensions(networkDef types.NetworkConfig) (map[string]string, error
 		}
 	}
 
-	var xic struct {
-		Parent string `mapstructure:"parent"`
-		Uplink string `mapstructure:"uplink"`
-	}
+	var xic xicNetworkConfig
 	ok, err = networkDef.Extensions.Get("x-incus-compose", &xic)
 	if err == nil && ok {
 		if xic.Parent != "" {

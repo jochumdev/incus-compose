@@ -432,6 +432,11 @@ func newRootCommand() *cli.Command {
 				Sources: cli.EnvVars("INCUS_COMPOSE_WORKERS"),
 				Value:   4,
 			},
+			&cli.BoolFlag{
+				Name:    "allow-remote-mounts",
+				Usage:   `Allow pass-through bind mounts on a remote Incus server`,
+				Sources: cli.EnvVars("INCUS_COMPOSE_ALLOW_REMOTE_MOUNTS"),
+			},
 		},
 		Commands: commands,
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
@@ -517,6 +522,7 @@ func newRootCommand() *cli.Command {
 				client.ClientProvideConnection(conn),
 				client.ClientCacheProject(cmd.String("image-cache")),
 				client.ClientDefaultStoragePool(cmd.String("storage-pool")),
+				client.ClientAllowRemoteMounts(cmd.Bool("allow-remote-mounts")),
 			}
 
 			c := client.New(ctx, opts...)

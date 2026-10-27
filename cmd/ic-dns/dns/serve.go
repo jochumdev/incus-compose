@@ -15,7 +15,7 @@ import (
 )
 
 // adapter puts a CoreDNS plugin chain after a miekg/dns server, shaped after
-// dnsserver.Server.ServeDNS at CoreDNS v1.14.6 - diff it by hand on a bump.
+// dnsserver.Server.ServeDNS at CoreDNS v1.15.0 - diff it by hand on a bump.
 type adapter struct {
 	logger *slog.Logger
 	chain  plugin.Handler

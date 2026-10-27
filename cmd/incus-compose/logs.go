@@ -245,10 +245,11 @@ func (f *logHandler) stopStreams() {
 	})
 }
 
-// projectInstances resolves the project's instance resources, skipping the ones
-// the client cannot hand back.
-func projectInstances(c *client.Client, p *project.Project) []*client.Instance {
-	names := p.InstanceNames()
+// projectInstances resolves the project's instance resources for the named
+// services (or all services when none are given), skipping the ones the client
+// cannot hand back.
+func projectInstances(c *client.Client, p *project.Project, services ...string) []*client.Instance {
+	names := p.InstanceNames(c, services...)
 	instances := make([]*client.Instance, 0, len(names))
 
 	for _, name := range names {
@@ -287,7 +288,7 @@ func logs(ctx context.Context, c *client.Client, args logsArgs) error {
 	}
 
 	if !args.Follow {
-		for _, inst := range knownInstances {
+		for _, inst := range args.Instances {
 			formatter.registerService(inst.Name())
 			_ = instanceLog(ctx, c, inst, formatter.write, false)
 		}
@@ -342,7 +343,7 @@ func logs(ctx context.Context, c *client.Client, args logsArgs) error {
 		}
 	}()
 
-	for _, inst := range knownInstances {
+	for _, inst := range args.Instances {
 		formatter.startStream(ctx, c, inst)
 	}
 
@@ -378,6 +379,15 @@ func newLogsCommand() *cli.Command {
 				return err
 			}
 
+			for _, s := range cmd.Args().Slice() {
+				_, ok := p.Services[s]
+				if !ok {
+					err := client.ErrNotFound.WithKindName(client.KindInstance, s)
+					c.LogError("Service not found", "service", s)
+					return errLogged.Wrap(err)
+				}
+			}
+
 			err = c.Open()
 			if err != nil {
 				c.LogError("Opening the project client", "error", err)
@@ -386,7 +396,7 @@ func newLogsCommand() *cli.Command {
 			defer func() { _ = c.Done() }()
 
 			return logs(ctx, c, logsArgs{
-				Instances: projectInstances(c, p),
+				Instances: projectInstances(c, p, cmd.Args().Slice()...),
 				Follow:    cmd.Bool("follow"),
 				Writer:    cmd.Root().Writer,
 			})
