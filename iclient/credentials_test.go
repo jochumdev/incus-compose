@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,7 +26,11 @@ func credHelper(t *testing.T, body string) (helper string, logPath string) {
 	// interleave a host and its newline, and the log would undercount.
 	script := fmt.Sprintf("#!/bin/sh\nhost=$(cat)\necho \"$host\" >> %q\n%s\n", logPath, body)
 
+	// A parallel test forking while the file is open for writing hands the
+	// child the write fd, and exec then fails with "text file busy".
+	syscall.ForkLock.RLock()
 	err := os.WriteFile(helper, []byte(script), 0o700)
+	syscall.ForkLock.RUnlock()
 	require.NoError(t, err)
 
 	return helper, logPath
