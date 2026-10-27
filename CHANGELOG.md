@@ -137,6 +137,11 @@ form.
 
 ### Fixed
 
+- Bridge network `raw.dnsmasq` now includes `local=/<service>/` alongside
+  `address=/<service>/<ip>` entries so `AAAA` lookups for IPv4-only service
+  names are answered locally with `NODATA` instead of being forwarded upstream
+  and timing out. (by @jlutran, @jochumdev, #236)
+
 - Removing a network ACL while other services change the same OVN network's ACLs
   no longer fails with `Failed removing default routes: object not found`. (by
   @tallica)

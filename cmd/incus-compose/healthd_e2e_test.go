@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/avast/retry-go/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	incusApi "github.com/lxc/incus/v7/shared/api"
 
 	"github.com/lxc/incus-compose/client"
+	"github.com/lxc/incus-compose/iclient"
 	"github.com/lxc/incus-compose/internal/testlib"
 	"github.com/lxc/incus-compose/shared"
 )
@@ -201,6 +204,43 @@ func TestE2EHealthdProjectScope(t *testing.T) {
 	local, err := c.InstanceExists(healthdInstanceName(c.IncusProject(), false))
 	require.NoError(t, err)
 	assert.True(t, local, "the project must carry a sidecar of its own")
+
+	waitHealthy(t, c, "web-1")
+
+	conn, err := c.Connection()
+	require.NoError(t, err)
+
+	err = retry.New(
+		retry.Attempts(10),
+		retry.Delay(250*time.Millisecond),
+		retry.LastErrorOnly(true),
+		retry.RetryIf(func(err error) bool {
+			return errors.Is(err, iclient.ErrInstanceBusy)
+		}),
+	).Do(func() error {
+		err := conn.WaitInstanceBusy(ctx, c.IncusProject(), "web-1")
+		if err != nil {
+			return err
+		}
+
+		op, err := conn.UpdateInstanceState(ctx, c.IncusProject(), "web-1", incusApi.InstanceStatePut{
+			Action:  "stop",
+			Timeout: -1,
+			Force:   true,
+		}, "")
+		if err != nil {
+			return err
+		}
+
+		_, err = iclient.WaitOperation(ctx, op)
+
+		return err
+	})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return instanceStatus(t, c, "web-1") == "Running"
+	}, 90*time.Second, time.Second, "web-1 was not restarted after a forced stop")
 
 	waitHealthy(t, c, "web-1")
 }

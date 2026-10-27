@@ -1,5 +1,8 @@
 address=/dev/-stripped-
+local=/dev/
 address=/service-db/-stripped-
+local=/service-db/
 address=/service-db2/-stripped-
+local=/service-db2/
 cname=db.mydomain.lan,my-db
 cname=db2.mydomain.lan,my-db2

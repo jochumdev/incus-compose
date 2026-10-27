@@ -425,26 +425,33 @@ func TestE2ESchedulerRestartsACrashedInstance(t *testing.T) {
 	t.Parallel()
 	testlib.SkipE2E(t)
 
-	c := testProject(t, "healthd-crash-")
-	name := testContainer(t, c, "web", healthKeys(map[string]string{
-		"test":     `["CMD","/bin/true"]`,
-		"interval": "2s",
-		"timeout":  "5s",
-		"retries":  "2",
-		"restart":  "always",
-	}), true)
+	for _, policy := range []string{"always", "unless-stopped"} {
+		t.Run(policy, func(t *testing.T) {
+			t.Parallel()
 
-	conn, project := testConn(t, c), c.Project()
-	runScheduler(t, c)
+			c := testProject(t, "healthd-crash-")
+			name := testContainer(t, c, "web", healthKeys(map[string]string{
+				"test":     `["CMD","/bin/true"]`,
+				"interval": "2s",
+				"timeout":  "5s",
+				"retries":  "2",
+				"restart":  policy,
+				"stopped":  "false",
+			}), true)
 
-	requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
+			conn, project := testConn(t, c), c.Project()
+			runScheduler(t, c)
 
-	setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
+			requireStatus(t, conn, project, name, shared.HealthStatusHealthy, 90*time.Second)
 
-	require.Eventually(t, func() bool {
-		state, _, err := conn.GetInstanceState(t.Context(), project, name)
-		return err == nil && state.StatusCode == incusApi.Running
-	}, 90*time.Second, time.Second, "a crashed instance should be restarted")
+			setState(t, conn, project, name, incusApi.InstanceStatePut{Action: "stop", Timeout: -1, Force: true})
+
+			require.Eventually(t, func() bool {
+				state, _, err := conn.GetInstanceState(t.Context(), project, name)
+				return err == nil && state.StatusCode == incusApi.Running
+			}, 90*time.Second, time.Second, "a crashed instance should be restarted")
+		})
+	}
 }
 
 // TestE2EMultipleProjects is the multi-project feature itself: one daemon, one
