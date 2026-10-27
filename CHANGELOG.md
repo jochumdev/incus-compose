@@ -142,6 +142,10 @@ form.
   names are answered locally with `NODATA` instead of being forwarded upstream
   and timing out. (by @jlutran, @jochumdev, #236)
 
+- Removing a network ACL while other services change the same OVN network's ACLs
+  no longer fails with `Failed removing default routes: object not found`. (by
+  @tallica)
+
 - `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
   the in-scope services (including scaled replicas) and reject unknown service
   names. (by @jochumdev, #231)

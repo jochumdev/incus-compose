@@ -214,6 +214,7 @@ func TestIsConcurrencyConflict(t *testing.T) {
 	assert.False(t, isConcurrencyConflict(errors.New("something else")))
 	assert.True(t, isConcurrencyConflict(errors.New("referential integrity violation: table logical_switch")))
 	assert.True(t, isConcurrencyConflict(errors.New("constraint violation: transaction causes multiple rows")))
+	assert.True(t, isConcurrencyConflict(errors.New("detaching network ACLs: Failed removing default routes: object not found")))
 	assert.True(t, isConcurrencyConflict(incusApi.StatusErrorf(http.StatusPreconditionFailed, "precondition failed")))
 	assert.True(t, isConcurrencyConflict(incusApi.StatusErrorf(http.StatusConflict, "conflict")))
 }
