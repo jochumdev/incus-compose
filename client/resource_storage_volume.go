@@ -47,6 +47,9 @@ type StorageVolumeConfig struct {
 	// ImageResource holds at that path. Needs ImageResource.
 	Prefetch string
 
+	// Target is the cluster member to create the volume on when the pool is local.
+	Target string
+
 	// Extensions contains additional volume configuration options.
 	Extensions map[string]string
 }
@@ -196,7 +199,7 @@ func (r *StorageVolume) get(ctx context.Context) error {
 	}
 
 	// Try to get existing volume
-	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, nil)
+	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, &iclient.GetStoragePoolVolumeArgs{Target: r.Config.Target})
 	if err != nil {
 		r.clearState()
 		return ErrNotFound.Wrap(err)
@@ -332,11 +335,12 @@ func (r *StorageVolume) create(ctx context.Context) error {
 		return err
 	}
 
-	if err := conn.CreateStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, volReq); err != nil {
+	err = conn.CreateStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, volReq, &iclient.CreateStoragePoolVolumeArgs{Target: r.Config.Target})
+	if err != nil {
 		return ErrCreate.Wrap(err)
 	}
 
-	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, nil)
+	volume, eTag, err := conn.GetStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, &iclient.GetStoragePoolVolumeArgs{Target: r.Config.Target})
 	if err != nil {
 		return ErrCreate.WithText("fetching created volume").Wrap(err)
 	}
@@ -348,7 +352,7 @@ func (r *StorageVolume) create(ctx context.Context) error {
 		if err != nil {
 			// A half filled volume is worse than none, and it is ours to drop.
 			r.client.WarnError(func() error {
-				return conn.DeleteStoragePoolVolume(context.WithoutCancel(ctx), r.client.incusProject, r.Config.Pool, "custom", r.incusName)
+				return conn.DeleteStoragePoolVolume(context.WithoutCancel(ctx), r.client.incusProject, r.Config.Pool, "custom", r.incusName, &iclient.DeleteStoragePoolVolumeArgs{Target: r.Config.Target})
 			}, "Failed to remove a volume its prefetch left behind")
 
 			r.clearState()
@@ -452,7 +456,7 @@ func (r *StorageVolume) Delete(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	err = conn.DeleteStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName)
+	err = conn.DeleteStoragePoolVolume(ctx, r.client.incusProject, r.Config.Pool, "custom", r.incusName, &iclient.DeleteStoragePoolVolumeArgs{Target: r.Config.Target})
 	if errors.Is(err, iclient.ErrVolumeInUse) {
 		// Replicas share one volume, so every instance but the last says this.
 		err = ErrVolumeInUse.WithResource(r).Wrap(err)

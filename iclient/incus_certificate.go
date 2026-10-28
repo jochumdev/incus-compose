@@ -43,7 +43,7 @@ func (c *Connection) CreateCertificate(ctx context.Context, certificate api.Cert
 func (c *Connection) CreateCertificateToken(ctx context.Context, certificate api.CertificatesPost) (<-chan api.Operation, error) {
 	certificate.Token = true
 
-	return c.asyncOperation(ctx, "", http.MethodPost, incusCertificatesPath, certificate, "")
+	return c.asyncOperation(ctx, "", http.MethodPost, incusCertificatesPath, nil, certificate, "")
 }
 
 // DeleteCertificate removes a certificate from the trust store.

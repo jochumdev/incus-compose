@@ -3,11 +3,27 @@ package iclient
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/lxc/incus/v7/shared/api"
 )
+
+// GetClusterMembers returns every member of the cluster, each one whole.
+func (c *Connection) GetClusterMembers(ctx context.Context) ([]api.ClusterMember, error) {
+	members := []api.ClusterMember{}
+
+	query := url.Values{}
+	query.Set("recursion", "1")
+
+	_, err := c.getStruct(ctx, "", "/cluster/members", query, &members)
+	if err != nil {
+		return nil, err
+	}
+
+	return members, nil
+}
 
 // GetServer returns the server's own description and its ETag.
 func (c *Connection) GetServer(ctx context.Context) (*api.Server, string, error) {

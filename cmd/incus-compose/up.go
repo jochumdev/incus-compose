@@ -142,6 +142,11 @@ func newUpCommand() *cli.Command {
 				Usage:   `Uplink network for OVN networks (e.g. "incusbr0")`,
 				Sources: cli.EnvVars("INCUS_COMPOSE_NETWORK_UPLINK"),
 			},
+			&cli.BoolFlag{
+				Name:    "allow-local-storage",
+				Usage:   `Allow multi-replica deployments on a cluster even when the storage pool is not shared`,
+				Sources: cli.EnvVars("INCUS_COMPOSE_ALLOW_LOCAL_STORAGE"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			noColor := noColor(ctx)
@@ -173,6 +178,9 @@ func newUpCommand() *cli.Command {
 
 			if cmd.Bool("external-healthd") {
 				p.ClientConfig.Healthd.External = true
+			}
+			if cmd.Bool("allow-local-storage") {
+				p.ClientConfig.AllowLocalStorage = true
 			}
 
 			c, err := globalClient.EnsureProject(
@@ -426,42 +434,19 @@ func newUpCommand() *cli.Command {
 			if len(stale) > 0 {
 				c.LogDebug("Recreating outdated instances", "instances", stale)
 
-				downStack := client.NewStack(c, client.StackSortDescending(), client.StackWorkers(cmd.Root().Int("workers")))
-				downStack.Add(stale...)
-
-				err = downStack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, client.OptionTimeout(cmd.Duration("timeout")))
+				myResources, stack, err = recreateStaleInstances(ctx, p, c, recreateStaleArgs{
+					Stale:        stale,
+					Scale:        scale,
+					FilterArgs:   args,
+					Order:        order,
+					Workers:      cmd.Root().Int("workers"),
+					Timeout:      cmd.Duration("timeout"),
+					StartUpdated: !cmd.Bool("no-start"),
+					StartOptions: startOptions,
+					DNSConfigs:   dnsConfigs,
+				})
 				if err != nil {
-					c.LogError("Stopping outdated instances", "error", err)
-					return errLogged.Wrap(err)
-				}
-
-				err = downStack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, client.OptionTimeout(cmd.Duration("timeout")))
-				if err != nil {
-					c.LogError("Deleting outdated instances", "error", err)
-					return errLogged.Wrap(err)
-				}
-
-				// Delete drops them from the client, so Start below runs on
-				// the resources this rebuild registers rather than the dead ones.
-				resources, err = p.Resources(c, project.ResourcesScale(scale))
-				if err != nil {
-					c.LogError("Getting project resources after the teardown", "error", err)
-					return errLogged.Wrap(err)
-				}
-
-				myResources = filterResources(p, resources, args)
-
-				stack = client.NewStack(c, client.StackWorkers(cmd.Root().Int("workers")), client.StackFailFast())
-				stack.AddOrdered(order, myResources)
-
-				// Everything else came through the ensure above; the deleted
-				// instances are what the rebuild handed back unensured.
-				deleted := func(r client.Resource) bool { return !r.IsEnsured() }
-
-				err = stack.ForActionF(client.ActionEnsure, deleted).Run(ctx, client.ActionEnsure, startOptions...)
-				if err != nil {
-					c.LogError("Ensuring the recreated instances", "error", err)
-					return errLogged.Wrap(err)
+					return err
 				}
 			}
 
@@ -625,4 +610,214 @@ func parseScale(values []string) map[string]int {
 		}
 	}
 	return scaleOverrides
+}
+
+type recreateStaleArgs struct {
+	Stale        []client.Resource
+	Scale        map[string]int
+	FilterArgs   filterResourcesArgs
+	Order        []string
+	Workers      int
+	Timeout      time.Duration
+	StartUpdated bool
+	StartOptions []client.Option
+	DNSConfigs   map[string]string
+}
+
+type staleBatch struct {
+	service       string
+	instances     []client.Resource
+	delay         time.Duration
+	failureAction string
+	startInBatch  bool
+}
+
+// buildStaleBatches groups stale instances into recreate batches: services with
+// deploy.update_config are split into batches of size parallelism, while all
+// other stale instances are recreated together in a single batch.
+func buildStaleBatches(p *project.Project, c *client.Client, stale []client.Resource, order []string) []staleBatch {
+	byService := map[string][]client.Resource{}
+	var unbatched []client.Resource
+
+	for _, r := range stale {
+		inst, ok := r.(*client.Instance)
+		if !ok {
+			continue
+		}
+		svc, hasSvc := p.Services[inst.Config.ServiceName]
+		if hasSvc && svc.Deploy != nil && svc.Deploy.UpdateConfig != nil {
+			byService[inst.Config.ServiceName] = append(byService[inst.Config.ServiceName], inst)
+		} else {
+			unbatched = append(unbatched, inst)
+		}
+	}
+
+	var batches []staleBatch
+	if len(unbatched) > 0 {
+		batches = append(batches, staleBatch{
+			instances:     unbatched,
+			failureAction: "pause",
+		})
+	}
+
+	for _, svcName := range order {
+		svcStale := byService[svcName]
+		if len(svcStale) == 0 {
+			continue
+		}
+
+		uc := p.Services[svcName].Deploy.UpdateConfig
+		if uc.Order == "start-first" && c != nil {
+			c.LogWarn(
+				"deploy.update_config.order: start-first is not supported for in-place instance recreation; using stop-first",
+				"service", svcName,
+			)
+		}
+
+		failureAction := "pause"
+		if uc.FailureAction != "" {
+			failureAction = uc.FailureAction
+		}
+
+		chunks := batchStaleInstances(svcStale, uc.Parallelism)
+		for idx, chunk := range chunks {
+			var delay time.Duration
+			if idx < len(chunks)-1 {
+				delay = time.Duration(uc.Delay)
+			}
+			batches = append(batches, staleBatch{
+				service:       svcName,
+				instances:     chunk,
+				delay:         delay,
+				failureAction: failureAction,
+				startInBatch:  true,
+			})
+		}
+	}
+
+	return batches
+}
+
+// batchStaleInstances splits a service's stale instances into batches of size
+// parallelism (1 when parallelism is nil, or a single batch when *parallelism == 0).
+func batchStaleInstances(instances []client.Resource, parallelism *uint64) [][]client.Resource {
+	if len(instances) == 0 {
+		return nil
+	}
+
+	batchSize := 1
+	if parallelism != nil {
+		if *parallelism == 0 || int(*parallelism) >= len(instances) {
+			return [][]client.Resource{instances}
+		}
+		batchSize = int(*parallelism)
+	}
+
+	var batches [][]client.Resource
+	for i := 0; i < len(instances); i += batchSize {
+		end := min(i+batchSize, len(instances))
+		batches = append(batches, instances[i:end])
+	}
+
+	return batches
+}
+
+// recreateStaleInstances tears down and recreates outdated instances, honoring
+// deploy.update_config batching when configured.
+func recreateStaleInstances(ctx context.Context, p *project.Project, c *client.Client, args recreateStaleArgs) (map[string][]client.Resource, *client.Stack, error) {
+	var myResources map[string][]client.Resource
+	var stack *client.Stack
+
+	for _, batch := range buildStaleBatches(p, c, args.Stale, args.Order) {
+		batchNames := make(map[string]bool, len(batch.instances))
+		for _, r := range batch.instances {
+			batchNames[r.IncusName()] = true
+		}
+
+		downStack := client.NewStack(c, client.StackSortDescending(), client.StackWorkers(args.Workers))
+		downStack.Add(batch.instances...)
+
+		err := downStack.ForAction(client.ActionStop).Run(ctx, client.ActionStop, client.OptionTimeout(args.Timeout))
+		if err != nil {
+			if batch.failureAction == "continue" {
+				c.LogWarn("Rolling update failed stopping batch, continuing", "service", batch.service, "error", err)
+				continue
+			}
+			c.LogError("Stopping outdated instances", "error", err)
+			return nil, nil, errLogged.Wrap(err)
+		}
+
+		err = downStack.ForAction(client.ActionDelete).Run(ctx, client.ActionDelete, client.OptionTimeout(args.Timeout))
+		if err != nil {
+			if batch.failureAction == "continue" {
+				c.LogWarn("Rolling update failed deleting batch, continuing", "service", batch.service, "error", err)
+				continue
+			}
+			c.LogError("Deleting outdated instances", "error", err)
+			return nil, nil, errLogged.Wrap(err)
+		}
+
+		// Delete drops them from the client, so Start below runs on
+		// the resources this rebuild registers rather than the dead ones.
+		resources, err := p.Resources(c, project.ResourcesScale(args.Scale))
+		if err != nil {
+			c.LogError("Getting project resources after the teardown", "error", err)
+			return nil, nil, errLogged.Wrap(err)
+		}
+
+		myResources = filterResources(p, resources, args.FilterArgs)
+		stack = client.NewStack(c, client.StackWorkers(args.Workers), client.StackFailFast())
+		stack.AddOrdered(args.Order, myResources)
+
+		inBatch := func(r client.Resource) bool {
+			return batchNames[r.IncusName()]
+		}
+
+		err = stack.ForActionF(client.ActionEnsure, inBatch).Run(ctx, client.ActionEnsure, args.StartOptions...)
+		if err != nil {
+			if batch.failureAction == "continue" {
+				c.LogWarn("Rolling update failed ensuring batch, continuing", "service", batch.service, "error", err)
+				continue
+			}
+			c.LogError("Ensuring the recreated instances", "error", err)
+			return nil, nil, errLogged.Wrap(err)
+		}
+
+		if batch.startInBatch && args.StartUpdated {
+			if len(args.DNSConfigs) > 0 {
+				for _, r := range myResources[batch.service] {
+					inst, ok := r.(*client.Instance)
+					if ok && batchNames[inst.IncusName()] && inst.IsEnsured() {
+						err = inst.AddConfigs(ctx, args.DNSConfigs)
+						if err != nil {
+							c.LogError("Adding DNS configs to instance", "instance", inst.Name(), "error", err)
+							return nil, nil, errLogged.Wrap(err)
+						}
+					}
+				}
+			}
+
+			err = stack.ForActionF(client.ActionStart, inBatch).Run(ctx, client.ActionStart, args.StartOptions...)
+			if err != nil {
+				if batch.failureAction == "continue" {
+					c.LogWarn("Rolling update failed starting batch, continuing", "service", batch.service, "error", err)
+					continue
+				}
+				c.LogError("Starting recreated instances", "service", batch.service, "error", err)
+				return nil, nil, errLogged.Wrap(err)
+			}
+		}
+
+		if batch.delay > 0 {
+			t := time.NewTimer(batch.delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return nil, nil, ctx.Err()
+			case <-t.C:
+			}
+		}
+	}
+
+	return myResources, stack, nil
 }

@@ -41,7 +41,7 @@ func (c *Connection) ExecInstance(ctx context.Context, project string, name stri
 	// Without this the server runs the command detached, with no descriptors to read.
 	exec.WaitForWS = true
 
-	updates, err := c.asyncOperation(ctx, project, http.MethodPost, incusInstancePath(name, "/exec"), exec, "")
+	updates, err := c.asyncOperation(ctx, project, http.MethodPost, incusInstancePath(name, "/exec"), nil, exec, "")
 	if err != nil {
 		return nil, err
 	}

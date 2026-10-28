@@ -128,6 +128,9 @@ type InstanceConfig struct {
 	// is nil.
 	User string
 
+	// Target is the cluster member or @group to place the instance on.
+	Target string
+
 	// WorkingDir is the compose `working_dir:` override of the image's WORKDIR.
 	WorkingDir string
 
@@ -790,17 +793,20 @@ func (r *Instance) create(ctx context.Context, opts ...Option) error {
 		},
 	}
 
-	op, err := conn.CreateInstance(ctx, r.client.incusProject, req)
-	if err := r.client.hookOperation(ctx, ActionEnsure, r, options, op, err); err != nil {
+	op, err := conn.CreateInstance(ctx, r.client.incusProject, req, &iclient.CreateInstanceArgs{Target: r.Config.Target})
+	err = r.client.hookOperation(ctx, ActionEnsure, r, options, op, err)
+	if err != nil {
 		return err
 	}
 
 	// Get instance to extract UID/GID
-	if err := r.fetch(ctx, nil); err != nil {
+	err = r.fetch(ctx, nil)
+	if err != nil {
 		return ErrCreate.WithText("fetching created instance").Wrap(err)
 	}
 
-	if err := r.ensured(); err != nil {
+	err = r.ensured()
+	if err != nil {
 		return err
 	}
 
@@ -2251,8 +2257,13 @@ func (r *Instance) Delete(ctx context.Context, opts ...Option) error {
 
 	// Replicas share one volume, so every delete but the last finds it in use.
 	if options.Volumes {
+		target := r.Config.Target
+		info := r.State().IncusInstance
+		if info != nil && info.Location != "" && info.Location != "none" {
+			target = info.Location
+		}
 		for _, dev := range r.prefetchDevices() {
-			err := conn.DeleteStoragePoolVolume(ctx, r.client.incusProject, dev["pool"], "custom", dev["source"])
+			err := conn.DeleteStoragePoolVolume(ctx, r.client.incusProject, dev["pool"], "custom", dev["source"], &iclient.DeleteStoragePoolVolumeArgs{Target: target})
 			if err != nil && !errors.Is(err, iclient.ErrVolumeInUse) {
 				r.client.LogWarn("Failed to delete a volume the instance brought up",
 					"resource", r, "volume", dev["source"], "error", err)

@@ -144,19 +144,26 @@ func (c *Connection) GetInstanceNames(ctx context.Context, project string, args 
 }
 
 // CreateInstance creates an instance and follows the operation.
-func (c *Connection) CreateInstance(ctx context.Context, project string, instance api.InstancesPost) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, project, http.MethodPost, incusInstancesPath, instance, "")
+func (c *Connection) CreateInstance(ctx context.Context, project string, instance api.InstancesPost, args *CreateInstanceArgs) (<-chan api.Operation, error) {
+	var query url.Values
+
+	if args != nil && args.Target != "" {
+		query = url.Values{}
+		query.Set("target", args.Target)
+	}
+
+	return c.asyncOperation(ctx, project, http.MethodPost, incusInstancesPath, query, instance, "")
 }
 
 // DeleteInstance removes an instance and follows the operation.
 func (c *Connection) DeleteInstance(ctx context.Context, project string, name string) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, project, http.MethodDelete, incusInstancePath(name), nil, "")
+	return c.asyncOperation(ctx, project, http.MethodDelete, incusInstancePath(name), nil, nil, "")
 }
 
 // UpdateInstanceState starts, stops or restarts an instance and follows the
 // operation.
 func (c *Connection) UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut, etag string) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, project, http.MethodPut, incusInstancePath(name, "/state"), state, etag)
+	return c.asyncOperation(ctx, project, http.MethodPut, incusInstancePath(name, "/state"), nil, state, etag)
 }
 
 // GetInstanceState returns the runtime state of one instance.

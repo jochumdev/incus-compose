@@ -29,7 +29,7 @@ func (c *Connection) ConsoleInstance(ctx context.Context, project string, name s
 		console.Type = "console"
 	}
 
-	updates, err := c.asyncOperation(ctx, project, http.MethodPost, incusInstancePath(name, "/console"), console, "")
+	updates, err := c.asyncOperation(ctx, project, http.MethodPost, incusInstancePath(name, "/console"), nil, console, "")
 	if err != nil {
 		return nil, err
 	}

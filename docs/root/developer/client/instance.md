@@ -26,6 +26,7 @@ type InstanceConfig struct {
     Type         incusApi.InstanceType   // container or vm
     Full         bool                    // fetch full instance details
     Image        string                  // image name (required)
+    Target       string                  // optional cluster member name
     Resources    []Resource              // dependencies that must be ensured
     Devices      []InstanceDevice        // pre-creation devices
     PostDevices  []InstanceDevice        // post-creation devices (need UID/GID)

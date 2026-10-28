@@ -82,11 +82,24 @@ func TestIncusNetworkRequests(t *testing.T) {
 
 		conn, seen := recordingServer(t, `{}`)
 
-		require.NoError(t, conn.CreateNetwork(ctx, "myproject", api.NetworksPost{Name: "br0"}))
+		require.NoError(t, conn.CreateNetwork(ctx, "myproject", api.NetworksPost{Name: "br0"}, nil))
 
 		req := seen.all()[0]
 		require.Equal(t, http.MethodPost, req.method)
 		require.Equal(t, "/1.0/networks?project=myproject", req.uri())
+		require.Contains(t, req.body, `"name":"br0"`)
+	})
+
+	t.Run("CreateNetwork with target", func(t *testing.T) {
+		t.Parallel()
+
+		conn, seen := recordingServer(t, `{}`)
+
+		require.NoError(t, conn.CreateNetwork(ctx, "myproject", api.NetworksPost{Name: "br0"}, &CreateNetworkArgs{Target: "node1"}))
+
+		req := seen.all()[0]
+		require.Equal(t, http.MethodPost, req.method)
+		require.Equal(t, "/1.0/networks?project=myproject&target=node1", req.uri())
 		require.Contains(t, req.body, `"name":"br0"`)
 	})
 

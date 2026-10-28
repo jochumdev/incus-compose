@@ -17,6 +17,8 @@ import (
 
 	"github.com/avast/retry-go/v5"
 	incusApi "github.com/lxc/incus/v7/shared/api"
+
+	"github.com/lxc/incus-compose/iclient"
 )
 
 // Network interface name limits.
@@ -424,6 +426,46 @@ func (r *Network) create(ctx context.Context) error {
 		}
 	}
 
+	proj := r.incusProject()
+	if r.client.Global().IsClustered() && r.Config.Type != "ovn" {
+		members, membersErr := r.client.Global().ClusterMembers()
+		if membersErr != nil {
+			return fmt.Errorf("creating network %q: listing cluster members: %w", r.Name(), membersErr)
+		}
+
+		var nodeConfig, globalConfig map[string]string
+		for k, v := range config {
+			if isNodeSpecificNetworkConfig(r.Config.Type, k) {
+				if nodeConfig == nil {
+					nodeConfig = map[string]string{}
+				}
+				nodeConfig[k] = v
+			} else {
+				if globalConfig == nil {
+					globalConfig = map[string]string{}
+				}
+				globalConfig[k] = v
+			}
+		}
+
+		pendingReq := incusApi.NetworksPost{
+			Name: r.incusName,
+			Type: r.Config.Type,
+			NetworkPut: incusApi.NetworkPut{
+				Config: nodeConfig,
+			},
+		}
+
+		for _, member := range members {
+			pendingErr := conn.CreateNetwork(ctx, proj, pendingReq, &iclient.CreateNetworkArgs{Target: member.ServerName})
+			if pendingErr != nil && !incusApi.StatusErrorCheck(pendingErr, http.StatusConflict) {
+				return fmt.Errorf("creating pending network %q on %q: %w", r.Name(), member.ServerName, pendingErr)
+			}
+		}
+
+		config = globalConfig
+	}
+
 	// Use client's configured description format for consistency with other resources.
 	req := incusApi.NetworksPost{
 		Name: r.incusName,
@@ -434,8 +476,7 @@ func (r *Network) create(ctx context.Context) error {
 		},
 	}
 
-	proj := r.incusProject()
-	err = conn.CreateNetwork(ctx, proj, req)
+	err = conn.CreateNetwork(ctx, proj, req, nil)
 	if err != nil {
 		return fmt.Errorf("creating network %q: %w", r.Name(), err)
 	}
@@ -464,6 +505,17 @@ func (r *Network) create(ctx context.Context) error {
 			// retry
 		}
 	}
+}
+
+func isNodeSpecificNetworkConfig(netType, key string) bool {
+	switch key {
+	case "bgp.ipv4.nexthop", "bgp.ipv6.nexthop", "bridge.external_interfaces":
+		return true
+	case "parent":
+		return netType != "ovn"
+	}
+
+	return false
 }
 
 // networkCreateConfig returns the Incus network config to use during creation.

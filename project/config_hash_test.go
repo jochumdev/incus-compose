@@ -58,6 +58,15 @@ func TestServiceConfigHash(t *testing.T) {
 			"x-incus": func(s *types.ServiceConfig) {
 				s.Extensions = map[string]any{"x-incus": map[string]any{"limits.cpu": "4"}}
 			},
+			"deploy.mode": func(s *types.ServiceConfig) {
+				s.Deploy = &types.DeployConfig{Mode: "global"}
+			},
+			"deploy.placement": func(s *types.ServiceConfig) {
+				s.Deploy = &types.DeployConfig{Placement: types.Placement{Constraints: []string{"node.role == worker"}}}
+			},
+			"deploy.restart_policy": func(s *types.ServiceConfig) {
+				s.Deploy = &types.DeployConfig{RestartPolicy: &types.RestartPolicy{Condition: "on-failure"}}
+			},
 		}
 
 		for name, mutate := range tests {
@@ -77,7 +86,10 @@ func TestServiceConfigHash(t *testing.T) {
 
 		tests := map[string]func(*types.ServiceConfig){
 			"deploy.replicas": func(s *types.ServiceConfig) { s.Deploy = &types.DeployConfig{Replicas: &replicas} },
-			"scale":           func(s *types.ServiceConfig) { s.Scale = &scale },
+			"deploy.update_config": func(s *types.ServiceConfig) {
+				s.Deploy = &types.DeployConfig{UpdateConfig: &types.UpdateConfig{Order: "start-first"}}
+			},
+			"scale": func(s *types.ServiceConfig) { s.Scale = &scale },
 			"depends_on": func(s *types.ServiceConfig) {
 				s.DependsOn = types.DependsOnConfig{"db": {Condition: "service_started"}}
 			},

@@ -38,6 +38,19 @@ func TestIncusServerRequestURLs(t *testing.T) {
 		// No second project parameter and no doubled prefix.
 		require.Equal(t, []string{"/1.0/instances/web-1?project=other"}, seen.uris())
 	})
+
+	t.Run("GetClusterMembers", func(t *testing.T) {
+		t.Parallel()
+
+		conn, seen := recordingServer(t, `[{"server_name":"node1","status":"Online"},{"server_name":"node2","status":"Online"}]`)
+
+		members, err := conn.GetClusterMembers(ctx)
+		require.NoError(t, err)
+		require.Len(t, members, 2)
+		require.Equal(t, "node1", members[0].ServerName)
+		require.Equal(t, "node2", members[1].ServerName)
+		require.Equal(t, []string{"/1.0/cluster/members?recursion=1"}, seen.uris())
+	})
 }
 
 func TestIncusHasExtension(t *testing.T) {
