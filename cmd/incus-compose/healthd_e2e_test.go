@@ -521,7 +521,7 @@ func TestE2EUpgradeNonOVNToOVN(t *testing.T) {
 	err = conn.CreateNetwork(ctx, "default", incusApi.NetworksPost{
 		Name: globalHealthdNetwork,
 		Type: "bridge",
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	_, err = gc.EnsureProject(globalProject, client.EnsureProjectWithCreate(), client.EnsureProjectWithConfig(map[string]string{

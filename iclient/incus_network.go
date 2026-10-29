@@ -83,8 +83,15 @@ func (c *Connection) GetNetworks(ctx context.Context, project string) ([]api.Net
 }
 
 // CreateNetwork adds a managed network.
-func (c *Connection) CreateNetwork(ctx context.Context, project string, network api.NetworksPost) error {
-	_, _, err := c.do(ctx, project, http.MethodPost, incusNetworksPath, nil, network, "")
+func (c *Connection) CreateNetwork(ctx context.Context, project string, network api.NetworksPost, args *CreateNetworkArgs) error {
+	var query url.Values
+
+	if args != nil && args.Target != "" {
+		query = url.Values{}
+		query.Set("target", args.Target)
+	}
+
+	_, _, err := c.do(ctx, project, http.MethodPost, incusNetworksPath, query, network, "")
 
 	return err
 }

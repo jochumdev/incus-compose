@@ -179,6 +179,7 @@ destructive or a no-op instead of just changing cosmetic output:
 | `INCUS_COMPOSE_IMAGE_CACHE`         | `--image-cache`         | Incus project used as image cache (`INCUS_COMPOSE_IMAGE_CACHE`, default: `incus-compose-cache`); set `""` to disable caching and pull straight into the project, see [CLI Reference](/cli-reference#global-options) |
 | `INCUS_COMPOSE_STORAGE_POOL`        | `--storage-pool`        | Default storage pool (default: `detect`)                                                                                                                                                                            |
 | `INCUS_COMPOSE_ALLOW_REMOTE_MOUNTS` | `--allow-remote-mounts` | Allow pass-through bind mounts on a remote Incus server (`true`/`1`, since v1.3.5)                                                                                                                                  |
+| `INCUS_COMPOSE_ALLOW_LOCAL_STORAGE` | `--allow-local-storage` | Allow multi-replica or global deployment on an Incus cluster without a remote/shared storage pool (`true`/`1`)                                                                                                      |
 
 An explicit `--remote` CLI flag takes precedence over `--server-url` /
 `INCUS_SERVER_URL`. Otherwise, `INCUS_SERVER_URL` takes precedence over

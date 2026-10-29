@@ -455,6 +455,33 @@ func TestIncusRequestURLs(t *testing.T) {
 			func(c *Connection) error { _, _, err := c.GetInstance(ctx, "myproject", "a/b", nil); return err },
 			"/1.0/instances/a%2Fb?project=myproject",
 		},
+		{
+			"GetStoragePool", `{"name":"default","driver":"zfs"}`,
+			func(c *Connection) error { _, _, err := c.GetStoragePool(ctx, "default"); return err },
+			"/1.0/storage-pools/default",
+		},
+		{
+			"GetStoragePoolVolume with target", `{"name":"vol-1"}`,
+			func(c *Connection) error {
+				_, _, err := c.GetStoragePoolVolume(ctx, "myproject", "default", "custom", "vol-1", &GetStoragePoolVolumeArgs{Full: true, Target: "node1"})
+				return err
+			},
+			"/1.0/storage-pools/default/volumes/custom/vol-1?project=myproject&recursion=1&target=node1",
+		},
+		{
+			"CreateStoragePoolVolume with target", `{}`,
+			func(c *Connection) error {
+				return c.CreateStoragePoolVolume(ctx, "myproject", "default", api.StorageVolumesPost{Name: "vol-1", Type: "custom"}, &CreateStoragePoolVolumeArgs{Target: "node1"})
+			},
+			"/1.0/storage-pools/default/volumes/custom?project=myproject&target=node1",
+		},
+		{
+			"DeleteStoragePoolVolume with target", `{}`,
+			func(c *Connection) error {
+				return c.DeleteStoragePoolVolume(ctx, "myproject", "default", "custom", "vol-1", &DeleteStoragePoolVolumeArgs{Target: "node1"})
+			},
+			"/1.0/storage-pools/default/volumes/custom/vol-1?project=myproject&target=node1",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

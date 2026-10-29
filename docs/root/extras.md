@@ -320,6 +320,27 @@ services:
 
 _Since: v1.3.5_
 
+### Cluster local storage override
+
+Scaling a service (`deploy.replicas > 1`, `deploy.mode: global`, or placement
+across multiple cluster members) on an Incus cluster whose storage pool is
+member-local is rejected by default because storage volumes are not shared
+across cluster members. Set `x-incus-compose.allow-local-storage: true` at the
+top level or on an individual service (or pass `--allow-local-storage` /
+`INCUS_COMPOSE_ALLOW_LOCAL_STORAGE`) to allow placement with member-local
+storage and log a warning instead:
+
+```yaml
+x-incus-compose:
+  allow-local-storage: true
+
+services:
+  web:
+    image: docker.io/nginx:alpine
+    deploy:
+      mode: global
+```
+
 ### Backup
 
 Configure `incus-compose backup` with the top-level `x-incus-compose.backup`

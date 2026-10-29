@@ -31,7 +31,7 @@ func TestIncusVolumeSFTP(t *testing.T) {
 	err = conn.CreateStoragePoolVolume(ctx, project, pool, api.StorageVolumesPost{
 		Name: volume,
 		Type: "custom",
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	// The volume goes with the project, so no separate cleanup.

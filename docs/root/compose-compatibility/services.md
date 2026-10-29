@@ -25,7 +25,8 @@ leafwiki_last_author_id: system
 - `networks` - Multiple networks per service
 - `ports` - Port publishing
 - `volumes` - Named volumes and bind mounts
-- `deploy.replicas` - Service scaling (instances named `{service}-{index}`)
+- `deploy` - Deployment mode, replicas, cluster placement, resource limits,
+  restart policy, and rolling updates (see below)
 - `restart` - Restart policies (`no`, `always`, `on-failure`, `unless-stopped`)
 - `pre_start` - Init containers run before container start (see below)
 - `post_start` - Lifecycle hooks run after container start (see below)
@@ -280,10 +281,84 @@ A service with no `healthcheck:` block inherits the one its image declares, and
 `disable: true` opts out of both - see
 [Dockerfile HEALTHCHECK](/healthd#dockerfile-healthcheck).
 
-## Resource Limits
+## Deploy and Resource Limits
 
-`deploy.resources` is not mapped. Use `x-incus` to set Incus instance limits
-directly:
+incus-compose supports the Compose Deploy Specification for service scaling,
+cluster placement, resource limits, restart policy, and rolling updates:
+
+```yaml
+services:
+  web:
+    image: docker.io/nginx:alpine
+    deploy:
+      mode: replicated
+      replicas: 3
+      placement:
+        constraints:
+          - node.role == database
+          - node.labels.env == prod
+        preferences:
+          - spread: node.failure_domain
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+          pids: 100
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+```
+
+### Mode and Replicas (`deploy.mode`, `deploy.replicas`)
+
+- `replicated` (default): creates `deploy.replicas` instances (`{service}-1` ..
+  `{service}-N`, default `1`), or the count given by `--scale`.
+- `global`: on an Incus cluster, deploys one replica onto every online cluster
+  member matching `deploy.placement.constraints` (or one instance on a
+  standalone server).
+
+### Cluster Placement (`deploy.placement`)
+
+When connected to an Incus cluster, `deploy.placement` controls how replicas are
+assigned to online cluster members (`Status == "Online"` and not evacuated):
+
+- **`constraints`**: `==` and `!=` expressions matched against each cluster
+  member:
+  - `node.hostname` / `node.id` -> `member.ServerName`
+  - `node.role` -> `member.Roles`
+  - `node.group` -> `member.Groups`
+  - `node.failure_domain` -> `member.FailureDomain`
+  - `node.labels.<key>` -> `member.Config["user."+<key>]`
+- **`preferences`**: orders candidate members by spreading across buckets in the
+  listed order (`spread: node.failure_domain`, `spread: node.labels.<key>`, or
+  `spread: node.hostname`).
+- **`max_replicas_per_node`**: caps how many replicas of the service may be
+  placed on any single cluster member.
+
+On a cluster whose storage pool is member-local (non-remote, such as `zfs`,
+`btrfs`, `dir`, or `lvm`), single-replica services without placement constraints
+are automatically pinned to the connected cluster member, and scaling
+(`replicas > 1`, `mode: global`, or multi-member placement) is rejected by
+default. Pass `--allow-local-storage` (`INCUS_COMPOSE_ALLOW_LOCAL_STORAGE`) or
+set `x-incus-compose.allow-local-storage: true` to override this check when
+member-local storage per replica is intended.
+
+### Resource Limits (`deploy.resources.limits`)
+
+`deploy.resources.limits` maps to Incus instance limits:
+
+| Compose `deploy.resources.limits` | Incus Config       |
+| --------------------------------- | ------------------ |
+| `cpus`                            | `limits.cpu`       |
+| `memory`                          | `limits.memory`    |
+| `pids`                            | `limits.processes` |
+
+You can also use `x-incus` to set any Incus instance limit directly (explicit
+`x-incus` keys take precedence):
 
 ```yaml
 services:
@@ -293,19 +368,35 @@ services:
       limits.memory: 512MiB
 ```
 
-Any Incus instance config key is accepted. See [Architecture](/extras#x-incus)
-for full details.
+See [Extras](/extras#x-incus) for full details.
+
+### Rolling Updates (`deploy.update_config`)
+
+When `up` recreates outdated instances (due to config drift, `--recreate`,
+`--build`, or `--pull always`), `deploy.update_config` batches the teardown and
+recreation per service:
+
+- `parallelism`: number of instances recreated per batch (default `1` when
+  `update_config` is present; `0` recreates all at once).
+- `delay`: pause between batches after each batch has started.
+- `failure_action`: `pause` (default, aborts the update on error) or `continue`
+  (logs a warning and proceeds to the next batch).
+- `order`: `stop-first` (default). Because Incus instance names (`{service}-1`)
+  are unique per project, `start-first` logs a warning and falls back to
+  `stop-first`.
 
 ## Restart Policies
 
-Restart policies map to Incus boot configuration:
+Restart policies can be configured via top-level `restart` or
+`deploy.restart_policy.condition` (top-level `restart` takes precedence when
+both are set):
 
-| Compose `restart` | Incus Config                                   |
-| ----------------- | ---------------------------------------------- |
-| `no` (default)    | `boot.autostart=false`                         |
-| `always`          | `boot.autostart=true`                          |
-| `on-failure`      | `boot.autostart=true`, `boot.autorestart=true` |
-| `unless-stopped`  | Uses last-state behavior (Incus default)       |
+| Compose `restart` | `deploy.restart_policy.condition` | Incus Config                                   |
+| ----------------- | --------------------------------- | ---------------------------------------------- |
+| `no` (default)    | `none`                            | `boot.autostart=false`                         |
+| `always`          | `any` (or empty)                  | `boot.autostart=true`                          |
+| `on-failure`      | `on-failure`                      | `boot.autostart=true`, `boot.autorestart=true` |
+| `unless-stopped`  | -                                 | Uses last-state behavior (Incus default)       |
 
 ```yaml
 services:

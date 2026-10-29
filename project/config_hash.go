@@ -22,6 +22,8 @@ func ServiceConfigHash(service types.ServiceConfig) (string, error) {
 	if service.Deploy != nil {
 		deploy := *service.Deploy
 		deploy.Replicas = nil
+		deploy.UpdateConfig = nil
+		deploy.RollbackConfig = nil
 		service.Deploy = &deploy
 
 		if reflect.ValueOf(deploy).IsZero() {

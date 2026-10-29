@@ -88,6 +88,33 @@ type GetStoragePoolVolumeArgs struct {
 	// Full also fetches snapshots and backups. Without it those fields of
 	// the returned StorageVolumeFull are zero.
 	Full bool
+
+	// Target reads the volume on that cluster member.
+	Target string
+}
+
+// CreateStoragePoolVolumeArgs narrows a volume create. A nil one is the zero value.
+type CreateStoragePoolVolumeArgs struct {
+	// Target creates the volume on that cluster member.
+	Target string
+}
+
+// DeleteStoragePoolVolumeArgs narrows a volume delete. A nil one is the zero value.
+type DeleteStoragePoolVolumeArgs struct {
+	// Target deletes the volume on that cluster member.
+	Target string
+}
+
+// CreateNetworkArgs narrows a network create. A nil one is the zero value.
+type CreateNetworkArgs struct {
+	// Target defines a pending network on that cluster member.
+	Target string
+}
+
+// CreateInstanceArgs narrows an instance create. A nil one is the zero value.
+type CreateInstanceArgs struct {
+	// Target places the instance on that cluster member or @group.
+	Target string
 }
 
 // DeleteProjectArgs widens a project delete. A nil one is the zero value.

@@ -64,7 +64,7 @@ func testInstance(t *testing.T, conn *Connection, project string, name string, c
 			Protocol:    registry.Protocol,
 			Certificate: registry.ServerCert,
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	_, err = WaitOperation(createCtx, updates)

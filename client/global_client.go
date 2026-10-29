@@ -203,8 +203,13 @@ type GlobalClient struct {
 
 	// Read once at connect: GetServer memoizes into the shared *ProtocolIncus,
 	// so calling it per service/network/port both races and re-queries.
-	apiExtensions []string
-	httpsAddress  string
+	apiExtensions           []string
+	httpsAddress            string
+	clustered               bool
+	serverName              string
+	storageSupportedDrivers []incusApi.ServerStorageDriverInfo
+	clusterMembers          []incusApi.ClusterMember
+	storagePoolRemote       map[string]bool
 
 	// Cache for ConnectionIP()
 	connectionIPs []net.IP
@@ -440,6 +445,11 @@ func (c *GlobalClient) Connect() error {
 	c.mu.Lock()
 	c.apiExtensions = server.APIExtensions
 	c.httpsAddress = server.Config["core.https_address"]
+	c.clustered = server.Environment.ServerClustered
+	if server.Environment.ServerClustered {
+		c.serverName = server.Environment.ServerName
+	}
+	c.storageSupportedDrivers = server.Environment.StorageSupportedDrivers
 	c.mu.Unlock()
 
 	// Static addresses, gateways and oci.dns.* on OCI instances, which every
@@ -449,7 +459,8 @@ func (c *GlobalClient) Connect() error {
 	}
 
 	if c.config.DefaultStoragePool == "detect" {
-		if err := c.detectStoragePool(); err != nil {
+		err = c.detectStoragePool()
+		if err != nil {
 			return err
 		}
 	}
@@ -709,7 +720,7 @@ func (c *GlobalClient) probeOVN() bool {
 				"network": "none",
 			},
 		},
-	})
+	}, nil)
 	if createErr != nil {
 		// Creation failure means the server does not support OVN.
 		return false
@@ -1266,6 +1277,100 @@ func (c *GlobalClient) HasExtension(ext string) bool {
 	defer c.mu.Unlock()
 
 	return slices.Contains(c.apiExtensions, ext)
+}
+
+// IsClustered reports whether the server is part of an Incus cluster.
+func (c *GlobalClient) IsClustered() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.clustered
+}
+
+// ServerName returns the name of the connected cluster member when clustered,
+// or an empty string on a standalone server.
+func (c *GlobalClient) ServerName() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.serverName
+}
+
+// ClusterMembers returns the members of the cluster.
+func (c *GlobalClient) ClusterMembers() ([]incusApi.ClusterMember, error) {
+	c.mu.Lock()
+	if len(c.clusterMembers) > 0 {
+		members := slices.Clone(c.clusterMembers)
+		c.mu.Unlock()
+
+		return members, nil
+	}
+	c.mu.Unlock()
+
+	conn, err := c.Connection()
+	if err != nil {
+		return nil, err
+	}
+
+	members, err := conn.GetClusterMembers(c.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.clusterMembers = slices.Clone(members)
+	c.mu.Unlock()
+
+	return members, nil
+}
+
+// IsStoragePoolRemote reports whether poolName uses a remote (shared) storage driver.
+func (c *GlobalClient) IsStoragePoolRemote(poolName string) (bool, error) {
+	if poolName == "" {
+		poolName = c.config.DefaultStoragePool
+	}
+
+	c.mu.Lock()
+	remote, ok := c.storagePoolRemote[poolName]
+	c.mu.Unlock()
+	if ok {
+		return remote, nil
+	}
+
+	conn, err := c.Connection()
+	if err != nil {
+		return false, err
+	}
+
+	pool, _, err := conn.GetStoragePool(c.ctx, poolName)
+	if err != nil {
+		return false, err
+	}
+
+	remote = c.isStorageDriverRemote(pool.Driver)
+
+	c.mu.Lock()
+	if c.storagePoolRemote == nil {
+		c.storagePoolRemote = map[string]bool{}
+	}
+	c.storagePoolRemote[poolName] = remote
+	c.mu.Unlock()
+
+	return remote, nil
+}
+
+func (c *GlobalClient) isStorageDriverRemote(driver string) bool {
+	c.mu.Lock()
+	drivers := c.storageSupportedDrivers
+	c.mu.Unlock()
+
+	for _, d := range drivers {
+		if d.Name == driver {
+			return d.Remote
+		}
+	}
+
+	return false
 }
 
 // LockDirect acquires an advisory lock by name on the LocksVolume in GlobalProject

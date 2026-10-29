@@ -148,7 +148,7 @@ func TestIncusAsyncOperationFirstValue(t *testing.T) {
 
 	conn, _ := newOperationServer(t, started)
 
-	updates, err := conn.CreateInstance(t.Context(), "myproject", api.InstancesPost{Name: "web-1"})
+	updates, err := conn.CreateInstance(t.Context(), "myproject", api.InstancesPost{Name: "web-1"}, nil)
 	require.NoError(t, err)
 
 	select {
@@ -158,6 +158,21 @@ func TestIncusAsyncOperationFirstValue(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("no first value")
 	}
+}
+
+func TestIncusCreateInstanceTarget(t *testing.T) {
+	t.Parallel()
+
+	conn, server := newOperationServer(t, running("op-1"))
+
+	updates, err := conn.CreateInstance(t.Context(), "myproject", api.InstancesPost{Name: "web-1"}, &CreateInstanceArgs{Target: "node2"})
+	require.NoError(t, err)
+
+	<-updates
+
+	seen := server.all()
+	require.GreaterOrEqual(t, len(seen), 2)
+	require.Equal(t, "/1.0/instances?project=myproject&target=node2", seen[1].uri())
 }
 
 // TestIncusAsyncOperationClosesOnTerminal: waiting is ranging until the close,
@@ -321,7 +336,7 @@ func TestIncusAsyncOperationOutlivesItsEventSocket(t *testing.T) {
 		_, _ = io.WriteString(w, `{"type":"sync","status_code":200,"metadata":`+string(metadata)+`}`)
 	})
 
-	updates, err := conn.asyncOperation(t.Context(), "myproject", http.MethodPost, "/instances", nil, "")
+	updates, err := conn.asyncOperation(t.Context(), "myproject", http.MethodPost, "/instances", nil, nil, "")
 	require.NoError(t, err)
 
 	final, err := WaitOperation(t.Context(), updates)
@@ -342,7 +357,7 @@ func TestIncusAsyncOperationReportsALostOperation(t *testing.T) {
 		_, _ = io.WriteString(w, `{"type":"error","error_code":404,"error":"Operation not found"}`)
 	})
 
-	updates, err := conn.asyncOperation(t.Context(), "myproject", http.MethodPost, "/instances", nil, "")
+	updates, err := conn.asyncOperation(t.Context(), "myproject", http.MethodPost, "/instances", nil, nil, "")
 	require.NoError(t, err)
 
 	_, err = WaitOperation(t.Context(), updates)
@@ -364,7 +379,7 @@ func TestIncusAsyncOperationCanceledDoesNotWait(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	updates, err := conn.asyncOperation(ctx, "myproject", http.MethodPost, "/instances", nil, "")
+	updates, err := conn.asyncOperation(ctx, "myproject", http.MethodPost, "/instances", nil, nil, "")
 	require.NoError(t, err)
 
 	cancel()

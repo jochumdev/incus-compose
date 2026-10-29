@@ -972,3 +972,15 @@ func TestNetworkPatchConfig(t *testing.T) {
 	require.Equal(t, "custom_value", net.State().IncusNetwork.Config["user.custom_key"])
 	require.Equal(t, "custom_value", net.Config.Extensions["user.custom_key"])
 }
+
+func TestIsNodeSpecificNetworkConfig(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isNodeSpecificNetworkConfig("bridge", "bridge.external_interfaces"))
+	require.True(t, isNodeSpecificNetworkConfig("bridge", "bgp.ipv4.nexthop"))
+	require.True(t, isNodeSpecificNetworkConfig("bridge", "bgp.ipv6.nexthop"))
+	require.True(t, isNodeSpecificNetworkConfig("bridge", "parent"))
+	require.False(t, isNodeSpecificNetworkConfig("ovn", "parent"))
+	require.False(t, isNodeSpecificNetworkConfig("bridge", "ipv4.address"))
+	require.False(t, isNodeSpecificNetworkConfig("bridge", "ipv4.nat"))
+}

@@ -48,6 +48,7 @@ func (r *Instance) prefetchVolumes(ctx context.Context, image *Image, owner *Own
 			Owner:         owner,
 			Pool:          r.client.Config().DefaultStoragePool,
 			Prefetch:      at,
+			Target:        r.Config.Target,
 			Extensions:    map[string]string{PrefetchVolumeServiceKey: r.Config.ServiceName},
 		}
 

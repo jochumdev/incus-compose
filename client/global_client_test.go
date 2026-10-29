@@ -98,7 +98,7 @@ func TestDetectOVNMatchesProbe(t *testing.T) {
 		Name:       name,
 		Type:       "ovn",
 		NetworkPut: incusApi.NetworkPut{Config: map[string]string{"network": "none"}},
-	})
+	}, nil)
 	if createErr == nil {
 		require.NoError(t, conn.DeleteNetwork(ctx, "default", name))
 	}

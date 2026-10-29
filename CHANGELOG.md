@@ -15,6 +15,15 @@ form.
 
 ### Added
 
+- Support for the Compose Deploy Specification (`deploy.mode`,
+  `deploy.replicas`, `deploy.placement.constraints`,
+  `deploy.placement.preferences`, `deploy.placement.max_replicas_per_node`,
+  `deploy.restart_policy`, and `deploy.update_config` rolling updates) across
+  Incus cluster members. Scaling or multi-node placement on a cluster requires a
+  remote/shared storage pool unless overridden with `--allow-local-storage`
+  (`INCUS_COMPOSE_ALLOW_LOCAL_STORAGE`) or
+  `x-incus-compose.allow-local-storage: true`. (by @jochumdev, #1)
+
 - Instances carry a `user.label.incus-compose.config-hash` label with the hash
   of their service. `up` recreates the drifted ones, `config --hash` prints the
   hash of the current file, and `ps` marks changed instances (`config_changed`
@@ -136,6 +145,12 @@ form.
   via `user.healthcheck.enabled`. (by @jochumdev)
 
 ### Fixed
+
+- Bridge network creation on Incus clusters now uses Incus's two-phase
+  per-member pending network workflow (`?target=<member>`) and co-locates
+  single-replica services and their volumes onto the connected cluster member
+  when using a bridge network or member-local storage pool. (by @jochumdev,
+  #213)
 
 - Bridge network `raw.dnsmasq` now includes `local=/<service>/` alongside
   `address=/<service>/<ip>` entries so `AAAA` lookups for IPv4-only service

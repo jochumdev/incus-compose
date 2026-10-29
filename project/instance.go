@@ -129,7 +129,11 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 
 	// User override - https://github.com/compose-spec/compose-spec/blob/main/05-services.md#user
 	// A name resolves against the image, which is not pulled yet here.
-	volumes, files, volumeResources, err := instanceVolumeDevices(c, p, service, image, service.User)
+	var target string
+	if options != nil {
+		target = options.target
+	}
+	volumes, files, volumeResources, err := instanceVolumeDevices(c, p, service, image, service.User, target)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
@@ -268,6 +272,7 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 			Command:       runnerCommand,
 			User:          hookUser,
 			WorkingDir:    hookWorkingDir,
+			Target:        target,
 			IgnoreStack:   true,
 		}
 
@@ -374,11 +379,12 @@ func serviceToInstance(c *client.Client, p *types.Project, serviceName string, o
 		Devices:       devices,
 		Profiles:      profiles,
 		Files:         instanceFiles,
-		Dependencies:  instanceDependencyWaits(p, service, options),
+		Dependencies:  instanceDependencyWaits(c, p, service, options),
 		Entrypoint:    service.Entrypoint,
 		Command:       service.Command,
 		User:          service.User,
 		WorkingDir:    service.WorkingDir,
+		Target:        target,
 		PreRun:        preRun,
 		PostRun:       postRun,
 	}
@@ -450,6 +456,7 @@ func oneOffService(service types.ServiceConfig, oneOff *OneOff) types.ServiceCon
 	if service.Deploy != nil {
 		deploy := *service.Deploy
 		deploy.Replicas = nil
+		deploy.RestartPolicy = nil
 		service.Deploy = &deploy
 	}
 
@@ -524,9 +531,10 @@ func instanceConfig(c *client.Client, service types.ServiceConfig, projectName s
 	}
 
 	// Restart policy
-	applyRestartPolicy(config, service.Restart)
-	if service.Restart != "" {
-		config[client.HealthKeyPrefix+"restart"] = service.Restart
+	restartPolicy := serviceRestartPolicy(service)
+	applyRestartPolicy(config, restartPolicy)
+	if restartPolicy != "" {
+		config[client.HealthKeyPrefix+"restart"] = restartPolicy
 	}
 
 	// Resource limits
@@ -538,7 +546,7 @@ func instanceConfig(c *client.Client, service types.ServiceConfig, projectName s
 		(service.HealthCheck.Disable ||
 			(len(service.HealthCheck.Test) > 0 && service.HealthCheck.Test[0] == "NONE"))
 
-	restarts := slices.Contains(healthdRestartPolicies, service.Restart)
+	restarts := slices.Contains(healthdRestartPolicies, restartPolicy)
 
 	// The opt-in ic-healthd requires. Set before x-incus, so a service can turn
 	// it off again with `user.healthcheck.enabled: "false"`.
@@ -1055,7 +1063,7 @@ func instanceProxyDevices(c *client.Client, devices []client.InstanceDevice, ser
 // instanceVolumeDevices builds disk, bind, and tmpfs devices for a service's
 // volumes plus the shm_size tmpfs. It returns any storage volume resources
 // and the files map for single-file binds.
-func instanceVolumeDevices(c *client.Client, p *types.Project, service types.ServiceConfig, image client.Resource, user string) ([]client.InstanceDevice, []client.InstanceFile, []client.Resource, error) {
+func instanceVolumeDevices(c *client.Client, p *types.Project, service types.ServiceConfig, image client.Resource, user string, volTarget string) ([]client.InstanceDevice, []client.InstanceFile, []client.Resource, error) {
 	var errs error
 	devices := []client.InstanceDevice{}
 	resources := []client.Resource{}
@@ -1129,6 +1137,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 				User:          user,
 				Pool:          pool,
 				Prefetch:      prefetch,
+				Target:        volTarget,
 				Extensions:    extensions,
 			}
 
@@ -1182,6 +1191,7 @@ func instanceVolumeDevices(c *client.Client, p *types.Project, service types.Ser
 						User:          user,
 						HostPath:      cVol.Source,
 						Pool:          c.Config().DefaultStoragePool,
+						Target:        volTarget,
 					}
 
 					v, err := c.Resource(client.KindStorageVolume, "bind-"+cVol.Source, volConfig)
@@ -1342,7 +1352,7 @@ func instanceSecrets(p *types.Project, service types.ServiceConfig) ([]client.In
 
 // instanceDependencyWaits builds the health-wait map for depends_on entries with
 // condition: service_healthy, keyed by the dependency's sanitized instance names.
-func instanceDependencyWaits(p *types.Project, service types.ServiceConfig, options *ResourcesOptions) map[string]string {
+func instanceDependencyWaits(c *client.Client, p *types.Project, service types.ServiceConfig, options *ResourcesOptions) map[string]string {
 	deps := map[string]string{}
 	for depName, dep := range service.DependsOn {
 		if dep.Condition != types.ServiceConditionHealthy {
@@ -1354,6 +1364,14 @@ func instanceDependencyWaits(p *types.Project, service types.ServiceConfig, opti
 			depScale = s
 		} else if depSvc.Deploy != nil && depSvc.Deploy.Replicas != nil {
 			depScale = *depSvc.Deploy.Replicas
+		} else if depSvc.Deploy != nil && depSvc.Deploy.Mode == "global" && c != nil && c.Global().IsClustered() {
+			members, err := c.Global().ClusterMembers()
+			if err == nil {
+				candidates, cErr := filterClusterMembers(members, depSvc.Deploy.Placement.Constraints)
+				if cErr == nil && len(candidates) > 0 {
+					depScale = len(candidates)
+				}
+			}
 		}
 		if depSvc.ContainerName != "" {
 			deps[client.SanitizeIncusName(depSvc.ContainerName, client.MaxIncusNameLen)] = client.HealthStatusHealthy

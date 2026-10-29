@@ -99,7 +99,7 @@ func (r *Image) createReader(ctx context.Context) (string, *sftp.Client, error) 
 				"root": {"type": "disk", "path": "/", "pool": r.client.Config().DefaultStoragePool},
 			},
 		},
-	})
+	}, &iclient.CreateInstanceArgs{Target: r.client.Global().ServerName()})
 	if err == nil {
 		_, err = iclient.WaitOperation(ctx, op)
 	}

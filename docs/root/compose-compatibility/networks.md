@@ -64,6 +64,14 @@ networks:
       uplink: incusbr0
 ```
 
+**Incus clusters without OVN:** When connected to an Incus cluster and using a
+`bridge` network, incus-compose automatically performs Incus's two-phase
+per-member network creation across all online cluster members (passing
+node-specific `x-incus` keys `parent`, `bridge.external_interfaces`,
+`bgp.ipv4.nexthop`, and `bgp.ipv6.nexthop` in the per-member phase and global
+config in the cluster-wide phase), and pins single-replica services and their
+volumes onto the connected cluster member.
+
 ## External Networks
 
 Mark a network as `external: true` to attach services to a pre-existing Incus

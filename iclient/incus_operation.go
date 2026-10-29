@@ -38,9 +38,9 @@ const incusOperationRetryDelay = 2 * time.Second
 //
 // A token operation is the exception: it waits to be used rather than
 // finishing, so read its first value and cancel the context.
-func (c *Connection) asyncOperation(ctx context.Context, project string, method string, path string, body any, etag string) (<-chan api.Operation, error) {
+func (c *Connection) asyncOperation(ctx context.Context, project string, method string, path string, query url.Values, body any, etag string) (<-chan api.Operation, error) {
 	return c.async(ctx, project, method+" "+path, func(sendCtx context.Context) (*api.Response, error) {
-		resp, _, err := c.do(sendCtx, project, method, path, nil, body, etag)
+		resp, _, err := c.do(sendCtx, project, method, path, query, body, etag)
 
 		return resp, err
 	})

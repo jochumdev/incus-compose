@@ -66,7 +66,7 @@ func (c *Connection) GetImageAlias(ctx context.Context, project string, name str
 // aliases and properties to record.
 func (c *Connection) CreateImage(ctx context.Context, project string, image api.ImagesPost, args *ImageCreateArgs) (<-chan api.Operation, error) {
 	if args == nil {
-		return c.asyncOperation(ctx, project, http.MethodPost, incusImagesPath, image, "")
+		return c.asyncOperation(ctx, project, http.MethodPost, incusImagesPath, nil, image, "")
 	}
 
 	if args.MetaFile == nil {
@@ -174,7 +174,7 @@ func (c *Connection) UpdateImage(ctx context.Context, project string, fingerprin
 
 // DeleteImage removes an image and follows the operation.
 func (c *Connection) DeleteImage(ctx context.Context, project string, fingerprint string) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, project, http.MethodDelete, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, "")
+	return c.asyncOperation(ctx, project, http.MethodDelete, incusImagesPath+"/"+url.PathEscape(fingerprint), nil, nil, "")
 }
 
 // imageSecret mints the one-time token that fetching a non-public image needs.

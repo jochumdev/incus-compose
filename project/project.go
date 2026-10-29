@@ -206,6 +206,10 @@ type XICProject struct {
 	// NoAutoVolumes is x-incus-compose.auto-volumes: false, which leaves the
 	// paths an image declares as volumes to Incus.
 	NoAutoVolumes bool
+
+	// AllowLocalStorage is x-incus-compose.allow-local-storage: true, which
+	// permits scaling services on a cluster even when the storage pool is not shared.
+	AllowLocalStorage bool
 }
 
 // XICHealthd is the x-incus-compose.healthd block.
@@ -294,6 +298,8 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			// A pointer: absent means on, which a bool cannot say.
 			AutoVolumes *bool `mapstructure:"auto-volumes"`
 
+			AllowLocalStorage bool `mapstructure:"allow-local-storage"`
+
 			SleepImage string `mapstructure:"sleep-image"`
 
 			Healthd struct {
@@ -344,6 +350,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 			p.ClientConfig.Healthd.RestartWorkers = ext.Healthd.RestartWorkers
 			p.ClientConfig.Backup = ext.Backup
 			p.ClientConfig.NoAutoVolumes = ext.AutoVolumes != nil && !*ext.AutoVolumes
+			p.ClientConfig.AllowLocalStorage = ext.AllowLocalStorage
 			p.ClientConfig.SleepImage = ext.SleepImage
 
 			p.ClientConfig.DNS.Disabled = ext.DNS.Disabled
@@ -442,6 +449,14 @@ func (p *Project) InstanceNames(c *client.Client, services ...string) []string {
 		replicas := 1
 		if service.Deploy != nil && service.Deploy.Replicas != nil {
 			replicas = *service.Deploy.Replicas
+		} else if service.Deploy != nil && service.Deploy.Mode == "global" && c != nil && c.Global().IsClustered() {
+			members, err := c.Global().ClusterMembers()
+			if err == nil {
+				candidates, cErr := filterClusterMembers(members, service.Deploy.Placement.Constraints)
+				if cErr == nil && len(candidates) > 0 {
+					replicas = len(candidates)
+				}
+			}
 		}
 
 		if c != nil {
@@ -479,6 +494,9 @@ type ResourcesOptions struct {
 
 	// noDNS carries x-incus-compose.dns.disabled to the instances.
 	noDNS bool
+
+	// target sets the cluster member target for the current replica.
+	target string
 }
 
 // OneOff is the instance `run` builds from a service, in place of the ones the
@@ -555,15 +573,33 @@ func (p *Project) Resources(c *client.Client, opts ...ResourcesOption) (map[stri
 
 	// Configure instances
 	for _, service := range p.Services {
-		// Determine the desired count: CLI --scale > deploy.replicas > 1.
+		// Determine the desired count and per-replica cluster targets:
+		// CLI --scale > deploy.replicas / deploy.mode: global > 1.
 		// A plain `up` reconciles to deploy.replicas in both directions, matching
 		// `docker compose up`: a manual --scale applies only to that invocation,
 		// and the next plain `up` restores replicas (scaling up or down).
-		desired := 1
-		if s, ok := options.Scale[service.Name]; ok {
-			desired = s
-		} else if service.Deploy != nil && service.Deploy.Replicas != nil {
-			desired = *service.Deploy.Replicas
+		var scaleOverride *int
+		s, ok := options.Scale[service.Name]
+		if ok {
+			scaleOverride = &s
+		}
+
+		var desired int
+		var targets []string
+		if options.oneOff != nil && options.oneOff.Service == service.Name {
+			desired = 1
+			if c != nil && c.Global().IsClustered() {
+				targets = []string{c.Global().ServerName()}
+			} else {
+				targets = []string{""}
+			}
+		} else {
+			var err error
+			desired, targets, err = p.resolveServicePlacement(c, service, scaleOverride)
+			if err != nil {
+				errs = errors.Join(errs, err)
+				continue
+			}
 		}
 
 		// Discover existing instances above the desired count so they can be
@@ -572,7 +608,8 @@ func (p *Project) Resources(c *client.Client, opts ...ResourcesOption) (map[stri
 		scale := desired
 		for options.oneOff == nil || options.oneOff.Service != service.Name {
 			instanceName := fmt.Sprintf("%s-%d", service.Name, scale+1)
-			if ok, err := c.InstanceExists(instanceName); !ok || err != nil {
+			ok, err := c.InstanceExists(instanceName)
+			if !ok || err != nil {
 				break
 			}
 
@@ -581,7 +618,14 @@ func (p *Project) Resources(c *client.Client, opts ...ResourcesOption) (map[stri
 
 		instances := []*client.Instance{}
 		for i := 1; i <= scale; i++ {
-			instance, instanceResources, err := serviceToInstance(c, p.Project, service.Name, options, i, scale)
+			replicaOpts := *options
+			if i <= len(targets) {
+				replicaOpts.target = targets[i-1]
+			} else if c != nil && c.Global().IsClustered() {
+				replicaOpts.target = c.Global().ServerName()
+			}
+
+			instance, instanceResources, err := serviceToInstance(c, p.Project, service.Name, &replicaOpts, i, scale)
 			if err != nil {
 				errs = errors.Join(errs, err)
 				continue

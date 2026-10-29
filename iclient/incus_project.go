@@ -67,7 +67,7 @@ func (c *Connection) UpdateProject(ctx context.Context, name string, project api
 
 // RenameProject renames a project and follows the operation.
 func (c *Connection) RenameProject(ctx context.Context, name string, project api.ProjectPost) (<-chan api.Operation, error) {
-	return c.asyncOperation(ctx, "", http.MethodPost, incusProjectsPath+"/"+url.PathEscape(name), project, "")
+	return c.asyncOperation(ctx, "", http.MethodPost, incusProjectsPath+"/"+url.PathEscape(name), nil, project, "")
 }
 
 // DeleteProject removes a project, which Incus refuses while it holds anything

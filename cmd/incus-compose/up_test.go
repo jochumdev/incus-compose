@@ -272,3 +272,76 @@ services:
 
 	assert.Empty(t, inst.Config.Files, "main instance should not re-seed the volume file")
 }
+
+func TestBatchStaleInstances(t *testing.T) {
+	t.Parallel()
+
+	c := client.NewOfflineClient(t.Context(), "default")
+	makeInst := func(name string) client.Resource {
+		r, err := c.Resource(client.KindInstance, name, &client.InstanceConfig{ServiceName: "web"})
+		require.NoError(t, err)
+		return r
+	}
+
+	items := []client.Resource{makeInst("web-1"), makeInst("web-2"), makeInst("web-3")}
+
+	// nil parallelism defaults to 1 per batch
+	batches := batchStaleInstances(items, nil)
+	require.Len(t, batches, 3)
+	assert.Len(t, batches[0], 1)
+
+	// parallelism == 2 splits into [2, 1]
+	two := uint64(2)
+	batches = batchStaleInstances(items, &two)
+	require.Len(t, batches, 2)
+	assert.Len(t, batches[0], 2)
+	assert.Len(t, batches[1], 1)
+
+	// parallelism == 0 puts all in one batch
+	zero := uint64(0)
+	batches = batchStaleInstances(items, &zero)
+	require.Len(t, batches, 1)
+	assert.Len(t, batches[0], 3)
+}
+
+func TestBuildStaleBatches(t *testing.T) {
+	t.Parallel()
+
+	dir := testlib.WriteTempFiles(t, map[string]string{
+		"compose.yaml": `name: test-batches
+services:
+  plain:
+    image: docker.io/alpine:edge
+  rolling:
+    image: docker.io/alpine:edge
+    deploy:
+      update_config:
+        parallelism: 1
+        delay: 2s
+        failure_action: continue
+        order: start-first
+`,
+	})
+
+	p, err := project.New().Load(t.Context(), project.LoadFiles([]string{filepath.Join(dir, "compose.yaml")}))
+	require.NoError(t, err)
+
+	c := client.NewOfflineClient(t.Context(), "default")
+	makeInst := func(name, svc string) client.Resource {
+		r, err := c.Resource(client.KindInstance, name, &client.InstanceConfig{ServiceName: svc})
+		require.NoError(t, err)
+		return r
+	}
+
+	stalePlain := []client.Resource{makeInst("plain-1", "plain"), makeInst("plain-2", "plain")}
+	batches := buildStaleBatches(p, c, stalePlain, []string{"plain", "rolling"})
+	require.Len(t, batches, 1)
+	assert.Len(t, batches[0].instances, 2)
+	assert.False(t, batches[0].startInBatch)
+
+	staleRolling := []client.Resource{makeInst("rolling-1", "rolling"), makeInst("rolling-2", "rolling")}
+	batches = buildStaleBatches(p, c, staleRolling, []string{"plain", "rolling"})
+	require.Len(t, batches, 2)
+	assert.True(t, batches[0].startInBatch)
+	assert.Equal(t, "continue", batches[0].failureAction)
+}

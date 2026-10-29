@@ -88,7 +88,8 @@ only), or `environment` instead.
 Not supported:
 
 - `extends` - Service extension
-- `deploy` - Most deployment options (except `replicas`)
+- `deploy.endpoint_mode`, `deploy.rollback_config`, and
+  `deploy.resources.reservations`
 - `links` - Legacy linking (use networks)
 - `external_links` - Cross-project links
 

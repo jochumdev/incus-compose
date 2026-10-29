@@ -154,9 +154,10 @@ one, _, err := conn.GetInstance(ctx, "blog", "web-1", nil)
 ```
 
 The same shape covers `GetImageArgs`, `GetImageAliasArgs`,
-`GetStoragePoolVolumeArgs`, `GetInstanceArgs`, `ImageCopyArgs`,
-`ImageCreateArgs`, `InstanceExecArgs`, `InstanceConsoleArgs` and
-`DeleteProjectArgs`.
+`GetStoragePoolVolumeArgs`, `CreateStoragePoolVolumeArgs`,
+`DeleteStoragePoolVolumeArgs`, `CreateNetworkArgs`, `CreateInstanceArgs`,
+`GetInstanceArgs`, `ImageCopyArgs`, `ImageCreateArgs`, `InstanceExecArgs`,
+`InstanceConsoleArgs` and `DeleteProjectArgs`.
 
 The exception is an axis that changes which endpoint the server serves.
 All-projects is one: incusd answers 400 to a request carrying both it and a
@@ -315,9 +316,11 @@ than half-working:
 - **Console input.** `ConsoleInstance` attaches to watch a console, not to drive
   one.
 - **Push and relay image copy.** Pull only.
-- **Cluster targeting.** `PatchInstanceConfig` sends no target: instance config
-  is cluster-wide state, so pinning the write to whichever member the caller
-  reached would be arbitrary.
+- **Cluster targeting on instance config updates.** `PatchInstanceConfig` sends
+  no target: instance config is cluster-wide state, so pinning the write to
+  whichever member the caller reached would be arbitrary. Calls that do target a
+  cluster member (`CreateNetwork`, `CreateInstance`, and the storage volume
+  calls) take `Target` on their `*XxxArgs` struct.
 
 ## Testing
 
