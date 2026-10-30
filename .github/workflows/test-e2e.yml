@@ -138,7 +138,6 @@ jobs:
     needs: test-e2e
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - name: Hugo
@@ -155,7 +154,7 @@ jobs:
           #   remote: ict-daily
           - name: WikiJS
             args: "-run TestExample/wikijs"
-            remote: ict-daily
+            remote: ict-lts
     runs-on: [self-hosted, incus-compose]
     timeout-minutes: 60
     permissions:
