@@ -1041,7 +1041,7 @@ func instanceProxyDevices(c *client.Client, devices []client.InstanceDevice, ser
 		}
 
 		devices = append(devices, client.InstanceDevice{
-			Name: fmt.Sprintf("proxy-%d", lPort),
+			Name: fmt.Sprintf("proxy-%s-%d", proto, lPort),
 			Config: client.InstanceDeviceConfig{
 				DeviceType: client.InstanceDeviceTypeProxy,
 				Proxy: client.InstanceDeviceProxyConfig{
