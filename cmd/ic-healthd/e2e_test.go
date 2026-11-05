@@ -706,3 +706,56 @@ func TestE2ESchedulerHonoursAnIntentionalStop(t *testing.T) {
 		return err == nil && state.StatusCode == incusApi.Running
 	}, 45*time.Second, time.Second, "a deliberately stopped instance must stay stopped")
 }
+
+// TestE2ERunRetriesItsOwnStatus pins that a failed first write of the daemon's
+// own status is retried: at host boot incusd can be too busy to answer, and
+// nothing restarts a sidecar that exited. The instance is missing at first, so
+// the write fails until it appears.
+func TestE2ERunRetriesItsOwnStatus(t *testing.T) {
+	t.Parallel()
+	testlib.SkipE2E(t)
+
+	c := testProject(t, "healthd-own-")
+	conn := testConn(t, c)
+
+	instRes, err := c.Resource(client.KindInstance, "self", &client.InstanceConfig{Image: testImage})
+	require.NoError(t, err)
+
+	inst, ok := instRes.(*client.Instance)
+	require.True(t, ok)
+
+	name := inst.IncusName()
+
+	cfg := healthdConfig(t, c, c.IncusProject())
+	cfg.OwnProject = c.Project()
+	cfg.OwnName = name
+
+	t.Cleanup(func() { revokeCert(t, c) })
+
+	log := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	done := make(chan error, 1)
+
+	go func() { done <- run(ctx, log, cfg) }()
+
+	select {
+	case err := <-done:
+		require.Fail(t, "run returned while its own instance was missing", "%v", err)
+	case <-time.After(3 * time.Second):
+	}
+
+	testContainer(t, c, "self", nil, false)
+
+	requireStatus(t, conn, c.Project(), name, shared.HealthStatusHealthy, 30*time.Second)
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Error("run did not stop when its context was canceled")
+	}
+}
