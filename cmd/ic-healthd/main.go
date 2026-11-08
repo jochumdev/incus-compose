@@ -279,9 +279,21 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config) error {
 	}
 
 	if cfg.OwnProject != "" && cfg.OwnName != "" {
-		err := writeOwnStatus(ctx, logger, conn, cfg, shared.HealthStatusHealthy)
-		if err != nil {
-			return fmt.Errorf("writing my own health status: %w", err)
+		// Nothing restarts the sidecar if it exits here, and at host boot incusd
+		// can be too busy to answer inside the timeout, so retry like connect.
+		for {
+			err := writeOwnStatus(ctx, logger, conn, cfg, shared.HealthStatusHealthy)
+			if err == nil {
+				break
+			}
+
+			logger.Error("writing my own health status", "err", err)
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("writing my own health status: %w", err)
+			case <-time.After(time.Second):
+			}
 		}
 	}
 
