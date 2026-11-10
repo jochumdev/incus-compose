@@ -1148,3 +1148,68 @@ func TestInstanceNames(t *testing.T) {
 		assert.Empty(t, p.InstanceNames(nil, "unknown"))
 	})
 }
+
+func TestRemotePreAndPostConfigFiles(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("INCUS_COMPOSE_CONFIG_DIR", cfgDir)
+
+	preYAML := `
+x-incus-compose:
+  healthd:
+    scope: global
+    workers: 8
+    network: incusbr-pre
+  dns:
+    ipv4_address: 10.0.0.10
+    forwarders:
+      - 1.1.1.1:53
+`
+	postYAML := `
+x-incus-compose:
+  healthd:
+    workers: 16
+  dns:
+    no_metrics: true
+`
+	err := os.WriteFile(filepath.Join(cfgDir, "prod_pre.yaml"), []byte(preYAML), 0o600)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(cfgDir, "prod_post.yaml"), []byte(postYAML), 0o600)
+	require.NoError(t, err)
+
+	projDir := filepath.Join(t.TempDir(), "myapp")
+	err = os.MkdirAll(projDir, 0o750)
+	require.NoError(t, err)
+
+	composeYAML := `
+x-incus-compose:
+  healthd:
+    network: incusbr-proj
+    workers: 4
+services:
+  web:
+    image: docker.io/alpine:edge
+`
+	composePath := filepath.Join(projDir, "compose.yaml")
+	err = os.WriteFile(composePath, []byte(composeYAML), 0o600)
+	require.NoError(t, err)
+
+	p, err := New().Load(t.Context(), LoadFiles([]string{composePath}), LoadRemote("prod"))
+	require.NoError(t, err)
+
+	// Project name and working directory stay anchored to the project file, not cfgDir.
+	assert.Equal(t, "myapp", p.Name)
+	assert.Equal(t, projDir, p.WorkingDir)
+
+	// pre sets defaults (scope, ipv4_address, forwarders); project overrides network; post overrides workers and no_metrics.
+	assert.Equal(t, "global", p.ClientConfig.Healthd.Scope)
+	assert.Equal(t, "incusbr-proj", p.ClientConfig.Healthd.Network)
+	assert.Equal(t, 16, p.ClientConfig.Healthd.Workers)
+	assert.Equal(t, "10.0.0.10", p.ClientConfig.DNS.IPv4Address)
+	assert.Equal(t, []string{"1.1.1.1:53"}, p.ClientConfig.DNS.Forwarders)
+	assert.True(t, p.ClientConfig.DNS.NoMetrics)
+
+	// Missing project compose file still returns ErrNoComposeFile even when remote pre/post exist.
+	emptyDir := t.TempDir()
+	_, err = New().Load(t.Context(), LoadWorkingDir(emptyDir), LoadRemote("prod"))
+	require.ErrorIs(t, err, ErrNoComposeFile)
+}

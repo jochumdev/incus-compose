@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/KimMachineGun/automemlimit v1.0.1
 	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/adrg/xdg v0.5.3
 	github.com/avast/retry-go/v5 v5.0.0
 	github.com/bradleyjkemp/cupaloy/v2 v2.8.0
 	github.com/compose-spec/compose-go/v2 v2.16.2

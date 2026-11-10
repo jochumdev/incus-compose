@@ -476,7 +476,34 @@ func removeDNSACLs(ctx context.Context, c *client.Client, p *project.Project) er
 
 // dnsUpGlobal brings the shared daemon up with no compose project to read.
 // It marks nothing, so projects still opt in on their own `up`.
-func dnsUpGlobal(ctx context.Context, gc *client.GlobalClient, args dnsUpArgs) error {
+func dnsUpGlobal(ctx context.Context, gc *client.GlobalClient, cfg project.XICDNS, args dnsUpArgs) error {
+	dnsNetwork := cfg.Network
+	if args.Network != "" {
+		dnsNetwork = args.Network
+	}
+
+	dnsIPv4 := cfg.IPv4Address
+	if args.IPv4Address != "" {
+		dnsIPv4 = args.IPv4Address
+	}
+
+	dnsIPv6 := cfg.IPv6Address
+	if args.IPv6Address != "" {
+		dnsIPv6 = args.IPv6Address
+	}
+
+	noMetrics := cfg.NoMetrics || args.NoMetrics
+
+	allowTransfer := cfg.AllowTransfer
+	if len(args.AllowTransfer) > 0 {
+		allowTransfer = args.AllowTransfer
+	}
+
+	forward := cfg.Forwarders
+	if len(args.Forward) > 0 {
+		forward = args.Forward
+	}
+
 	var incus *url.URL
 	if args.Incus != "" {
 		var err error
@@ -493,24 +520,24 @@ func dnsUpGlobal(ctx context.Context, gc *client.GlobalClient, args dnsUpArgs) e
 		image:         resolveImageVersion(args.Image),
 		pull:          args.Pull,
 		incus:         incus,
-		network:       args.Network,
-		ipv4Address:   args.IPv4Address,
-		ipv6Address:   args.IPv6Address,
+		network:       dnsNetwork,
+		ipv4Address:   dnsIPv4,
+		ipv6Address:   dnsIPv6,
 		scope:         shared.DNSScopeGlobal,
-		noMetrics:     args.NoMetrics,
+		noMetrics:     noMetrics,
 		listen:        args.Listen,
 		http:          args.HTTP,
-		forward:       args.Forward,
+		forward:       forward,
 		suffix:        args.Suffix,
 		ttl:           args.TTL,
 		projectMarker: args.ProjectMarker,
 		timeout:       args.Timeout,
 		stackWorkers:  args.Workers,
-		allowTransfer: args.AllowTransfer,
+		allowTransfer: allowTransfer,
 		trace:         args.Trace,
 	}
 
-	release, err := upgradeGlobalProject(ctx, gc, args.Network)
+	release, err := upgradeGlobalProject(ctx, gc, dnsNetwork)
 	if err != nil {
 		gc.LogError("Upgrading global project", "error", err)
 		return errLogged.Wrap(err)
@@ -789,7 +816,13 @@ func newDNSUpCommand() *cli.Command {
 			}
 
 			if p == nil {
-				return dnsUpGlobal(ctx, globalClient, upArgs)
+				rp, err := loadRemoteProject(ctx, cmd)
+				if err != nil {
+					globalClient.LogError("Configuring the remote project", "error", err)
+					return errLogged.Wrap(err)
+				}
+
+				return dnsUpGlobal(ctx, globalClient, rp.ClientConfig.DNS, upArgs)
 			}
 
 			c, err := globalClient.EnsureProject(

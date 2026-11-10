@@ -138,7 +138,43 @@ func buildLoadOptions(cmd *cli.Command) []project.LoadOption {
 		loadOpts = append(loadOpts, project.LoadNetworkUplink(uplink))
 	}
 
+	remote := resolveRemoteName(cmd)
+	if remote != "" {
+		loadOpts = append(loadOpts, project.LoadRemote(remote))
+	}
+
 	return loadOpts
+}
+
+func resolveRemoteName(cmd *cli.Command) string {
+	if cmd.Root().IsSet("remote") {
+		return cmd.Root().String("remote")
+	}
+
+	if cmd.Root().String("server-url") != "" {
+		return "manual"
+	}
+
+	remote := os.Getenv("INCUS_REMOTE")
+	if remote != "" {
+		return remote
+	}
+
+	config, err := iclient.ReadConfig("")
+	if err == nil && config.DefaultRemote != "" {
+		return config.DefaultRemote
+	}
+
+	return "local"
+}
+
+func loadRemoteProject(ctx context.Context, cmd *cli.Command) (*project.Project, error) {
+	files := project.RemoteConfigFiles(resolveRemoteName(cmd))
+	if len(files) == 0 {
+		return project.New(), nil
+	}
+
+	return project.New().Load(ctx, project.LoadFiles(files), project.LoadName(globalProject))
 }
 
 // initLogger builds a logger scoped to this single command invocation. It

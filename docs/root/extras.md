@@ -62,6 +62,31 @@ incus-compose -f compose.yaml up
 The override file follows normal Compose merge rules. For example, `!reset []`
 clears a list from the base file.
 
+## Per-remote pre and post files
+
+You can define per-remote defaults and overrides in your platform's user
+configuration directory (`~/.config/incus-compose/` on Linux,
+`~/Library/Application Support/incus-compose/` on macOS,
+`%LOCALAPPDATA%\incus-compose\` on Windows, or `$INCUS_COMPOSE_CONFIG_DIR`):
+
+- `<remote>_pre.yaml` - loaded **before** the project's `compose.yaml` (provides
+  defaults for `ic-healthd`, `ic-dns`, `x-incus`, etc.).
+- `<remote>_post.yaml` - loaded **after** the project's `compose.yaml` and
+  `compose.incus.yaml` (overrides project settings).
+
+Example `~/.config/incus-compose/local_pre.yaml`:
+
+```yaml
+x-incus-compose:
+  healthd:
+    scope: global
+    workers: 8
+  dns:
+    forwarders:
+      - 1.1.1.1:53
+      - 9.9.9.9:53
+```
+
 ## x-incus
 
 `x-incus` keys are passed verbatim to Incus and never interpreted by

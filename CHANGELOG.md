@@ -15,6 +15,11 @@ form.
 
 ### Added
 
+- Per-remote `<remote>_pre.yaml` and `<remote>_post.yaml` compose files in the
+  user configuration directory (`~/.config/incus-compose/`, or
+  `INCUS_COMPOSE_CONFIG_DIR`) to configure `ic-healthd`, `ic-dns`, and project
+  defaults/overrides per Incus remote. (by @jochumdev)
+
 - `x-incus-compose.dns.forwarders`: configure upstream DNS forwarders for the
   `ic-dns` sidecar (`ip`, `ip:port`, or `resolv.conf` path), defaulting to
   `/etc/resolv.conf` when omitted or empty. (by @jochumdev)

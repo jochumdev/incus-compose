@@ -15,8 +15,10 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 
+	"github.com/adrg/xdg"
 	"github.com/compose-spec/compose-go/v2/cli"
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/compose-spec/compose-go/v2/errdefs"
@@ -63,6 +65,10 @@ type LoadOptions struct {
 
 	// NetworkUplink is the OVN network uplink override.
 	NetworkUplink string
+
+	// Remote is the Incus remote name used to resolve {remote}_pre.yaml and
+	// {remote}_post.yaml in the user config directory.
+	Remote string
 }
 
 // LoadOption is a functional option for LoadProject.
@@ -137,6 +143,54 @@ func LoadNetworkUplink(uplink string) LoadOption {
 	return func(o *LoadOptions) {
 		o.NetworkUplink = uplink
 	}
+}
+
+// LoadRemote sets the remote name used to resolve {remote}_pre.yaml and
+// {remote}_post.yaml in the user config directory.
+func LoadRemote(remote string) LoadOption {
+	return func(o *LoadOptions) {
+		o.Remote = remote
+	}
+}
+
+// ConfigDir returns the incus-compose user configuration directory.
+func ConfigDir() string {
+	dir := os.Getenv("INCUS_COMPOSE_CONFIG_DIR")
+	if dir != "" {
+		return dir
+	}
+
+	dir = os.Getenv("XDG_CONFIG_HOME")
+	if dir != "" {
+		return filepath.Join(dir, "incus-compose")
+	}
+
+	return filepath.Join(xdg.ConfigHome, "incus-compose")
+}
+
+// RemoteConfigFiles returns the existing {remote}_pre.yaml and
+// {remote}_post.yaml files in the user configuration directory.
+func RemoteConfigFiles(remote string) []string {
+	if remote == "" {
+		return nil
+	}
+
+	dir := ConfigDir()
+	var files []string
+
+	for _, suffix := range []string{"_pre.yaml", "_post.yaml"} {
+		candidate, err := filepath.Abs(filepath.Join(dir, remote+suffix))
+		if err != nil {
+			continue
+		}
+
+		_, err = os.Stat(candidate)
+		if err == nil {
+			files = append(files, candidate)
+		}
+	}
+
+	return files
 }
 
 // NewLoadOptions creates LoadOptions with the given options applied.
@@ -721,6 +775,10 @@ func buildProjectOptions(options LoadOptions, extraOpts ...cli.ProjectOptionsFn)
 		withDotEnvAndOsEnv,
 	)
 
+	if options.Remote != "" {
+		projectOptions = append(projectOptions, withRemoteConfigFiles(options.Remote))
+	}
+
 	if options.Name != "" {
 		projectOptions = append(projectOptions, cli.WithName(options.Name))
 	}
@@ -764,4 +822,45 @@ func withDotEnvAndOsEnv(o *cli.ProjectOptions) error {
 	// Only merge the .env results into project environment
 	o.Environment.Merge(envMap)
 	return nil
+}
+
+// withRemoteConfigFiles wraps the project's compose files with
+// {remote}_pre.yaml and {remote}_post.yaml from ConfigDir when present.
+func withRemoteConfigFiles(remote string) cli.ProjectOptionsFn {
+	return func(o *cli.ProjectOptions) error {
+		if len(o.ConfigPaths) == 0 {
+			return nil
+		}
+
+		// compose-go derives GetWorkingDir (and the default project name) from
+		// ConfigPaths[0] when WorkingDir is unset; pin it before prepending pre.
+		if o.WorkingDir == "" {
+			wd, err := o.GetWorkingDir()
+			if err != nil {
+				return err
+			}
+
+			o.WorkingDir = wd
+		}
+
+		dir := ConfigDir()
+
+		preFile, err := filepath.Abs(filepath.Join(dir, remote+"_pre.yaml"))
+		if err == nil {
+			_, err = os.Stat(preFile)
+			if err == nil {
+				o.ConfigPaths = slices.Insert(o.ConfigPaths, 0, preFile)
+			}
+		}
+
+		postFile, err := filepath.Abs(filepath.Join(dir, remote+"_post.yaml"))
+		if err == nil {
+			_, err = os.Stat(postFile)
+			if err == nil {
+				o.ConfigPaths = append(o.ConfigPaths, postFile)
+			}
+		}
+
+		return nil
+	}
 }
