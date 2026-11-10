@@ -240,6 +240,7 @@ type XICDNS struct {
 	Zone          string   `mapstructure:"zone"`
 	AllowTransfer []string `mapstructure:"allow_transfer"`
 	Transfer      bool     `mapstructure:"transfer"`
+	Forwarders    []string `mapstructure:"forwarders"`
 }
 
 // DefaultDNSZoneSuffix is the default TLD suffix used when no zone is specified.
@@ -322,6 +323,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 				Zone          string   `mapstructure:"zone"`
 				AllowTransfer []string `mapstructure:"allow_transfer"`
 				Transfer      bool     `mapstructure:"transfer"`
+				Forwarders    []string `mapstructure:"forwarders"`
 			} `mapstructure:"dns"`
 
 			Network struct {
@@ -363,6 +365,7 @@ func (p *Project) Load(ctx context.Context, opts ...LoadOption) (*Project, error
 
 			p.ClientConfig.DNS.AllowTransfer = ext.DNS.AllowTransfer
 			p.ClientConfig.DNS.Transfer = ext.DNS.Transfer
+			p.ClientConfig.DNS.Forwarders = ext.DNS.Forwarders
 			if len(p.ClientConfig.DNS.AllowTransfer) > 0 {
 				p.ClientConfig.DNS.Transfer = true
 			}

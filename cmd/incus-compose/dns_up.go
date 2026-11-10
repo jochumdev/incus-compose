@@ -105,6 +105,11 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 		allowTransfer = args.AllowTransfer
 	}
 
+	forward := p.ClientConfig.DNS.Forwarders
+	if len(args.Forward) > 0 {
+		forward = args.Forward
+	}
+
 	var incus *url.URL
 	if args.Incus != "" {
 		incus, err = url.Parse(args.Incus)
@@ -126,7 +131,7 @@ func dnsUp(ctx context.Context, p *project.Project, c *client.Client, args dnsUp
 		noMetrics:     noMetrics,
 		listen:        args.Listen,
 		http:          args.HTTP,
-		forward:       args.Forward,
+		forward:       forward,
 		suffix:        args.Suffix,
 		ttl:           args.TTL,
 		projectMarker: args.ProjectMarker,

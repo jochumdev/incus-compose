@@ -238,7 +238,23 @@ func TestDNSSettings(t *testing.T) {
 		assert.Equal(t, "true", settings[envDNSRestricted])
 		assert.Equal(t, ":9153", settings[envDNSHTTP])
 		assert.Equal(t, "true", settings[envDNSMetrics])
+		assert.Equal(t, "/etc/resolv.conf", settings[envDNSForward])
 		assert.Empty(t, settings[envDNSAllowTransfer])
+	})
+
+	t.Run("carried forwarder is preserved when unset", func(t *testing.T) {
+		t.Parallel()
+
+		params := dnsParams{
+			scope: shared.DNSScopeProject,
+			carry: map[string]string{
+				envDNSForward: "9.9.9.9",
+			},
+		}
+
+		settings := dnsSettings(params, "https://10.0.0.1:8443", false)
+
+		assert.Equal(t, "9.9.9.9", settings[envDNSForward])
 	})
 
 	t.Run("multi-project scope settings", func(t *testing.T) {

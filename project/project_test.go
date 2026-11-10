@@ -888,6 +888,24 @@ services:
 				Transfer: true,
 			},
 		},
+		{
+			name: "forwarders list",
+			yaml: `
+name: myproject
+x-incus-compose:
+  dns:
+    forwarders:
+      - 1.1.1.1
+      - 8.8.8.8:53
+services:
+  web:
+    image: docker.io/alpine:edge
+`,
+			expected: XICDNS{
+				Zone:       "myproject.incus",
+				Forwarders: []string{"1.1.1.1", "8.8.8.8:53"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -917,6 +935,7 @@ func TestDNSConfigEmptyWithoutExtension(t *testing.T) {
 	assert.Empty(t, proj.ClientConfig.DNS.IPv6Address)
 	assert.False(t, proj.ClientConfig.DNS.NoMetrics)
 	assert.Empty(t, proj.ClientConfig.DNS.Scope)
+	assert.Empty(t, proj.ClientConfig.DNS.Forwarders)
 	assert.Equal(t, proj.Name+"."+
 		DefaultDNSZoneSuffix, proj.ClientConfig.DNS.Zone)
 }

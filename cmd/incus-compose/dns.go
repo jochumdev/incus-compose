@@ -130,8 +130,9 @@ func dnsSettings(params dnsParams, incusURL string, debug bool) map[string]strin
 		settings[envDNSListen] = params.listen
 	}
 	if len(params.forward) > 0 {
-		fw := strings.Join(params.forward, ",")
-		settings[envDNSForward] = fw
+		settings[envDNSForward] = strings.Join(params.forward, ",")
+	} else if settings[envDNSForward] == "" {
+		settings[envDNSForward] = "/etc/resolv.conf"
 	}
 	if len(params.allowTransfer) > 0 {
 		settings[envDNSAllowTransfer] = strings.Join(params.allowTransfer, ",")

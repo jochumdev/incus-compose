@@ -15,6 +15,10 @@ form.
 
 ### Added
 
+- `x-incus-compose.dns.forwarders`: configure upstream DNS forwarders for the
+  `ic-dns` sidecar (`ip`, `ip:port`, or `resolv.conf` path), defaulting to
+  `/etc/resolv.conf` when omitted or empty. (by @jochumdev)
+
 - Support for the Compose Deploy Specification (`deploy.mode`,
   `deploy.replicas`, `deploy.placement.constraints`,
   `deploy.placement.preferences`, `deploy.placement.max_replicas_per_node`,
