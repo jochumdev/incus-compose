@@ -170,6 +170,10 @@ form.
   no longer fails with `Failed removing default routes: object not found`. (by
   @tallica)
 
+- Copying files into instances or volumes (and backups of volumes) no longer
+  fails intermittently with `server unexpectedly closed connection` when it
+  reconnects just as Incus shuts down its idle file server. (by @tallica)
+
 - `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
   the in-scope services (including scaled replicas) and reject unknown service
   names. (by @jochumdev, #231)

@@ -2,10 +2,14 @@ package iclient
 
 import (
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/lxc/incus/v7/shared/api"
+	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,4 +81,65 @@ func TestIncusInstanceSFTPNotFound(t *testing.T) {
 	_, err := conn.GetInstanceFileSFTP(t.Context(), "", "ic-iclient-does-not-exist")
 	require.Error(t, err)
 	require.True(t, api.StatusErrorCheck(err, 404), "want a 404 StatusError, got %v", err)
+}
+
+// TestIncusSFTPRetriesAnEarlyClose: a stream that ends before the version
+// packet is opened again, and a server that never recovers gives up.
+func TestIncusSFTPRetriesAnEarlyClose(t *testing.T) {
+	t.Parallel()
+
+	for name, drops := range map[string]int{"recovers": 2, "never recovers": 1000} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var mu sync.Mutex
+
+			opened := 0
+
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				mu.Lock()
+				opened++
+				drop := opened <= drops
+				mu.Unlock()
+
+				stream, buf, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					return
+				}
+
+				_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: sftp\r\nConnection: Upgrade\r\n\r\n")
+				_ = buf.Flush()
+
+				if drop {
+					_ = stream.Close()
+
+					return
+				}
+
+				srv, err := sftp.NewServer(stream)
+				if err != nil {
+					return
+				}
+
+				_ = srv.Serve()
+			}))
+			t.Cleanup(server.Close)
+
+			conn, err := NewConnection(&ConfigRemoteInfo{Name: "sftp", Addrs: []string{server.URL}, InsecureSkipVerify: true})
+			require.NoError(t, err)
+
+			client, err := conn.sftpClient(t.Context(), "", "/sftp")
+
+			if drops < incusSFTPAttempts {
+				require.NoError(t, err)
+				require.NoError(t, client.Close())
+			} else {
+				require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			require.Equal(t, min(drops+1, incusSFTPAttempts), opened)
+		})
+	}
 }
