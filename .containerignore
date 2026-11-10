@@ -1,3 +1,6 @@
 # Scratch area: design notes, vendored sources, test logs and coverage
 work/
 .git/
+# CI writes the live test log and coverage here while images build from this
+# context; a file growing mid-copy fails the tar with "write too long".
+reports/
