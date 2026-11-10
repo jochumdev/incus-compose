@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
 	"github.com/pkg/sftp"
@@ -16,6 +19,13 @@ import (
 
 // incusSFTPMaxPacket is the packet size upstream negotiates; the default is far smaller.
 const incusSFTPMaxPacket = 128 * 1024
+
+// incusSFTPAttempts and incusSFTPRetryDelay bound how often a stream that
+// closed before the SFTP handshake is opened again.
+const (
+	incusSFTPAttempts   = 5
+	incusSFTPRetryDelay = time.Second
+)
 
 // GetInstanceFileSFTP returns an SFTP connection to an instance's filesystem.
 // The caller closes it; holding one open keeps the forkfile process alive.
@@ -35,26 +45,44 @@ func (c *Connection) GetStoragePoolVolumeFileSFTP(ctx context.Context, project s
 }
 
 // sftpClient upgrades a connection to SFTP and speaks the protocol over it.
+//
+// forkfile exits after about 10s idle, and incusd reuses its socket while it is
+// still listening, so a connection dialed just before the exit is closed
+// unanswered and the stream ends before the version packet. Nothing has been
+// exchanged by then, so a fresh upgrade is safe; it finds the socket dead and
+// incusd spawns a new forkfile.
 func (c *Connection) sftpClient(ctx context.Context, project string, path string) (*sftp.Client, error) {
-	conn, err := c.upgradeConn(ctx, project, path, "sftp")
-	if err != nil {
-		return nil, err
-	}
+	for attempt := 1; ; attempt++ {
+		conn, err := c.upgradeConn(ctx, project, path, "sftp")
+		if err != nil {
+			return nil, err
+		}
 
-	client, err := sftp.NewClientPipe(conn, conn, sftp.MaxPacketUnchecked(incusSFTPMaxPacket))
-	if err != nil {
+		client, err := sftp.NewClientPipe(conn, conn, sftp.MaxPacketUnchecked(incusSFTPMaxPacket))
+		if err == nil {
+			go func() {
+				// The pipe does not own the connection, so close it after the client.
+				_ = client.Wait()
+				_ = conn.Close()
+			}()
+
+			return client, nil
+		}
+
 		_ = conn.Close()
 
-		return nil, fmt.Errorf("starting SFTP on %s: %w", path, err)
+		err = fmt.Errorf("starting SFTP on %s: %w", path, err)
+
+		if !errors.Is(err, io.ErrUnexpectedEOF) || attempt >= incusSFTPAttempts {
+			return nil, err
+		}
+
+		select {
+		case <-time.After(incusSFTPRetryDelay):
+		case <-ctx.Done():
+			return nil, err
+		}
 	}
-
-	go func() {
-		// The pipe does not own the connection, so close it after the client.
-		_ = client.Wait()
-		_ = conn.Close()
-	}()
-
-	return client, nil
 }
 
 // upgradeConn dials the server and trades an HTTP request for a raw stream.

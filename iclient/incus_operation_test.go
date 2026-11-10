@@ -268,7 +268,7 @@ func TestIncusListenOperationCatchesUp(t *testing.T) {
 
 // droppingServer answers the async request, then drops the event socket under
 // the still-running operation. wait is what the wait endpoint answers with.
-func droppingServer(t *testing.T, wait func(w http.ResponseWriter)) (*Connection, *recorder) {
+func droppingServer(t *testing.T, hold <-chan struct{}, wait func(w http.ResponseWriter)) (*Connection, *recorder) {
 	t.Helper()
 
 	seen := &recorder{}
@@ -282,6 +282,12 @@ func droppingServer(t *testing.T, wait func(w http.ResponseWriter)) (*Connection
 			socket, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				return
+			}
+
+			// hold keeps the socket up until the test has acted, so the drop
+			// cannot race it.
+			if hold != nil {
+				<-hold
 			}
 
 			// Nothing is ever sent on it: the socket goes away under the operation.
@@ -331,7 +337,7 @@ func waits(seen *recorder) int {
 func TestIncusAsyncOperationOutlivesItsEventSocket(t *testing.T) {
 	t.Parallel()
 
-	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
+	conn, seen := droppingServer(t, nil, func(w http.ResponseWriter) {
 		metadata, _ := json.Marshal(api.Operation{ID: "op-1", StatusCode: api.Success, Status: "Success"})
 		_, _ = io.WriteString(w, `{"type":"sync","status_code":200,"metadata":`+string(metadata)+`}`)
 	})
@@ -352,7 +358,7 @@ func TestIncusAsyncOperationOutlivesItsEventSocket(t *testing.T) {
 func TestIncusAsyncOperationReportsALostOperation(t *testing.T) {
 	t.Parallel()
 
-	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
+	conn, seen := droppingServer(t, nil, func(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = io.WriteString(w, `{"type":"error","error_code":404,"error":"Operation not found"}`)
 	})
@@ -372,7 +378,11 @@ func TestIncusAsyncOperationReportsALostOperation(t *testing.T) {
 func TestIncusAsyncOperationCanceledDoesNotWait(t *testing.T) {
 	t.Parallel()
 
-	conn, seen := droppingServer(t, func(w http.ResponseWriter) {
+	hold := make(chan struct{})
+	release := sync.OnceFunc(func() { close(hold) })
+	t.Cleanup(release)
+
+	conn, seen := droppingServer(t, hold, func(w http.ResponseWriter) {
 		metadata, _ := json.Marshal(api.Operation{ID: "op-1", StatusCode: api.Success, Status: "Success"})
 		_, _ = io.WriteString(w, `{"type":"sync","status_code":200,"metadata":`+string(metadata)+`}`)
 	})
@@ -383,6 +393,7 @@ func TestIncusAsyncOperationCanceledDoesNotWait(t *testing.T) {
 	require.NoError(t, err)
 
 	cancel()
+	release()
 
 	for range updates {
 	}
