@@ -10,7 +10,7 @@ services:
     networks:
       default: null
   no-restart:
-    restart: 'no'
+    restart: "no"
     image: docker.io/library/alpine:latest
     networks:
       default: null
