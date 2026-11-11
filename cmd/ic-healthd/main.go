@@ -282,7 +282,15 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config) error {
 		// Nothing restarts the sidecar if it exits here, and at host boot incusd
 		// can be too busy to answer inside the timeout, so retry like connect.
 		for {
-			err := writeOwnStatus(ctx, logger, conn, cfg, shared.HealthStatusHealthy)
+			// Creating or rebuilding from an OCI image writes back the config the
+			// operation started with, erasing a status written meanwhile, so wait
+			// the instance out. Only here: at shutdown the stop holding it waits
+			// for this process.
+			err := conn.WaitInstanceBusy(ctx, cfg.OwnProject, cfg.OwnName)
+			if err == nil {
+				err = writeOwnStatus(ctx, logger, conn, cfg, shared.HealthStatusHealthy)
+			}
+
 			if err == nil {
 				break
 			}
