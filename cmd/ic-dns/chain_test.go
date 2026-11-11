@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -253,4 +255,36 @@ func (r *runnerPlugin) Run(ctx context.Context) error {
 	<-ctx.Done()
 
 	return nil
+}
+
+func TestQueryChain(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty forward returns nil", func(t *testing.T) {
+		plugins, stop := queryChain(config{})
+		assert.Nil(t, plugins)
+		assert.Nil(t, stop)
+	})
+
+	t.Run("empty resolv.conf returns nil", func(t *testing.T) {
+		resolv := filepath.Join(t.TempDir(), "resolv.conf")
+		err := os.WriteFile(resolv, []byte("options edns0\n"), 0o600)
+		require.NoError(t, err)
+
+		plugins, stop := queryChain(config{Forward: []string{resolv}})
+		assert.Nil(t, plugins)
+		assert.Nil(t, stop)
+	})
+
+	t.Run("resolv.conf and bare IPs wire cache, loop, and forward", func(t *testing.T) {
+		resolv := filepath.Join(t.TempDir(), "resolv.conf")
+		err := os.WriteFile(resolv, []byte("nameserver 127.0.0.1\n"), 0o600)
+		require.NoError(t, err)
+
+		plugins, stop := queryChain(config{Forward: []string{resolv, "127.0.0.2"}})
+		require.NotNil(t, stop)
+		defer stop()
+
+		assert.Len(t, plugins, 3)
+	})
 }

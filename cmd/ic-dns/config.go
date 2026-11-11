@@ -6,6 +6,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	parsepkg "github.com/coredns/coredns/plugin/pkg/parse"
 )
 
 // Defaults for what main decides. A plugin's own defaults are its business;
@@ -111,6 +113,13 @@ func (c config) validate() error {
 
 	if c.TTL > maxTTL {
 		return fmt.Errorf("ttl %d is out of range, the most a record may carry is %d", c.TTL, maxTTL)
+	}
+
+	if len(c.Forward) > 0 {
+		_, err := parsepkg.HostPortOrFile(c.Forward...)
+		if err != nil && !errors.Is(err, parsepkg.ErrNoNameservers) {
+			return fmt.Errorf("forward: %w", err)
+		}
 	}
 
 	return nil

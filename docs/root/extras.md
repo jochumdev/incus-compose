@@ -62,6 +62,31 @@ incus-compose -f compose.yaml up
 The override file follows normal Compose merge rules. For example, `!reset []`
 clears a list from the base file.
 
+## Per-remote pre and post files
+
+You can define per-remote defaults and overrides in your platform's user
+configuration directory (`~/.config/incus-compose/` on Linux,
+`~/Library/Application Support/incus-compose/` on macOS,
+`%LOCALAPPDATA%\incus-compose\` on Windows, or `$INCUS_COMPOSE_CONFIG_DIR`):
+
+- `<remote>_pre.yaml` - loaded **before** the project's `compose.yaml` (provides
+  defaults for `ic-healthd`, `ic-dns`, `x-incus`, etc.).
+- `<remote>_post.yaml` - loaded **after** the project's `compose.yaml` and
+  `compose.incus.yaml` (overrides project settings).
+
+Example `~/.config/incus-compose/local_pre.yaml`:
+
+```yaml
+x-incus-compose:
+  healthd:
+    scope: global
+    workers: 8
+  dns:
+    forwarders:
+      - 1.1.1.1:53
+      - 9.9.9.9:53
+```
+
 ## x-incus
 
 `x-incus` keys are passed verbatim to Incus and never interpreted by
@@ -546,6 +571,9 @@ x-incus-compose:
     no_metrics: false
     allow_transfer:
       - 192.168.1.0/24
+    forwarders:
+      - 1.1.1.1
+      - 8.8.8.8
 
 services:
   web:
@@ -563,6 +591,7 @@ services:
 | `no_metrics`     | Disable Prometheus metrics endpoint on the DNS sidecar.                                                                                                                               |
 | `allow_transfer` | CIDR prefix(es) permitted to perform zone transfers (AXFR/IXFR). Configures `--allow-transfer` on the sidecar and automatically stamps `user.label.dns.transfer=true` on the project. |
 | `transfer`       | Explicitly opt the project zone into transfers (`user.label.dns.transfer=true`) without configuring sidecar CIDRs (useful when sharing a global sidecar).                             |
+| `forwarders`     | Upstream DNS server(s) (`ip`, `ip:port`, or `resolv.conf` path) for external domains. Defaults to the sidecar's `/etc/resolv.conf` when omitted or empty.                             |
 
 See [DNS (ic-dns)](/dns) for details on split-horizon resolution and DNS
 configuration.

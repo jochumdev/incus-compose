@@ -15,6 +15,15 @@ form.
 
 ### Added
 
+- Per-remote `<remote>_pre.yaml` and `<remote>_post.yaml` compose files in the
+  user configuration directory (`~/.config/incus-compose/`, or
+  `INCUS_COMPOSE_CONFIG_DIR`) to configure `ic-healthd`, `ic-dns`, and project
+  defaults/overrides per Incus remote. (by @jochumdev)
+
+- `x-incus-compose.dns.forwarders`: configure upstream DNS forwarders for the
+  `ic-dns` sidecar (`ip`, `ip:port`, or `resolv.conf` path), defaulting to
+  `/etc/resolv.conf` when omitted or empty. (by @jochumdev)
+
 - Support for the Compose Deploy Specification (`deploy.mode`,
   `deploy.replicas`, `deploy.placement.constraints`,
   `deploy.placement.preferences`, `deploy.placement.max_replicas_per_node`,
@@ -160,6 +169,10 @@ form.
 - Removing a network ACL while other services change the same OVN network's ACLs
   no longer fails with `Failed removing default routes: object not found`. (by
   @tallica)
+
+- Copying files into instances or volumes (and backups of volumes) no longer
+  fails intermittently with `server unexpectedly closed connection` when it
+  reconnects just as Incus shuts down its idle file server. (by @tallica)
 
 - `logs [SERVICE...]` and foreground `up [SERVICE...]` now filter log output to
   the in-scope services (including scaled replicas) and reject unknown service

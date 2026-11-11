@@ -12,6 +12,7 @@ import (
 	"github.com/coredns/coredns/plugin/cache"
 	"github.com/coredns/coredns/plugin/forward"
 	"github.com/coredns/coredns/plugin/loop"
+	parsepkg "github.com/coredns/coredns/plugin/pkg/parse"
 	proxypkg "github.com/coredns/coredns/plugin/pkg/proxy"
 	incusapi "github.com/lxc/incus/v7/shared/api"
 
@@ -120,6 +121,11 @@ func queryChain(cfg config) ([]plugin.Plugin, func()) {
 		return nil, nil
 	}
 
+	upstreams, err := parsepkg.HostPortOrFile(cfg.Forward...)
+	if err != nil {
+		return nil, nil
+	}
+
 	// Before the forwarder, never before the engine: what the engine
 	// answers is in memory and cannot go stale.
 	c := cache.New()
@@ -130,7 +136,7 @@ func queryChain(cfg config) ([]plugin.Plugin, func()) {
 
 	fwd := forward.New()
 
-	for _, upstream := range cfg.Forward {
+	for _, upstream := range upstreams {
 		// SetProxy also starts the health checker, so OnStartup is not called.
 		fwd.SetProxy(proxypkg.NewProxy(upstream, upstream, "dns"))
 	}

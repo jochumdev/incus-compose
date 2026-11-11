@@ -193,12 +193,22 @@ func healthdUp(ctx context.Context, p *project.Project, c *client.Client, args h
 
 // healthdUpGlobal brings the shared daemon up with no compose project to read.
 // It marks nothing, so projects still opt in on their own `up`.
-func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdUpArgs) error {
-	var incus *url.URL
+func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, cfg project.XICHealthd, args healthdUpArgs) error {
+	healthdIncus := cfg.Incus
 	if args.Incus != "" {
+		healthdIncus = args.Incus
+	}
+
+	healthdNetwork := cfg.Network
+	if args.Network != "" {
+		healthdNetwork = args.Network
+	}
+
+	var incus *url.URL
+	if healthdIncus != "" {
 		var err error
 
-		incus, err = url.Parse(args.Incus)
+		incus, err = url.Parse(healthdIncus)
 		if err != nil {
 			gc.LogError("Parsing the healthd incus URL failed", "error", err)
 			return errLogged.Wrap(errors.New("parsing error"))
@@ -206,25 +216,28 @@ func healthdUpGlobal(ctx context.Context, gc *client.GlobalClient, args healthdU
 	}
 
 	params := healthdParams{
-		global:       true,
-		scope:        shared.HealthScopeGlobal,
-		trace:        args.Trace,
-		binary:       args.Binary,
-		image:        resolveImageVersion(args.Image),
-		pull:         args.Pull,
-		incus:        incus,
-		network:      args.Network,
-		timeout:      args.Timeout,
-		stackWorkers: args.Workers,
-		noMetrics:    args.NoMetrics,
+		global:         true,
+		scope:          shared.HealthScopeGlobal,
+		trace:          args.Trace,
+		binary:         args.Binary,
+		image:          resolveImageVersion(args.Image),
+		pull:           args.Pull,
+		incus:          incus,
+		network:        healthdNetwork,
+		timeout:        args.Timeout,
+		stackWorkers:   args.Workers,
+		workers:        cfg.Workers,
+		restartWorkers: cfg.RestartWorkers,
+		noMetrics:      args.NoMetrics,
+		xIncus:         cfg.XIncus,
 	}
 
 	hcProject := globalProject
-	if project, rest, ok := strings.Cut(args.Network, ":"); ok && project != "" && rest != "" && !strings.Contains(rest, ":") {
+	if project, rest, ok := strings.Cut(healthdNetwork, ":"); ok && project != "" && rest != "" && !strings.Contains(rest, ":") {
 		hcProject = project
 	}
 
-	release, err := upgradeGlobalProject(ctx, gc, args.Network)
+	release, err := upgradeGlobalProject(ctx, gc, healthdNetwork)
 	if err != nil {
 		gc.LogError("Upgrading global project", "error", err)
 		return errLogged.Wrap(err)
@@ -463,7 +476,13 @@ func newHealthdUpCommand() *cli.Command {
 			// No compose file to read, so there is no project to mark and
 			// nothing to gate on: just put the shared daemon on the server.
 			if p == nil {
-				return healthdUpGlobal(ctx, globalClient, upArgs)
+				rp, err := loadRemoteProject(ctx, cmd)
+				if err != nil {
+					globalClient.LogError("Configuring the remote project", "error", err)
+					return errLogged.Wrap(err)
+				}
+
+				return healthdUpGlobal(ctx, globalClient, rp.ClientConfig.Healthd, upArgs)
 			}
 
 			c, err := globalClient.EnsureProject(

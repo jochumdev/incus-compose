@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -209,4 +211,39 @@ func TestRedactedKeepsTheToken(t *testing.T) {
 
 	// And the length is the token's, not a constant that happens to fit.
 	assert.Equal(t, "<redacted-(11)>", config{Token: "hello world"}.redacted().Token)
+}
+
+func TestValidateForward(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	resolv := filepath.Join(dir, "resolv.conf")
+	err := os.WriteFile(resolv, []byte("nameserver 1.1.1.1\nnameserver 8.8.8.8\n"), 0o600)
+	require.NoError(t, err)
+
+	emptyResolv := filepath.Join(dir, "empty.conf")
+	err = os.WriteFile(emptyResolv, []byte("options edns0\n"), 0o600)
+	require.NoError(t, err)
+
+	base := config{UseRemote: true}
+
+	t.Run("accepts bare IPs, host:port, and resolv.conf", func(t *testing.T) {
+		cfg := base
+		cfg.Forward = []string{"1.1.1.1", "8.8.8.8:53", resolv}
+		require.NoError(t, cfg.validate())
+	})
+
+	t.Run("accepts resolv.conf with no nameservers", func(t *testing.T) {
+		cfg := base
+		cfg.Forward = []string{emptyResolv}
+		require.NoError(t, cfg.validate())
+	})
+
+	t.Run("rejects invalid forward entry", func(t *testing.T) {
+		cfg := base
+		cfg.Forward = []string{"not-an-ip-or-file"}
+		err := cfg.validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "forward:")
+	})
 }

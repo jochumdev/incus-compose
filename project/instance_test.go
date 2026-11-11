@@ -1908,7 +1908,7 @@ func TestInstanceProxyDevices(t *testing.T) {
 		devices, err := instanceProxyDevices(c, []client.InstanceDevice{}, service)
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
-		assert.Equal(t, "proxy-8080", devices[0].Name)
+		assert.Equal(t, "proxy-tcp-8080", devices[0].Name)
 		proxy := devices[0].Config.Proxy
 		assert.Equal(t, "0.0.0.0", proxy.ListenAddr)
 		assert.Equal(t, uint32(8080), proxy.ListenPort)
@@ -1945,7 +1945,7 @@ func TestInstanceProxyDevices(t *testing.T) {
 		devices, err := instanceProxyDevices(c, devices, service)
 		require.NoError(t, err)
 		require.Len(t, devices, 2)
-		assert.Equal(t, "proxy-8080", devices[1].Name)
+		assert.Equal(t, "proxy-tcp-8080", devices[1].Name)
 		proxy := devices[1].Config.Proxy
 		assert.Equal(t, "0.0.0.0", proxy.ListenAddr)
 		assert.Equal(t, uint32(8080), proxy.ListenPort)
@@ -1963,7 +1963,7 @@ func TestInstanceProxyDevices(t *testing.T) {
 		devices, err := instanceProxyDevices(c, []client.InstanceDevice{}, service)
 		require.NoError(t, err)
 		require.Len(t, devices, 1)
-		assert.Equal(t, "proxy-8080", devices[0].Name)
+		assert.Equal(t, "proxy-tcp-8080", devices[0].Name)
 		proxy := devices[0].Config.Proxy
 		assert.Equal(t, "0.0.0.0", proxy.ListenAddr)
 		assert.Equal(t, uint32(8080), proxy.ListenPort)

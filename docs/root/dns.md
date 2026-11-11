@@ -131,6 +131,9 @@ x-incus-compose:
     allow_transfer:
       - 192.168.1.0/24
       - 10.0.0.53/32
+    forwarders:
+      - 1.1.1.1
+      - 8.8.8.8
 
 services:
   web:
@@ -147,17 +150,18 @@ services:
 
 ### Options Reference
 
-| Key              | Type            | Default           | Description                                                                                                                                                                           |
-| ---------------- | --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `disabled`       | boolean         | `false`           | Disable DNS sidecar creation and DNS configuration for the project. Equivalent to `--no-dns` on `incus-compose up`.                                                                   |
-| `scope`          | string          | `global`          | Sidecar lifecycle scope: `global` (one shared daemon in the `incus-compose` project) or `project` (a dedicated sidecar scoped to this project).                                       |
-| `zone`           | string          | `<project>.incus` | Custom DNS zone domain for the project, replacing the default `<project>.<suffix>`.                                                                                                   |
-| `network`        | string          | project network   | Network attachment for the DNS sidecar.                                                                                                                                               |
-| `ipv4_address`   | string          | auto              | Static IPv4 address assigned to the DNS sidecar instance.                                                                                                                             |
-| `ipv6_address`   | string          | auto              | Static IPv6 address assigned to the DNS sidecar instance.                                                                                                                             |
-| `no_metrics`     | boolean         | `false`           | Disable the HTTP Prometheus `/metrics` endpoint on the sidecar.                                                                                                                       |
-| `allow_transfer` | list of strings | `[]`              | CIDR prefix(es) permitted to perform zone transfers (AXFR/IXFR). Configures `--allow-transfer` on the sidecar and automatically stamps `user.label.dns.transfer=true` on the project. |
-| `transfer`       | boolean         | `false`           | Explicitly opt the project zone into transfers (`user.label.dns.transfer=true`) without configuring sidecar CIDRs (useful when sharing a global sidecar).                             |
+| Key              | Type            | Default            | Description                                                                                                                                                                           |
+| ---------------- | --------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`       | boolean         | `false`            | Disable DNS sidecar creation and DNS configuration for the project. Equivalent to `--no-dns` on `incus-compose up`.                                                                   |
+| `scope`          | string          | `global`           | Sidecar lifecycle scope: `global` (one shared daemon in the `incus-compose` project) or `project` (a dedicated sidecar scoped to this project).                                       |
+| `zone`           | string          | `<project>.incus`  | Custom DNS zone domain for the project, replacing the default `<project>.<suffix>`.                                                                                                   |
+| `network`        | string          | project network    | Network attachment for the DNS sidecar.                                                                                                                                               |
+| `ipv4_address`   | string          | auto               | Static IPv4 address assigned to the DNS sidecar instance.                                                                                                                             |
+| `ipv6_address`   | string          | auto               | Static IPv6 address assigned to the DNS sidecar instance.                                                                                                                             |
+| `no_metrics`     | boolean         | `false`            | Disable the HTTP Prometheus `/metrics` endpoint on the sidecar.                                                                                                                       |
+| `allow_transfer` | list of strings | `[]`               | CIDR prefix(es) permitted to perform zone transfers (AXFR/IXFR). Configures `--allow-transfer` on the sidecar and automatically stamps `user.label.dns.transfer=true` on the project. |
+| `transfer`       | boolean         | `false`            | Explicitly opt the project zone into transfers (`user.label.dns.transfer=true`) without configuring sidecar CIDRs (useful when sharing a global sidecar).                             |
+| `forwarders`     | list of strings | `/etc/resolv.conf` | Upstream DNS server(s) (`ip`, `ip:port`, or `resolv.conf` path) for external domains. Defaults to the sidecar's `/etc/resolv.conf` when omitted or empty.                             |
 
 ---
 

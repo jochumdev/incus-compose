@@ -41,8 +41,8 @@ func TestE2ENATProxy(t *testing.T) {
 	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-nat-1", nil)
 	require.NoError(t, err)
 
-	proxyDev, ok := inst.Devices["proxy-8081"]
-	require.True(t, ok, "proxy-8081 device should exist")
+	proxyDev, ok := inst.Devices["proxy-tcp-8081"]
+	require.True(t, ok, "proxy-tcp-8081 device should exist")
 	assert.Equal(t, "proxy", proxyDev["type"])
 	assert.Equal(t, "true", proxyDev["nat"])
 	assert.Equal(t, "tcp:0.0.0.0:8081", proxyDev["listen"])
@@ -81,8 +81,8 @@ func TestE2ENATProxyWithPort(t *testing.T) {
 	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 
-	proxy, ok := inst.Devices["proxy-8080"]
-	require.True(t, ok, "proxy-8080 device should exist")
+	proxy, ok := inst.Devices["proxy-tcp-8080"]
+	require.True(t, ok, "proxy-tcp-8080 device should exist")
 	assert.Contains(t, proxy["connect"], "0.0.0.0:80")
 	assert.Equal(t, "true", proxy["nat"])
 }
@@ -130,7 +130,7 @@ networks:
 	inst, _, err := conn.GetInstance(ctx, c.IncusProject(), "web-1", nil)
 	require.NoError(t, err)
 
-	proxy, ok := inst.Devices["proxy-8080"]
+	proxy, ok := inst.Devices["proxy-tcp-8080"]
 	require.True(t, ok, "proxy-8080 device should exist")
 	assert.Contains(t, proxy["connect"], "10.131.245.2:80")
 	assert.Equal(t, "true", proxy["nat"])

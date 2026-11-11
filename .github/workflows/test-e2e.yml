@@ -30,8 +30,8 @@ jobs:
             remote: ict-stable
           - name: custom
             remote: ict-custom
-          # - name: lts
-          #   remote: ict-lts
+          - name: lts
+            remote: ict-lts
           - name: daily
             remote: ict-daily
     runs-on: [self-hosted, incus-compose, default]
@@ -138,7 +138,6 @@ jobs:
     needs: test-e2e
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - name: Hugo
@@ -155,7 +154,7 @@ jobs:
           #   remote: ict-daily
           - name: WikiJS
             args: "-run TestExample/wikijs"
-            remote: ict-daily
+            remote: ict-lts
     runs-on: [self-hosted, incus-compose]
     timeout-minutes: 60
     permissions:
@@ -206,12 +205,14 @@ jobs:
 
       - name: Test
         run: |
+          echo "Using VERSION: ${VERSION}"
           mkdir -p "$REPORTS_DIR"
 
           gotestsum \
             --packages="./examples/..." \
             --junitfile "$REPORTS_DIR/junit.xml" \
-            -- -count=1 -parallel "$TEST_PROCS" -timeout 20m \
+            -- -ldflags="-X github.com/lxc/incus-compose/cmd/incus-compose/version.Version=v${VERSION#v} -X github.com/lxc/incus-compose/internal/testlib.version=v${VERSION#v}" \
+               -count=1 -parallel "$TEST_PROCS" -timeout 20m \
                ${{ matrix.args }} 2>&1
 
       - name: Post-test cleanup
