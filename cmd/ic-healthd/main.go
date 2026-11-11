@@ -434,6 +434,14 @@ func writeOwnStatus(ctx context.Context, logger *slog.Logger, conn *iclient.Conn
 	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
 	defer cancel()
 
+	// Incus lets PATCH inherit an in-flight ActionCreate/ActionRestart lock and
+	// then overwrites the config at the end of creation, so wait any operation
+	// out before writing.
+	err := conn.WaitInstanceBusy(ctx, cfg.OwnProject, cfg.OwnName)
+	if err != nil {
+		return err
+	}
+
 	return checker.WriteStatus(ctx, logger, conn, cfg.OwnProject, cfg.OwnName, status)
 }
 
