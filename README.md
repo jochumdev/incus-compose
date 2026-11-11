@@ -1,6 +1,6 @@
 # incus-compose
 
-[![CI](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml/badge.svg?branch=develop)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml?query=branch%3Adevelop)
+[![CI](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml/badge.svg?branch=main)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml?query=branch%3Amain)
 [![Coverage 75%](https://img.shields.io/badge/coverage-75%25-yellow)](https://github.com/lxc/incus-compose/actions/workflows/test-e2e.yml)
 
 A drop-in replacement for `docker compose` that runs your `compose.yaml` on
